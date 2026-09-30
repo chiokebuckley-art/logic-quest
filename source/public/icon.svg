@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img"><title>Logic Quest</title>
+<rect width="512" height="512" rx="112" fill="#0b1020"/>
+<circle cx="256" cy="256" r="176" fill="none" stroke="#c9a227" stroke-width="20"/>
+<circle cx="256" cy="176" r="40" fill="#2dd4bf"/>
+<circle cx="180" cy="316" r="40" fill="#c9a227"/>
+<circle cx="332" cy="316" r="40" fill="#c9a227"/>
+</svg>
+

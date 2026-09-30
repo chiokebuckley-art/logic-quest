@@ -1,20 +1,11 @@
-# LOGIC QUEST
+# Logic Quest
 
-**Play:** https://chiokebuckley-art.github.io/logic-quest/. On a phone, open the link and choose "Add to Home Screen".
+Play: https://chiokebuckley-art.github.io/logic-quest/
 
-A logic game in the Engineering Quest family, written at a 6th-grade reading level. You learn by solving small
-puzzles first, then see why they work.
+v0.3.0 adds the supplied Pattern Lab artwork, an optional Explorer Pattern Workshop, thirteen preparation events, age paths, six-step reasoning prompts, and separate saved bridge badges. Existing stop checks and mastery are preserved.
 
-**v0.2.0 — Grids, knights and IF…THEN:** three more stops. Stop 4 Grid Detective (logic grids with ✓ and ✗),
-Stop 5 Riddle Island (knights, who always tell the truth, and knaves, who always lie), and Stop 6 If… then
-(when a rule is broken, which way a rule works, and the rule-checker cards). Also new: the Wrong-Answer Notebook.
-Each missed question comes back as a new question on the same idea, a few days apart, until it is fixed three
-times.
+The editable source for this release is now in `source/` in this repository. The previous source snapshot was in `command-center` branch `ccr-4bce2062-2v9qj3`, commit `464242e6c299df9fe49b29609babf3ff54bc5144`.
 
-**v0.1.0 — Foundation:** the first three Journey stops (True or False?; NOT, AND, OR; Line Up), players with PINs,
-lessons with key ideas, stop checks that pass at 100% with "not yet" and a lock-in check on a later day, Arcade
-practice, Progress for kids and grown-ups, read-aloud, and export/import.
+To build: `cd source`, `npm ci`, `npm test`, and `npm run pages`. Copy `source/dist-pages/` over the root deployment files, preserving the root PWA icons, then publish the same commit to `gh-pages` and `main`. The root `.nojekyll` is preserved.
 
-This repository holds the built, static game only. GitHub Pages publishes the `gh-pages` branch, and `main`
-mirrors the same files. The source is in the `logic-quest/` folder of the `command-center` repository. Run
-`npm run pages` there to build `dist-pages/`, then copy it here and push to `gh-pages` and `main`.
+See `source/docs/PATTERN_BRIDGES.md` for integration scope, progress boundaries, and validation. The full Pattern Lab curriculum remains hosted in Engineering Quest; this release implements its Logic Quest bridges.
