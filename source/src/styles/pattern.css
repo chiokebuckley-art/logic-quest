@@ -60,3 +60,9 @@
 .pl-home details[open] > :not(summary) { margin-top:16px; }
 @media(max-width:480px) { .pl-destinations { grid-template-columns:1fr; } .pl-destination { display:grid; grid-template-columns:105px 1fr; } .pl-destination > img { width:105px; height:100%; object-fit:cover; } .pl-destination > div { padding:12px; } .pl-routine { grid-template-columns:repeat(3,minmax(0,1fr)); } .pl-routine li { flex-direction:row; font-size:14px; } .pl-routine img { width:26px; height:26px; } .pl-work { padding:16px; } .pl-home { padding:14px; } .pl-scene { height:155px; } .pl-stop-art { width:72px; height:72px; } }
 @media(prefers-reduced-motion:reduce) { .pl-investigation * { scroll-behavior:auto; } }
+
+/* Exact repeat lanes keep all positions in one row on phones. */
+.pl-tokens.pl-sequence { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:6px; }
+.pl-tokens.pl-sequence figure,.pl-tokens.pl-sequence svg { width:100%; }
+.pl-tokens.pl-sequence svg { height:auto; aspect-ratio:1; }
+.pl-tokens.pl-sequence figcaption { overflow-wrap:anywhere; }

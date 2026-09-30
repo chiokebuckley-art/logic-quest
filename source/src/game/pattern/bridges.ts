@@ -36,7 +36,7 @@ export interface Question { prompt: string; options: string[]; answer: string; w
 export interface BridgeRound { id: string; title: string; evidence: string; tokens?: Token[]; compare: string; describe: Question; predict: Question; test: Question; reveal: string; revise: Question }
 const q = (prompt: string, options: string[], answer: string, why: string): Question => ({ prompt, options, answer, why });
 
-export function makeRound(id: string, seed: number): BridgeRound {
+function buildRound(id: string, seed: number): BridgeRound {
   const rng = createRng(seed);
   const shape = rng.pick(['circle','square','triangle'] as const);
   const other = shape === 'circle' ? 'square' : 'circle';
@@ -99,9 +99,9 @@ export function makeRound(id: string, seed: number): BridgeRound {
       evidence:'A mystery machine takes 2 (input pieces) and gives 4 (output pieces). Candidate A adds 2. Candidate B doubles. These are hypotheses, not known rules.',
       compare:'Both candidates predict 4 for an input of 2. One matching result cannot separate them.',
       describe:q('Which candidates fit the observed result?',['Both A and B','Only A','Only B'],'Both A and B','2 + 2 = 4 and 2 × 2 = 4.'),
-      predict:q(`For ${input} (input pieces), what do A and B predict?`,[`${input+2} and ${input*2}`,`${input*2} and ${input+2}`,'Both predict 4'],`${input+2} and ${input*2}`,'Apply each candidate separately; label which prediction belongs to which rule.'),
+      predict:q(`For ${input} (input pieces), what do A and B predict?`,[`A: ${input+2} (output pieces); B: ${input*2} (output pieces)`,`A: ${input*2} (output pieces); B: ${input+2} (output pieces)`,'Both predict 4 (output pieces)'],`A: ${input+2} (output pieces); B: ${input*2} (output pieces)`,'Apply each candidate separately; label which prediction belongs to which rule.'),
       test:q('Which input distinguishes these two rules?',[`${input} (input pieces)`,'2 (input pieces)','Repeat the first result'],`${input} (input pieces)`,'Use an input where the two rules predict different outputs.'),
-      reveal:`The test gives ${output} (output pieces) from ${input} (input pieces). A predicts ${input+2}; B predicts ${input*2}.`,
+      reveal:`The test gives ${output} (output pieces) from ${input} (input pieces). A predicts ${input+2} (output pieces); B predicts ${input*2} (output pieces).`,
       revise:q('Which of the two stated candidates survives this test?',['A: add 2','B: double','Both candidates'],hidden==='add'?'A: add 2':'B: double','Keep the candidate matching the new result. This does not prove it is the only possible rule in the world.'),
     };
   }
@@ -131,4 +131,11 @@ export function makeRound(id: string, seed: number): BridgeRound {
     reveal:'A key can operate a lock; a remote can operate a television. The analogy is about function.',
     revise:q('Does the analogy prove that every remote works with every television?',['No; compatibility needs evidence','Yes; all objects operate everything','Yes; the shapes match'],'No; compatibility needs evidence','A shared relation is not a proof of every possible case.'),
   };
+}
+
+/** Shuffle response positions without changing the teaching evidence or geometry. */
+export function makeRound(id: string, seed: number): BridgeRound {
+  const round=buildRound(id,seed); const rng=createRng(seed ^ 0x51a7c);
+  const shuffle=(q: Question): Question => ({...q,options:rng.shuffle(q.options)});
+  return {...round,describe:shuffle(round.describe),predict:shuffle(round.predict),test:shuffle(round.test),revise:shuffle(round.revise)};
 }

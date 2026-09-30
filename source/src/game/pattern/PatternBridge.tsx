@@ -18,7 +18,7 @@ export function BridgeProgressCard() {
   const { save } = useStore();
   if (!save) return null;
   const p = save.patternBridge;
-  return <section className="panel pl-progress"><h3>Pattern bridges</h3><p>Optional preparation · {p.completed.length} bridge activities completed</p>
+  return <section className="panel pl-progress"><h3>Pattern bridges</h3><p>Optional preparation · {p.completed.length + (p.workshop ? 1 : 0)} preparation activities completed</p>
     <div className="pl-badges">{p.workshop && <figure><img src={art('badge-pattern-scout')} alt="" /><figcaption>Pattern Scout</figcaption></figure>}
       {p.evidenceScout && <figure><img src={art('badge-evidence-scout')} alt="" /><figcaption>Evidence Scout</figcaption></figure>}</div>
     <p className="small soft-text">Bridge badges show preparation. Logic Quest stop checks, Proof, and Junior Badge requirements stay separate.</p></section>;
@@ -30,7 +30,7 @@ export function PatternBridgeHome() {
   const views = viewAll(STOPS, save.stops, today);
   return <section className="pl-home" aria-labelledby="pl-title"><details><summary id="pl-title">Pattern bridges · Workshop and activities</summary>
     <div className="row between wrap"><div><div className="kicker">Engineering Quest connection</div><h2>Choose your preparation</h2></div>
-    <label className="pl-path">Learning path<select value={p.path} onChange={e => actions.setPatternPath(e.target.value as AgePath)}>
+    <label className="pl-path">Learning path<select aria-label="Learning path" value={p.path} onChange={e => actions.setPatternPath(e.target.value as AgePath)}>
       {(['Explorer','Trailblazer','Logician'] as const).map(path => <option key={path}>{path}</option>)}</select></label></div>
     <p>Practice a shared way to think. Keep learning statements, operators, and proof in your Journey.</p>
     {p.path === 'Explorer' && <div className="pl-workshop-card"><picture><source media="(max-width: 480px)" srcSet={art('pattern-workshop-portrait')} /><img src={art('pattern-workshop-landscape')} alt="An invention workshop with an empty scanner and conveyor" /></picture>
@@ -50,7 +50,7 @@ export function PatternBridgeHome() {
 }
 
 function ExactTokens({ tokens }: { tokens: Token[] }) {
-  return <div className="pl-tokens" aria-label="Evidence objects in order">{tokens.map((t,i) => <figure key={i}><svg viewBox="0 0 80 80" role="img" aria-label={t.label ?? `${t.color} ${t.shape}`}>
+  return <div className={`pl-tokens${tokens.length >= 6 ? ' pl-sequence' : ''}`} aria-label="Evidence objects in order">{tokens.map((t,i) => <figure key={i}><svg viewBox="0 0 80 80" role="img" aria-label={t.label ?? `${t.color} ${t.shape}`}>
     {t.shape === 'circle' ? <circle cx="40" cy="40" r="29" fill={t.color === 'teal' ? '#167d88' : '#dca231'} stroke="#14263e" strokeWidth="3" /> : t.shape === 'square' ? <rect x="11" y="11" width="58" height="58" fill={t.color === 'teal' ? '#167d88' : '#dca231'} stroke="#14263e" strokeWidth="3" /> : <path d="M40 8 L73 68 H7 Z" fill={t.color === 'teal' ? '#167d88' : '#dca231'} stroke="#14263e" strokeWidth="3" />}
     </svg><figcaption>{t.label}</figcaption></figure>)}</div>;
 }
