@@ -126,4 +126,3 @@ describe('a check left open by a reload or a closed app', () => {
     expect(none).toEqual(all(S1));
   });
 });
-

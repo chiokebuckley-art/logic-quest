@@ -153,16 +153,19 @@ export interface Actions {
   setPin(id: string, pin: string): boolean;
   removePin(id: string): void;
   completeLesson(stopId: string, lessonId: string): void;
+  /** Remember (or forget, with null) the lesson in progress. */
+  setLessonRun(run: saves.LessonRun | null): void;
   finishCheck(stopId: string, kind: CheckKind, items: Item[], records: AnswerRecord[]): CheckOutcome | null;
   /** The player left a check early. After at least one answer it counts as a try (see mastery.recordLeft). */
   leaveCheck(stopId: string, kind: CheckKind, answered: AnswerRecord[]): void;
   /** Save a check in progress after each answer, so a reload or a closed app still counts as leaving. */
   checkAnswered(stopId: string, kind: CheckKind, answered: AnswerRecord[]): void;
   /**
-   * Count one answered item. A miss (wrong, timed out, or "Show me") also goes into the Wrong-Answer Notebook,
+   * Count one answered item. A miss (wrong in a check, timed out, or a lesson item not passed on its own after the explanation) also goes
+   * into the Wrong-Answer Notebook,
    * unless `fromNotebook` (a fix attempt; use fixNote for those).
    */
-  recordAnswer(record: Pick<AnswerRecord, 'skill' | 'firstTry' | 'correct' | 'stop' | 'lesson'>, opts?: { fromNotebook?: boolean }): void;
+  recordAnswer(record: Pick<AnswerRecord, 'skill' | 'firstTry' | 'correct' | 'stop' | 'lesson' | 'help'>, opts?: { fromNotebook?: boolean }): void;
   /** A Wrong-Answer Notebook fix attempt on a skill. Returns true when that card is now cleared. */
   fixNote(skill: string, correct: boolean): boolean;
   addActive(seconds: number): void;
@@ -333,8 +336,12 @@ export function StoreProvider({ children, kv: kvProp }: { children: ReactNode; k
         }));
       },
 
+      setLessonRun: (run) => {
+        dispatch({ type: 'save', fn: (d) => ({ ...d, lessonRun: run }) });
+      },
+
       completeLesson: (stopId, lessonId) => {
-        dispatch({ type: 'save', fn: (d) => ({ ...d, stops: { ...d.stops, [stopId]: mastery.completeLesson(d.stops[stopId], lessonId) } }) });
+        dispatch({ type: 'save', fn: (d) => ({ ...d, lessonRun: d.lessonRun?.lessonId === lessonId ? null : d.lessonRun, stops: { ...d.stops, [stopId]: mastery.completeLesson(d.stops[stopId], lessonId) } }) });
       },
 
       finishCheck: (stopId, kind, items, records) => {
@@ -364,12 +371,14 @@ export function StoreProvider({ children, kv: kvProp }: { children: ReactNode; k
         dispatch({ type: 'save', fn: (d) => ({ ...d, stops: { ...d.stops, [stopId]: { ...(d.stops[stopId] ?? mastery.emptyProgress()), openCheck } } }) });
       },
 
-      recordAnswer: ({ skill, firstTry, correct, stop, lesson }, opts) => {
+      recordAnswer: ({ skill, firstTry, correct, stop, lesson, help }, opts) => {
         const day = todayNow();
         dispatch({
           type: 'save',
           fn: (d) => {
-            const counted = saves.recordAnswer(d, day, skill, firstTry);
+            let counted = saves.recordAnswer(d, day, skill, firstTry);
+            if (help) counted = saves.recordHelp(counted, day, skill, help);
+            if (help?.gap) counted = saves.recordGap(counted, help.gap);
             return correct || opts?.fromNotebook ? counted : { ...counted, notebook: notebook.addMiss(counted.notebook, { skill, stop, lesson }, day) };
           },
         });
@@ -460,4 +469,3 @@ export function downloadText(fileName: string, text: string, type: string): void
   a.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
-

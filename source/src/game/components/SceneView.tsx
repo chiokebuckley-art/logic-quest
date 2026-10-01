@@ -214,4 +214,3 @@ function GridPicture({ scene, labelId }: { scene: GridScene; labelId?: string })
     </div>
   );
 }
-

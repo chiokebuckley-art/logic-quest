@@ -139,4 +139,3 @@ export function CheckRunner({ stop, kind, items, timeLimit, readAloud, onFinish,
     </div>
   );
 }
-

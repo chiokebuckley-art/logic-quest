@@ -6,7 +6,23 @@ import { STOPS } from '../../content/stops';
 import { claimTrue, clueHolds, gridClueHolds } from '../grade';
 import { READING, fkGrade, longestSentence } from '../readability';
 import { createRng } from '../rng';
-import type { AssignItem, Item, StopDef } from '../types';
+import { feedbackText, teachStrings } from '../teach';
+import type { AssignItem, Item, StopDef, TeachCase } from '../types';
+
+/**
+ * Every wrong-answer route meets the wrong-answer handoff (v1.0): each item has Item.teach, and each wrong choice of
+ * a choose item has its own ChoiceFeedback. This holds for every lesson of every built stop.
+ */
+const coverageFor = (_lessonId: string) => true;
+
+/** Shape rules for a worked case card. */
+function caseProblems(c: TeachCase, where: string): string[] {
+  const out: string[] = [];
+  if (!c.label.trim()) out.push(`${where}: case without a label`);
+  for (const g of c.groups ?? []) if (!g.label.trim() || !Number.isInteger(g.n) || g.n < 0 || g.n > 12) out.push(`${where}: bad group ${JSON.stringify(g)}`);
+  for (const t of c.truths ?? []) if (!t.who.trim()) out.push(`${where}: truth without a name`);
+  return out;
+}
 
 const only = process.env.STOP ? Number(process.env.STOP) : null;
 const built = STOPS.filter((s) => s.ready && (only === null || s.n === only));
@@ -78,6 +94,25 @@ export function problems(stop: StopDef, item: Item): string[] {
     for (const d of item.diagnose ?? []) if (key(d.ids) === key(item.answer)) out.push('diagnose set equals the answer');
   }
   if (item.seconds !== undefined && (item.seconds < 60 || item.seconds > 240)) out.push(`seconds ${item.seconds} out of range 60-240`);
+  if (item.teach) {
+    if (!item.teach.rule.trim()) out.push('teach without a rule');
+    for (const c of item.teach.cases ?? []) out.push(...caseProblems(c, 'teach case'));
+    for (const t of item.teach.terms ?? []) if (!t.word.trim() || !t.meaning.trim()) out.push('empty term');
+  }
+  if (item.kind === 'choose' && item.feedback) {
+    const ids = item.choices.map((c) => c.id);
+    for (const [k, fb] of Object.entries(item.feedback)) {
+      if (!ids.includes(k)) out.push(`feedback for unknown choice ${k}`);
+      if (k === item.answer) out.push('feedback written for the right answer');
+      if (!fb.headline.trim() || !fb.detail.length) out.push(`feedback ${k} needs a headline and detail`);
+      if (item.whyWrong?.[k] !== feedbackText(fb)) out.push(`whyWrong ${k} is out of step with its feedback (call syncWhyWrong)`);
+      if (fb.example) out.push(...caseProblems(fb.example, `feedback ${k}`));
+    }
+  }
+  if (coverageFor(item.lesson)) {
+    if (!item.teach) out.push('no teach (rule, terms, cases, remember, simpler) for the wrong-answer explanation');
+    if (item.kind === 'choose') for (const c of item.choices) if (c.id !== item.answer && !item.feedback?.[c.id]) out.push(`wrong choice ${c.id} has no ChoiceFeedback`);
+  }
   if (item.scene?.kind === 'grid') {
     const rows = new Set(item.scene.rows.map((r) => r.id)), cols = new Set(item.scene.cols.map((c) => c.id));
     for (const [r, m] of Object.entries(item.scene.marks)) for (const c of Object.keys(m)) if (!rows.has(r) || !cols.has(c)) out.push(`grid scene mark ${r}/${c} is not a cell`);
@@ -139,7 +174,7 @@ const looks = (it: Item) => JSON.stringify([it.prompt, it.scene?.kind === 'speak
 function prose(items: Item[]): string {
   const parts: string[] = [];
   for (const it of items) {
-    parts.push(it.prompt, it.explain);
+    parts.push(it.prompt, it.explain, ...teachStrings(it));
     if (it.hint) parts.push(it.hint);
     if (it.kind === 'choose') parts.push(...Object.values(it.whyWrong ?? {}));
     if (it.kind === 'tapall') parts.push(...(it.diagnose ?? []).map((d) => d.message));
@@ -219,4 +254,3 @@ it('the Journey lists 12 stops in order', () => {
   expect(STOPS.map((s) => s.n)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
   expect(STOPS.slice(0, 6).every((s) => s.ready) || only !== null || process.env.ALLOW_PLACEHOLDERS === '1').toBe(true);
 });
-

@@ -34,4 +34,3 @@ export function createRng(seed?: number): Rng {
 }
 
 export const defaultRng = createRng();
-

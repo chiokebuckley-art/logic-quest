@@ -5,7 +5,7 @@ import { createRng } from '../../engine/rng';
 import { STOPS as GAME_STOPS } from '../../content/stops';
 import {
   dayRange, fileSlug, firstTryWinsThisWeek, frontierStop, goalPercent, minutesByDay, minutesOn, needsPractice, pathDot,
-  percent, readyLabel, shortDay, SKILL_NAMES, skillLabel, skillName, skillRows, stopCounts, streakDays, strongSkills, totalMinutes, totals,
+  helpTotals, percent, readyLabel, shortDay, SKILL_NAMES, skillLabel, skillName, skillRows, stopCounts, streakDays, strongSkills, totalMinutes, totals,
 } from '../progressStats';
 
 describe('streakDays', () => {
@@ -216,3 +216,11 @@ describe('skill names', () => {
   });
 });
 
+describe('help after a miss', () => {
+  it('adds up the help tallies over the chosen days only', () => {
+    const help = { '2026-09-30': { 's1.not-more': [1, 1, 2, 1, 0] }, '2026-09-20': { 's1.not-more': [5, 5, 5, 5, 5] } };
+    expect(helpTotals(help, '2026-09-30', 7)).toEqual({ explained: 1, retried: 1, fresh: 2, freshPassed: 1, simpler: 0 });
+    expect(helpTotals(help, '2026-09-30', 30).explained).toBe(6);
+    expect(helpTotals(undefined, '2026-09-30', 7).explained).toBe(0);
+  });
+});

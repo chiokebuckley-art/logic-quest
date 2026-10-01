@@ -93,4 +93,3 @@ export function IdeaCards({ cards, readAloud, onDone, doneLabel = 'Try it', kick
     </article>
   );
 }
-

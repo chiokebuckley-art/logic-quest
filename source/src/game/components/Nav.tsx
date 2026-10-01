@@ -29,4 +29,3 @@ export function Nav() {
     </nav>
   );
 }
-

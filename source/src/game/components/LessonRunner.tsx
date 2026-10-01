@@ -7,7 +7,8 @@ import { createRng } from '../../engine/rng';
 import type { LessonDef, StopDef } from '../../engine/types';
 import type { AnswerRecord, LessonRunnerProps } from './contracts';
 import { IdeaCards } from './IdeaCards';
-import { ItemView, PlayHeader, type DotState } from './ItemView';
+import { PlayHeader, type DotState } from './ItemView';
+import { LearnItem } from './LearnItem';
 
 type Step = { at: 'ideas' } | { at: 'try'; i: number } | { at: 'recap' };
 
@@ -64,10 +65,14 @@ export function LessonRecap({ stop, lesson, tries, firstTry, onDone }: LessonRec
   );
 }
 
-export function LessonRunner({ stop, lesson, seed, readAloud, onAnswer, onComplete, onExit }: LessonRunnerProps) {
+export function LessonRunner({ stop, lesson, seed, readAloud, onAnswer, onComplete, onExit, start, onProgress }: LessonRunnerProps) {
   const items = useMemo(() => lesson.practice(createRng(seed)), [lesson, seed]);
-  const [step, setStep] = useState<Step>(() => (lesson.ideas.length ? { at: 'ideas' } : items.length ? { at: 'try', i: 0 } : { at: 'recap' }));
-  const [firstTry, setFirstTry] = useState(0);
+  const [step, setStep] = useState<Step>(() => {
+    if (start && start.next > 0 && start.next < items.length) return { at: 'try', i: start.next };
+    return lesson.ideas.length ? { at: 'ideas' } : items.length ? { at: 'try', i: 0 } : { at: 'recap' };
+  });
+  const [firstTry, setFirstTry] = useState(start && start.next > 0 && start.next < items.length ? start.firstTry : 0);
+  const resumed = !!start && start.next > 0 && start.next < items.length;
   const rootRef = useRef<HTMLDivElement>(null);
   const completed = useRef(false);
   const stepKey = step.at === 'try' ? `try-${step.i}` : step.at;
@@ -97,7 +102,9 @@ export function LessonRunner({ stop, lesson, seed, readAloud, onAnswer, onComple
 
   const answered = (i: number, r: AnswerRecord) => {
     onAnswer(r);
-    if (r.firstTry) setFirstTry((n) => n + 1);
+    const wins = firstTry + (r.firstTry ? 1 : 0);
+    setFirstTry(wins);
+    onProgress?.(i + 1, wins);
     setStep(i + 1 < items.length ? { at: 'try', i: i + 1 } : { at: 'recap' });
   };
 
@@ -114,11 +121,17 @@ export function LessonRunner({ stop, lesson, seed, readAloud, onAnswer, onComple
       {step.at === 'ideas' && (
         <IdeaCards cards={lesson.ideas} readAloud={readAloud} onDone={() => setStep(items.length ? { at: 'try', i: 0 } : { at: 'recap' })} />
       )}
+      {resumed && step.at === 'try' && step.i === start!.next && (
+        <p className="play-fresh-note" role="status">
+          Welcome back. You are on try {step.i + 1} of {items.length}. Your earlier answers are saved.
+        </p>
+      )}
       {step.at === 'try' && items[step.i] && (
-        <ItemView
+        <LearnItem
           key={step.i}
+          stop={stop}
           item={items[step.i]}
-          mode="learn"
+          seed={seed + (step.i + 1) * 7}
           readAloud={readAloud}
           kicker={`Try ${step.i + 1} of ${items.length}`}
           nextLabel={step.i + 1 < items.length ? 'Next' : 'Finish'}
@@ -129,4 +142,3 @@ export function LessonRunner({ stop, lesson, seed, readAloud, onAnswer, onComple
     </div>
   );
 }
-

@@ -6,6 +6,29 @@
 import type { CheckKind } from '../../engine/journey/mastery';
 import type { Answer, IdeaCard, Item, LessonDef, StopDef } from '../../engine/types';
 
+/**
+ * How a learn-mode item went after a miss (lessons, practice, the notebook). Kept apart from the first try:
+ * help and a revealed answer never count as learning on their own.
+ */
+export interface HelpUse {
+  /** There was a wrong answer, so the explanation was shown. */
+  explained: boolean;
+  /** "Explain more simply" was opened. */
+  simpler: boolean;
+  /** The hint was opened. */
+  hint: boolean;
+  /** Right on the retry after the explanation (practice with help). */
+  retried: boolean;
+  /** New examples tried after the miss. */
+  fresh: number;
+  /** The last set of new examples was all right, with no hint. */
+  freshPassed: boolean;
+  /** The player chose "Move on for now". */
+  moveOn?: boolean;
+  /** A choice that had no explanation of its own ("skill:choiceId"), for repair. */
+  gap?: string;
+}
+
 /** One answered item. `firstTry` is true when the first attempt was right. */
 export interface AnswerRecord {
   itemId: string;
@@ -18,6 +41,8 @@ export interface AnswerRecord {
   timedOut?: boolean;
   /** The player's (last) answer, for "You said" on the check result. Missing on a timeout. */
   answer?: Answer;
+  /** Learn mode only. */
+  help?: HelpUse;
 }
 
 /** 'learn': instant feedback, hint button, retry until right. 'check': no feedback, no hint, answer once. */
@@ -49,6 +74,10 @@ export interface LessonRunnerProps {
   /** All key-idea cards read and every practice item finished. */
   onComplete(): void;
   onExit(): void;
+  /** Pick up a lesson left partway: the next try (0-based) and the first-try wins so far. Skips the key ideas. */
+  start?: { next: number; firstTry: number };
+  /** After each try: the next try (0-based) and the first-try wins so far, so the host can save the place. */
+  onProgress?(next: number, firstTry: number): void;
 }
 
 export interface CheckRunnerProps {
@@ -76,6 +105,8 @@ export interface CheckResultProps {
   missed: string[];
   onLearnAgain(lessonId: string): void;
   onDone(): void;
+  /** Show the read-aloud button on each explanation. */
+  readAloud?: boolean;
 }
 
 export interface PracticeRunnerProps {
@@ -85,4 +116,3 @@ export interface PracticeRunnerProps {
   onAnswer(record: AnswerRecord): void;
   onExit(): void;
 }
-

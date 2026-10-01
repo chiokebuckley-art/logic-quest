@@ -37,6 +37,21 @@ export interface Settings {
 
 /** answered, right on the first try */
 export type Tally = [number, number];
+/**
+ * Learning after a miss, per skill and day: [explanations shown, right retries with help, new examples tried,
+ * new-example sets passed on their own, times "Explain more simply" was used].
+ */
+export type HelpTally = [number, number, number, number, number];
+export const MAX_GAPS = 50;
+
+/** A lesson left partway: its practice seed, the next try (0-based) and the first-try wins so far. */
+export interface LessonRun {
+  stopId: string;
+  lessonId: string;
+  seed: number;
+  next: number;
+  firstTry: number;
+}
 
 export interface SaveData {
   patternBridge: BridgeProgress;
@@ -53,6 +68,12 @@ export interface SaveData {
   notebook: Notebook;
   /** Notebook cards cleared by three clean fixes, all time. */
   fixedCount: number;
+  /** day -> skill -> HelpTally. Kept apart from first tries: help never counts as learning on its own. */
+  help: Record<string, Record<string, HelpTally>>;
+  /** Choices that showed the neutral explanation because they had none of their own ("s1.not-more:none-red"). */
+  gaps: string[];
+  /** The lesson in progress, so a refresh or a closed app picks up at the same try with the same questions. */
+  lessonRun: LessonRun | null;
 }
 
 export interface KV {
@@ -64,7 +85,7 @@ export interface KV {
 export const DEFAULT_SETTINGS: Settings = { timer: true, readAloud: true, reduceMotion: false };
 
 export function newSave(now = Date.now()): SaveData {
-  return { patternBridge: freshBridge(), game: 'logic-quest', v: SAVE_VERSION, savedAt: now, stops: {}, stats: {}, active: {}, settings: { ...DEFAULT_SETTINGS }, notebook: {}, fixedCount: 0 };
+  return { patternBridge: freshBridge(), game: 'logic-quest', v: SAVE_VERSION, savedAt: now, stops: {}, stats: {}, active: {}, settings: { ...DEFAULT_SETTINGS }, notebook: {}, fixedCount: 0, help: {}, gaps: [], lessonRun: null };
 }
 
 /** Skill tags look like 's2.or-both'. Anything else in an imported save is dropped (it would also break the CSV). */
@@ -138,6 +159,23 @@ export function parseSave(raw: unknown): SaveData | null {
   }
   s.patternBridge = parseBridge(raw.patternBridge);
   s.fixedCount = num(raw.fixedCount, 0, 1e6);
+  if (isObj(raw.help)) {
+    for (const [day, skills] of Object.entries(raw.help)) {
+      if (!isDay(day) || !isObj(skills)) continue;
+      const row: Record<string, HelpTally> = {};
+      for (const [skill, t] of Object.entries(skills)) {
+        if (Array.isArray(t) && t.length === 5 && SKILL_RE.test(skill)) row[skill] = [num(t[0]), num(t[1]), num(t[2]), num(t[3]), num(t[4])];
+      }
+      s.help[day] = row;
+    }
+  }
+  if (isObj(raw.lessonRun)) {
+    const r = raw.lessonRun;
+    if (typeof r.stopId === 'string' && /^s\d{1,2}$/.test(r.stopId) && typeof r.lessonId === 'string' && /^s\d{1,2}\.l\d{1,2}$/.test(r.lessonId) && r.lessonId.startsWith(`${r.stopId}.`) && typeof r.seed === 'number' && Number.isFinite(r.seed)) {
+      s.lessonRun = { stopId: r.stopId, lessonId: r.lessonId, seed: Math.trunc(r.seed), next: num(r.next, 0, 20), firstTry: num(r.firstTry, 0, 20) };
+    }
+  }
+  if (Array.isArray(raw.gaps)) s.gaps = [...new Set(raw.gaps.filter((g): g is string => typeof g === 'string' && /^s\d{1,2}\.[\w.:-]{1,120}$/.test(g)))].slice(-MAX_GAPS);
   if (isObj(raw.settings)) {
     const st = raw.settings;
     s.settings = {
@@ -226,6 +264,26 @@ export function recordAnswer(data: SaveData, day: string, skill: string, firstTr
   return { ...data, stats: { ...data.stats, [day]: row } };
 }
 
+/** What happened after a miss, added to the day's help tally for the skill. */
+export function recordHelp(
+  data: SaveData,
+  day: string,
+  skill: string,
+  h: { explained: boolean; retried: boolean; fresh: number; freshPassed: boolean; simpler: boolean },
+): SaveData {
+  if (!h.explained && !h.simpler) return data;
+  const row = { ...(data.help[day] ?? {}) };
+  const [e, r, f, p, s] = row[skill] ?? [0, 0, 0, 0, 0];
+  row[skill] = [e + (h.explained ? 1 : 0), r + (h.retried ? 1 : 0), f + h.fresh, p + (h.freshPassed ? 1 : 0), s + (h.simpler ? 1 : 0)];
+  return { ...data, help: { ...data.help, [day]: row } };
+}
+
+/** Remember a choice that had no explanation of its own, once, newest last. */
+export function recordGap(data: SaveData, gap: string): SaveData {
+  if (data.gaps.includes(gap)) return data;
+  return { ...data, gaps: [...data.gaps, gap].slice(-MAX_GAPS) };
+}
+
 export function addActive(data: SaveData, day: string, seconds: number): SaveData {
   return { ...data, active: { ...data.active, [day]: Math.min(86400, (data.active[day] ?? 0) + seconds) } };
 }
@@ -256,10 +314,15 @@ function csvField(v: string | number): string {
 
 /** date,skill,answered,first_try_right — one row per day and skill, oldest first. */
 export function statsCsv(data: SaveData): string {
-  const rows = ['date,skill,answered,first_try_right'];
-  for (const day of Object.keys(data.stats).sort()) {
-    for (const [skill, [a, f]] of Object.entries(data.stats[day]).sort()) rows.push([day, skill, a, f].map(csvField).join(','));
+  const rows = ['date,skill,answered,first_try_right,explanations_shown,right_retry_with_help,new_examples_tried,new_example_sets_passed,simpler_used'];
+  const days = [...new Set([...Object.keys(data.stats), ...Object.keys(data.help ?? {})])].sort();
+  for (const day of days) {
+    const skills = [...new Set([...Object.keys(data.stats[day] ?? {}), ...Object.keys(data.help?.[day] ?? {})])].sort();
+    for (const skill of skills) {
+      const [a, f] = data.stats[day]?.[skill] ?? [0, 0];
+      const h = data.help?.[day]?.[skill] ?? [0, 0, 0, 0, 0];
+      rows.push([day, skill, a, f, ...h].map(csvField).join(','));
+    }
   }
   return rows.join('\n') + '\n';
 }
-

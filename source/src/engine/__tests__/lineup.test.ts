@@ -1,28 +1,44 @@
 /**
  * Stop 3 line-up engine. Every answer is re-derived here by brute force (all orders of the people,
  * checked with clueHolds), independent of the helpers the engine uses to build items.
+ *
+ * The teaching after a wrong answer (Item.teach, ChooseItem.feedback) is re-checked with a second clue
+ * evaluator written here (`holds`): every truth a case card shows, every note under it, every order a
+ * message quotes and every smallest example is checked against its own computation.
  */
 import { describe, expect, it } from 'vitest';
 import { stop3 } from '../../content/stop3';
+import { freshCheckSet, looks } from '../fresh';
 import { clueHolds, grade } from '../grade';
 import {
   CANT,
   ORDERLY,
+  ORDINALS,
   SKINS,
   SKIN_IDS,
   buildPuzzle,
+  buildSimpler,
   chainPuzzle,
+  chainSimpler,
+  clueId,
   clueText,
   extraCluePuzzle,
+  extraSimpler,
   forceClues,
   spotPuzzle,
+  spotSimpler,
   statusPuzzle,
+  statusSimpler,
   trueClues,
   type SkinId,
+  type SpotFocus,
   type Status,
 } from '../puzzles/lineup';
+import { sentences, words } from '../readability';
 import { createRng } from '../rng';
-import type { ChooseItem, Item, LineClue } from '../types';
+import { feedbackText, teachStrings } from '../teach';
+import { explanationFor, explanationSpeech } from '../../game/explanation';
+import type { ChooseItem, Item, LineClue, TeachCase } from '../types';
 
 const SEEDS = 300;
 
@@ -41,22 +57,199 @@ function quotedOrders(text: string): string[][] {
   return [...text.matchAll(/[Tt]he order ((?:[A-Z][a-z]*, )+[A-Z][a-z]*)/g)].map((m) => m[1].split(', ').map((s) => s.toLowerCase()));
 }
 
-function cleanText(item: Item) {
+/** Every string a player can read for an item: prompt, explain, hint, labels, clues, why-wrong and all teaching. */
+function playerText(item: Item): string[] {
   const whyWrong = item.kind === 'choose' ? Object.values(item.whyWrong ?? {}) : [];
   const labels = item.kind === 'choose' ? item.choices.map((c) => c.label) : [];
   const scene = item.scene?.kind === 'clues' ? item.scene.clues : [];
-  const all = [item.prompt, item.explain, item.hint ?? '', ...whyWrong, ...labels, ...scene].join(' ');
+  return [item.prompt, item.explain, item.hint ?? '', ...whyWrong, ...labels, ...scene, ...teachStrings(item)];
+}
+
+function cleanText(item: Item) {
+  const all = playerText(item).join(' ');
   expect(all).not.toMatch(/undefined|NaN|\{list\}|\s\s|\.\./);
   // Curly apostrophes and quotes only.
   expect(all).not.toMatch(/['"]/);
   // The screen already shows a "Not yet" heading, so the message must not repeat it.
-  for (const msg of whyWrong) expect(msg).not.toMatch(/^Not yet/);
+  if (item.kind === 'choose') for (const msg of Object.values(item.whyWrong ?? {})) expect(msg).not.toMatch(/^Not yet/);
 }
 
 function whyWrongCoversWrongChoices(item: ChooseItem) {
   const wrong = item.choices.map((c) => c.id).filter((id) => id !== item.answer);
   expect(Object.keys(item.whyWrong ?? {}).sort()).toEqual(wrong.sort());
+  expect(Object.keys(item.feedback ?? {}).sort()).toEqual(wrong.sort());
+  for (const id of wrong) expect(item.whyWrong![id]).toBe(feedbackText(item.feedback![id]));
 }
+
+// ---------- a second clue evaluator, and checks for case cards ----------
+
+/** Written apart from clueHolds: 1-based spots and signed gaps. Full orders only. */
+function holds(c: LineClue, order: readonly string[]): boolean {
+  const at = new Map(order.map((id, i) => [id, i + 1]));
+  const A = at.get(c.a)!;
+  const n = order.length;
+  const gap = (x: string) => at.get(x)! - A;
+  switch (c.t) {
+    case 'before': return gap(c.b) > 0;
+    case 'rightBefore': return gap(c.b) === 1;
+    case 'nextTo': return Math.abs(gap(c.b)) === 1;
+    case 'notNextTo': return Math.abs(gap(c.b)) > 1;
+    case 'between': return gap(c.b) * gap(c.c) < 0;
+    case 'first': return A === 1;
+    case 'last': return A === n;
+    case 'notFirst': return A > 1;
+    case 'notLast': return A < n;
+    case 'place': return A === c.k;
+  }
+}
+const fitHolds = (ids: string[], clues: readonly LineClue[]) => perms(ids).filter((p) => clues.every((c) => holds(c, p)));
+const brokenHolds = (clues: readonly LineClue[], order: readonly string[]) => clues.flatMap((c, i) => (holds(c, order) ? [] : [i]));
+const sceneClues = (item: Item) => (item.scene?.kind === 'clues' ? item.scene.clues : []);
+const LINE_LABELS = new Set(SKIN_IDS.map((s) => SKINS[s].lineLabel));
+/** "clue 2", "clues 1 and 3" -> [1], [0, 2]. */
+const nums = (s: string) => [...s.matchAll(/\d+/g)].map((m) => Number(m[0]) - 1);
+const CLUES_FALSE = /[Cc]lues? (\d+(?:(?:, | and )\d+)*) (?:is|are) false/;
+
+interface Ctx {
+  ids: string[];
+  clues: readonly LineClue[];
+  texts: readonly string[];
+  stmt?: LineClue;
+  stmtText?: string;
+  /** The picked answer as a placement, for "Your answer" truths. */
+  claim?: LineClue;
+  /** The right line, for "This is the right line with … swapped." */
+  answer?: readonly string[];
+}
+
+interface Checked {
+  order: string[];
+  broken: number[];
+  shown: number[];
+  your?: boolean;
+  sentence?: boolean;
+}
+
+/**
+ * Re-check one case card: the line in its label, every truth it shows (against `holds`), and every claim its
+ * note makes. Returns what it found so the caller can check what the card is meant to show.
+ */
+function checkCase(c: TeachCase, ctx: Ctx): Checked {
+  const m = /^([A-Z][a-z ]+): ((?:[A-Za-z]+, )+[A-Za-z]+)\.$/.exec(c.label);
+  expect(m, c.label).not.toBeNull();
+  expect(LINE_LABELS.has(m![1]), c.label).toBe(true);
+  const order = m![2].split(', ').map((s) => s.toLowerCase());
+  expect([...order].sort(), c.label).toEqual([...ctx.ids].sort());
+  const broken = brokenHolds(ctx.clues, order);
+  const out: Checked = { order, broken, shown: [] };
+  for (const t of c.truths ?? []) {
+    let x: RegExpExecArray | null;
+    if ((x = /^Clue (\d+), “(.+)”$/.exec(t.who))) {
+      const i = Number(x[1]) - 1;
+      expect(`${x[2]}.`).toBe(ctx.texts[i]);
+      expect(t.value, `${c.label} ${t.who}`).toBe(holds(ctx.clues[i], order));
+      out.shown.push(i);
+    } else if ((x = /^The sentence, “(.+)”$/.exec(t.who))) {
+      expect(`${x[1]}.`).toBe(ctx.stmtText);
+      expect(t.value, `${c.label} ${t.who}`).toBe(holds(ctx.stmt!, order));
+      out.sentence = t.value;
+    } else if (/^Your answer, “.+”$/.test(t.who)) {
+      expect(ctx.claim, 'a Your answer truth needs a picked answer').toBeDefined();
+      expect(t.value, `${c.label} ${t.who}`).toBe(holds(ctx.claim!, order));
+      out.your = t.value;
+    } else {
+      throw new Error(`unknown truth: ${t.who}`);
+    }
+  }
+  // Clue truths are listed in clue order, without repeats.
+  expect(out.shown).toEqual([...new Set(out.shown)].sort((a, b) => a - b));
+  // A card lists every clue (a line that fits), or exactly the clues the line breaks: never a mix.
+  const all = ctx.clues.map((_, i) => i);
+  expect(out.shown.length === all.length && !broken.length ? true : same(out.shown.map(String), broken.map(String)), `${c.label} shows ${out.shown}, breaks ${broken}`).toBe(true);
+  const note = c.note ?? '';
+  if (/Every clue is true here|This order fits every clue|This is the only line that fits/.test(note)) expect(broken, note).toEqual([]);
+  const f = CLUES_FALSE.exec(note);
+  if (f) expect(nums(f[1]), `${c.label} ${note}`).toEqual(broken);
+  if (/does not fit/.test(note)) expect(broken.length).toBeGreaterThan(0);
+  const sw = /This is the right line with (\w+) and (\w+) swapped\. That breaks (clues? [\d, and]+)\./.exec(note);
+  if (sw) {
+    expect(nums(sw[3])).toEqual(broken);
+    expect(ctx.answer, 'a swap note needs the right line').toBeDefined();
+    const right = [...ctx.answer!];
+    const [i, j] = [right.indexOf(sw[1].toLowerCase()), right.indexOf(sw[2].toLowerCase())];
+    [right[i], right[j]] = [right[j], right[i]];
+    expect(order).toEqual(right);
+  }
+  if (/The other clues are still true/.test(note)) expect(broken).toEqual(out.shown);
+  const cov = /With clue (\d+) covered, this order fits too/.exec(note);
+  if (cov) expect(broken).toEqual([Number(cov[1]) - 1]);
+  const still = /With clue (\d+) covered, this is still the only order that fits/.exec(note);
+  if (still) {
+    const k = Number(still[1]) - 1;
+    expect(fitHolds(ctx.ids, ctx.clues.filter((_, j) => j !== k))).toEqual([order]);
+  }
+  if (/Every clue but yours is true here/.test(note)) expect(broken.length).toBe(1);
+  // "Zap is between Tik and Rivet." names exactly who stands between the two.
+  const btw = /([A-Z]\w*(?:, [A-Z]\w*)*(?: and [A-Z]\w*)?) (?:is|are) between ([A-Z]\w*) and ([A-Z]\w*)\./.exec(note);
+  if (btw) {
+    const [i, j] = [order.indexOf(btw[2].toLowerCase()), order.indexOf(btw[3].toLowerCase())].sort((a, b) => a - b);
+    expect(btw[1].split(/, | and /).map((s) => s.toLowerCase()).sort()).toEqual(order.slice(i + 1, j).sort());
+  }
+  return out;
+}
+
+/** The orders a message quotes, re-checked against what the sentence around them claims. */
+function checkDetail(lines: readonly string[], ctx: Ctx) {
+  for (const line of lines) {
+    for (const sentenceText of line.split(/(?<=\.)\s+(?=[A-Z])/)) {
+      const fits = /[Tt]he order ((?:[A-Z][a-z]*, )+[A-Z][a-z]*)(?: \([a-z ]+\))? fits every clue\b/.exec(sentenceText);
+      if (fits) expect(brokenHolds(ctx.clues, fits[1].toLowerCase().split(', ')), sentenceText).toEqual([]);
+    }
+    const think = /[Tt]hink of the order ((?:[A-Z][a-z]*, )+[A-Z][a-z]*)(?: \([a-z ]+\))?\. (.*)$/.exec(line);
+    if (think) {
+      const order = think[1].toLowerCase().split(', ');
+      const rest = think[2];
+      if (/^Every clue is true there/.test(rest)) expect(brokenHolds(ctx.clues, order), line).toEqual([]);
+      const f = CLUES_FALSE.exec(rest);
+      if (f) expect(nums(f[1]), line).toEqual(brokenHolds(ctx.clues, order));
+    }
+  }
+}
+
+/** Every item carries the whole teaching: a rule, 1-3 terms, a meaning, 2-4 cases, a remember line and a question, a simpler example. */
+function checkTeachShape(item: Item) {
+  const t = item.teach!;
+  expect(t, item.id).toBeDefined();
+  expect(t.rule.length).toBeGreaterThan(10);
+  expect(t.terms!.length).toBeGreaterThanOrEqual(1);
+  expect(t.terms!.length).toBeLessThanOrEqual(4);
+  // Any panel text that says a clue "breaks" defines the word first.
+  const panel = [item.explain, ...teachStrings(item)].join(' ');
+  if (/\bbreak/i.test(panel)) expect(t.terms!.map((x) => x.word), `${item.id} uses “break”`).toContain('To break a clue');
+  expect(new Set(t.terms!.map((x) => x.word)).size).toBe(t.terms!.length);
+  expect(t.meaning!.length).toBeGreaterThan(10);
+  expect(t.casesTitle!.length).toBeGreaterThan(5);
+  expect(t.cases!.length).toBeGreaterThanOrEqual(2);
+  expect(t.cases!.length).toBeLessThanOrEqual(4);
+  expect(t.remember!.length).toBe(2);
+  expect(t.remember![1]).toMatch(/^Ask: “.+\?”$/);
+  expect(t.simpler!.length).toBeGreaterThanOrEqual(3);
+}
+
+/** Headline -> mistake kind, across many items: no headline may stand for two different mistakes. */
+function headlinesDifferByKind(byKind: Map<string, Set<string>>) {
+  const owner = new Map<string, string>();
+  for (const [kind, heads] of byKind) {
+    for (const h of heads) {
+      expect(owner.get(h) ?? kind, `“${h}” is used for ${owner.get(h)} and ${kind}`).toBe(kind);
+      owner.set(h, kind);
+    }
+  }
+}
+const note = (byKind: Map<string, Set<string>>, kind: string, headline: string) => {
+  if (!byKind.has(kind)) byKind.set(kind, new Set());
+  byKind.get(kind)!.add(headline);
+};
 
 describe('clue text', () => {
   it('every skin says every clue type it allows as one clear sentence', () => {
@@ -88,6 +281,26 @@ describe('clue text', () => {
       expect(SKINS[id].types).not.toContain('rightBefore');
       expect(SKINS[id].types).not.toContain('nextTo');
       expect(SKINS[id].types).not.toContain('between');
+    }
+  });
+
+  it('the test’s own clue checker agrees with clueHolds on every order of five', () => {
+    const ids = ['a', 'b', 'c', 'd', 'e'];
+    for (const order of perms(ids)) {
+      for (const c of trueClues(['a', 'b', 'c', 'd', 'e'], SKINS.race.types)) expect(holds(c, order)).toBe(clueHolds(c, order));
+    }
+  });
+
+  it('every skin defines, in its own words, each clue type it can say that needs defining', () => {
+    for (const id of SKIN_IDS) {
+      const skin = SKINS[id];
+      for (const t of skin.types) {
+        if (t === 'first' || t === 'last' || t === 'place') continue;
+        const term = skin.terms[t];
+        expect(term, `${id} ${t}`).toBeDefined();
+        expect(term![0]).toMatch(/^“[A-Z].*”$|^To /);
+        expect(term![1]).toMatch(/^[a-z].*\.$/);
+      }
     }
   });
 });
@@ -131,10 +344,10 @@ describe('lesson 1: chains', () => {
         expect(!!item.conflict).toBe(cantTell);
         whyWrongCoversWrongChoices(item);
         cleanText(item);
-        // "P could be first, but so could Q (and R). No clue decides between them." holds.
+        // "P could be first, but so could Q (and R)." holds, and no clue compares the people it names.
         let couldMsgs = 0;
-        for (const msg of Object.values(item.whyWrong!)) {
-          const m = msg.match(/^(\w+) could .*, but so could (.+?)\. No clue decides between them\.$/);
+        for (const fb of Object.values(item.feedback!)) {
+          const m = fb.headline.match(/^(\w+) could .*, but so could (.+?)\.$/);
           if (!m) continue;
           couldMsgs++;
           const named = [m[1], ...m[2].split(/, | and /)].map((s) => s.toLowerCase());
@@ -168,7 +381,10 @@ describe('lesson 1: chains', () => {
       const label = (id: string) => item.choices.find((c) => c.id === id)!.label;
       const named = (text: string) => ids.filter((id) => new RegExp(`\\b${label(id)}\\b`).test(text)).sort();
       expect(named(item.explain), `seed ${seed}: ${item.explain}`).toEqual(ends);
-      for (const e of ends) expect(named(item.whyWrong![e]), `seed ${seed}: ${item.whyWrong![e]}`).toEqual(ends);
+      for (const e of ends) expect(named(item.feedback![e].headline), `seed ${seed}: ${item.feedback![e].headline}`).toEqual(ends);
+      // "No clue rules out A or D." in the meaning names exactly them too.
+      const rule = /No clue rules out (.+)\.$/.exec(item.teach!.meaning!)!;
+      expect(named(rule[1])).toEqual(ends);
     }
     expect(three).toBeGreaterThan(0);
   });
@@ -190,10 +406,8 @@ describe('lesson 2: before vs right before', () => {
         expect(clues.map((c) => `${c.t}${c.a}${'b' in c ? c.b : ''}`)).not.toContain(`${stmt.t}${stmt.a}${stmt.b}`);
         whyWrongCoversWrongChoices(item);
         cleanText(item);
-        // Every order quoted as a witness really fits, and says what the text claims.
-        for (const o of quotedOrders([item.explain, ...Object.values(item.whyWrong!)].join(' '))) {
-          expect(fits.some((f) => same(f, o)), `seed ${seed}: ${o}`).toBe(true);
-        }
+        // Every order the explanation quotes really fits, and says what the text claims.
+        for (const o of quotedOrders(item.explain)) expect(fits.some((f) => same(f, o)), `seed ${seed}: ${o}`).toBe(true);
         if (status === 'might') {
           const [tOrder, fOrder] = quotedOrders(item.explain).slice(-2);
           expect(clueHolds(stmt, tOrder)).toBe(true);
@@ -205,12 +419,14 @@ describe('lesson 2: before vs right before', () => {
 
   it('conflict items: the clue says "before", the sentence says "right before", and it only might be true', () => {
     for (let seed = 1; seed <= SEEDS; seed++) {
-      const { item, ids, clues, stmt } = statusPuzzle(createRng(seed), { id: 'x', skin: skinAt(seed, ORDERLY), conflict: true });
+      const skin = skinAt(seed, ORDERLY);
+      const { item, ids, clues, stmt } = statusPuzzle(createRng(seed), { id: 'x', skin, conflict: true });
       expect(stmt.t).toBe('rightBefore');
       expect(clues.some((c) => c.t === 'before' && c.a === stmt.a && c.b === stmt.b)).toBe(true);
       expect(item.answer).toBe('might');
       expect(item.conflict).toBe(true);
-      expect(item.whyWrong!.must).toMatch(/^You read/);
+      // The headline names the answer's gap, not the player's thinking.
+      expect(item.feedback!.must.headline).toBe(`Your answer treats “${SKINS[skin].beforeWord}” as “${SKINS[skin].rightWord}.”`);
       // Misreading "before" as "right before" would make it a must.
       const misread = clues.map((c) => (c.t === 'before' && c.a === stmt.a && c.b === stmt.b ? stmt : c));
       expect(fitting(ids, misread).every((o) => clueHolds(stmt, o))).toBe(true);
@@ -234,9 +450,7 @@ describe('lesson 3: not first, not last, next to, between', () => {
           expect(item.answer === CANT).toBe(cantTell);
           whyWrongCoversWrongChoices(item);
           cleanText(item);
-          for (const o of quotedOrders([item.explain, ...Object.values(item.whyWrong!)].join(' '))) {
-            expect(fits.some((f) => same(f, o))).toBe(true);
-          }
+          for (const o of quotedOrders(item.explain)) expect(fits.some((f) => same(f, o))).toBe(true);
           // "Two orders fit" only when exactly two do.
           if (cantTell) expect(item.explain.startsWith('Two orders fit the clues:')).toBe(fits.length === 2);
           // Forced answers take more than one clue to see.
@@ -252,7 +466,7 @@ describe('lesson 3: not first, not last, next to, between', () => {
     }
   });
 
-  it('conflict items leave the tempting answer open', () => {
+  it('conflict items leave the tempting answer open, and their skill is the conflict’s own clue', () => {
     for (let seed = 1; seed <= SEEDS; seed++) {
       const ends = spotPuzzle(createRng(seed), { id: 'x', skin: skinAt(seed, ORDERLY), conflict: 'ends' });
       expect(ends.ids.length).toBe(4);
@@ -260,11 +474,23 @@ describe('lesson 3: not first, not last, next to, between', () => {
       expect(ends.clues).toContainEqual({ t: 'notLast', a: ends.target });
       expect(ends.item.answer).toBe(CANT);
       expect(new Set(fitting(ends.ids, ends.clues).map((o) => o.indexOf(ends.target)))).toEqual(new Set([1, 2]));
+      expect(ends.item.skill).toBe('s3.not-first-last');
 
       const btw = spotPuzzle(createRng(seed), { id: 'x', skin: skinAt(seed, ORDERLY), conflict: 'between' });
       expect(btw.clues.some((c) => c.t === 'between')).toBe(true);
       expect(btw.item.answer).toBe(CANT);
       expect(btw.item.conflict).toBe(true);
+      expect(btw.item.skill).toBe('s3.between');
+    }
+  });
+
+  it('“where” questions say where counting starts', () => {
+    for (let seed = 1; seed <= 60; seed++) {
+      const skin = skinAt(seed, ORDERLY);
+      const { item } = spotPuzzle(createRng(seed), { id: 'x', skin, q: 'where' });
+      if (skin === 'line' || skin === 'robots') expect(item.prompt).toMatch(/Counting from the front, where is \w+ in (line|the parade)\?$/);
+      if (skin === 'letters') expect(item.prompt).toMatch(/Counting from the left, where is \w+\?$/);
+      if (skin === 'race' || skin === 'brooms') expect(item.prompt).toMatch(/In what place did \w+ finish\?$/);
     }
   });
 });
@@ -300,16 +526,426 @@ describe('lesson 5: which clue was not needed', () => {
       expect(all[0]).toEqual(order);
       const removable = clues.map((_, i) => fitting(ids, clues.filter((_, j) => j !== i)).length === 1);
       expect(removable.filter(Boolean).length).toBe(1);
-      expect(item.answer).toBe(`k${removable.indexOf(true) + 1}`);
+      expect(item.answer).toBe(clueId(clues[removable.indexOf(true)]));
       expect(new Set(item.choices.map((c) => c.label)).size).toBe(item.choices.length);
       whyWrongCoversWrongChoices(item);
       cleanText(item);
       // Each "not yet" names an order that fits without that clue and is not the answer.
       for (const [id, msg] of Object.entries(item.whyWrong!)) {
-        const i = Number(id.slice(1)) - 1;
+        const i = clues.findIndex((c) => clueId(c) === id);
         const [alt] = quotedOrders(msg);
         expect(same(alt, order)).toBe(false);
         expect(clues.filter((_, j) => j !== i).every((c) => clueHolds(c, alt))).toBe(true);
+        expect(clueHolds(clues[i], alt)).toBe(false);
+      }
+    }
+  });
+
+  it('choice ids come from what each clue says, so they never depend on where the clue sits', () => {
+    for (let seed = 1; seed <= 100; seed++) {
+      const { item, clues } = extraCluePuzzle(createRng(seed), { id: 'x', skin: skinAt(seed) });
+      const texts = sceneClues(item);
+      expect(item.choices.map((c) => c.id)).toEqual(clues.map(clueId));
+      expect(item.choices.map((c) => c.label)).toEqual(texts);
+      expect(item.choices.every((c) => !/^k\d$/.test(c.id))).toBe(true);
+      // Reordering the choices keeps each id on its own clue and each explanation on its own choice.
+      for (const c of [...item.choices].reverse()) {
+        if (c.id === item.answer) continue;
+        expect(item.feedback![c.id].detail.join(' ')).toContain(`Cover up “${c.label.replace(/\.$/, '')}.”`);
+      }
+    }
+  });
+});
+
+// ---------- the teaching after a wrong answer ----------
+
+describe('teaching after a wrong answer: lesson 1 (chains)', () => {
+  it('cases try each name at that end, and every truth, note and example is computed right', () => {
+    const byKind = new Map<string, Set<string>>();
+    for (let seed = 1; seed <= 150; seed++) {
+      for (const cantTell of [false, true]) {
+        const { item, ids, clues, ask } = chainPuzzle(createRng(seed), { id: 'x', skin: skinAt(seed), cantTell });
+        const texts = sceneClues(item);
+        const end = ask === 'first' ? 0 : ids.length - 1;
+        const ends = new Set(fitHolds(ids, clues).map((o) => o[end]));
+        checkTeachShape(item);
+        item.teach!.cases!.forEach((c, i) => {
+          const r = checkCase(c, { ids, clues, texts });
+          expect(r.order[end]).toBe(ids[i]);
+          expect(r.broken.length === 0).toBe(ends.has(ids[i]));
+        });
+        for (const ch of item.choices) {
+          if (ch.id === item.answer) continue;
+          const fb = item.feedback![ch.id];
+          const claim: LineClue | undefined = ch.id === CANT ? undefined : { t: 'place', a: ch.id, k: end + 1 };
+          const ctx: Ctx = { ids, clues, texts, claim };
+          const ex = checkCase(fb.example!, ctx);
+          checkDetail(fb.detail, ctx);
+          if (ch.id === CANT) {
+            // The chain decides it: the example puts someone else at that end and breaks a clue.
+            note(byKind, 'decided', fb.headline);
+            expect(fb.headline).toBe(`The clues rule out everyone but ${item.choices.find((c) => c.id === item.answer)!.label}.`);
+            expect(ex.broken.length).toBeGreaterThan(0);
+            expect(ex.order[end]).not.toBe(item.answer);
+          } else if (ends.has(ch.id)) {
+            // Could be there, but not for sure: two orders that fit disagree.
+            note(byKind, 'not-sure', fb.headline);
+            expect(ex.broken).toEqual([]);
+            expect(ex.your).toBe(false);
+            const two = quotedOrders(fb.detail.join(' '));
+            expect(two.length).toBe(2);
+            for (const o of two) expect(brokenHolds(clues, o)).toEqual([]);
+            expect(two[0][end]).toBe(ch.id);
+            expect(two[1][end]).not.toBe(ch.id);
+          } else {
+            // A clue rules it out: the headline names that clue, and the example shows it break.
+            note(byKind, 'breaks', fb.headline.replace(/“.+”/, '“…”'));
+            const m = /^Your answer makes the clue “(.+)” false\.$/.exec(fb.headline)!;
+            const i = texts.indexOf(`${m[1]}.`);
+            expect(i).toBeGreaterThanOrEqual(0);
+            const c = clues[i];
+            expect(c.t === 'before' && (end === 0 ? c.b : c.a)).toBe(ch.id);
+            expect(ex.your).toBe(true);
+            expect(ex.broken).toContain(i);
+          }
+        }
+      }
+    }
+    headlinesDifferByKind(byKind);
+    expect([...byKind.keys()].sort()).toEqual(['breaks', 'decided', 'not-sure']);
+  });
+
+  it('for a can’t-tell answer, the cases show two orders that fit the clues but disagree', () => {
+    for (let seed = 1; seed <= 100; seed++) {
+      const { item, ids, clues, ask } = chainPuzzle(createRng(seed), { id: 'x', skin: skinAt(seed), cantTell: true });
+      const end = ask === 'first' ? 0 : ids.length - 1;
+      const fitsShown = item.teach!.cases!.map((c) => checkCase(c, { ids, clues, texts: sceneClues(item) })).filter((r) => !r.broken.length);
+      expect(new Set(fitsShown.map((r) => r.order[end])).size).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it('“Explain more simply” is a three-name chain whose answer is worked out the same way', () => {
+    for (const s of SKIN_IDS) {
+      for (const ask of ['first', 'last'] as const) {
+        for (const cant of [false, true]) {
+          const mini = chainSimpler(SKINS[s], [], ask, cant);
+          const end = ask === 'first' ? 0 : 2;
+          const left = [...new Set(fitHolds(mini.ids, mini.clues).map((o) => o[end]))];
+          expect(left.length > 1).toBe(cant);
+          const last = mini.text[mini.text.length - 1];
+          if (cant) expect(last).toMatch(/are left\. No clue compares them, so you can’t tell\.$/);
+          else expect(last).toMatch(new RegExp(`^Only ${SKINS[s].pool.find((p) => p.toLowerCase() === left[0])} is left\\.`));
+        }
+      }
+    }
+  });
+});
+
+describe('teaching after a wrong answer: lesson 2 (before vs right before)', () => {
+  it('cases and every wrong choice’s example show the right orders, with computed truths', () => {
+    const byKind = new Map<string, Set<string>>();
+    for (let seed = 1; seed <= 150; seed++) {
+      const skin = skinAt(seed, ORDERLY);
+      for (const opts of [{ target: 'must' as const }, { target: 'might' as const }, { target: 'cant' as const }, { conflict: true }]) {
+        const { item, ids, clues, stmt, status } = statusPuzzle(createRng(seed), { id: 'x', skin, ...opts });
+        const texts = sceneClues(item);
+        const stmtText = /Look at this sentence: “(.+?)” Think about every order that fits the clues\./.exec(item.prompt)![1];
+        const ctx: Ctx = { ids, clues, texts, stmt, stmtText };
+        checkTeachShape(item);
+        const cases = item.teach!.cases!.map((c) => checkCase(c, ctx));
+        const fitT = cases.filter((r) => !r.broken.length && r.sentence);
+        const fitF = cases.filter((r) => !r.broken.length && !r.sentence);
+        if (status === 'might') {
+          expect(fitT.length).toBeGreaterThan(0);
+          expect(fitF.length).toBeGreaterThan(0);
+        } else {
+          // Every order that fits agrees, and one more line shows the other value only by breaking a clue.
+          expect((status === 'must' ? fitF : fitT).length).toBe(0);
+          expect(cases.some((r) => r.broken.length > 0 && r.sentence === (status === 'cant'))).toBe(true);
+        }
+        for (const pick of ['must', 'might', 'cant'] as const) {
+          if (pick === status) continue;
+          const fb = item.feedback![pick];
+          const ex = checkCase(fb.example!, ctx);
+          checkDetail(fb.detail, ctx);
+          const misread = status === 'might' && pick === 'must' && !!item.conflict;
+          note(byKind, misread ? 'misread' : `${status}<-${pick}`, misread ? fb.headline.replace(/“.+”/, '“…”') : fb.headline);
+          if (status === 'might') {
+            // Picked must: an order fits and the sentence is false. Picked can't: an order fits and it is true.
+            expect(ex.broken).toEqual([]);
+            expect(ex.sentence).toBe(pick === 'cant');
+          } else if (pick === 'might' || (status === 'cant' && pick === 'must')) {
+            // No order that fits gives the other value: the best try breaks a clue.
+            expect(ex.broken.length).toBeGreaterThan(0);
+            expect(ex.sentence).toBe(status === 'cant');
+          } else {
+            // Must, picked can't: an order fits and the sentence is true there.
+            expect(ex.broken).toEqual([]);
+            expect(ex.sentence).toBe(true);
+          }
+          if (misread) expect(fb.example!.note).toMatch(/ (is|are) between /);
+        }
+      }
+    }
+    headlinesDifferByKind(byKind);
+    expect(byKind.size).toBe(7);
+  });
+
+  it('the question says what must, might and can’t are about: every order that fits the clues', () => {
+    for (let seed = 1; seed <= 40; seed++) {
+      const { item } = statusPuzzle(createRng(seed), { id: 'x', skin: skinAt(seed, ORDERLY) });
+      expect(item.prompt).toMatch(/Think about every order that fits the clues\. Must the sentence be true, might it be true, or can’t it be true\?$/);
+      const words = item.teach!.terms!.map((t) => t.word);
+      expect(words).toContain(SKINS[skinAt(seed, ORDERLY)].terms.before![0]);
+      expect(words).toContain(SKINS[skinAt(seed, ORDERLY)].terms.rightBefore![0]);
+    }
+  });
+
+  it('“Explain more simply” gets its answer by checking every order that fits', () => {
+    for (const s of ORDERLY) {
+      for (const status of ['must', 'might', 'cant'] as const) {
+        for (const t of ['before', 'rightBefore'] as const) {
+          const mini = statusSimpler(SKINS[s], [], status, t);
+          const fit = fitHolds(mini.ids, mini.clues);
+          const yes = fit.filter((o) => holds(mini.stmt, o)).length;
+          expect(yes === fit.length ? 'must' : yes === 0 ? 'cant' : 'might', `${s} ${status} ${t}`).toBe(status);
+          expect(mini.text.filter((x) => x.startsWith('In the order ')).length).toBe(fit.length);
+          for (const line of mini.text.filter((x) => x.startsWith('In the order '))) {
+            const m = /^In the order (.+), it is (true|false)\.$/.exec(line)!;
+            const order = m[1].split(', ').map((x) => x.toLowerCase());
+            expect(holds(mini.stmt, order)).toBe(m[2] === 'true');
+          }
+        }
+      }
+    }
+  });
+});
+
+describe('teaching after a wrong answer: lesson 3 (not first, not last, next to, between)', () => {
+  it('cases try every spot (or every name), and every wrong choice’s example is computed right', () => {
+    const byKind = new Map<string, Set<string>>();
+    for (let seed = 1; seed <= 120; seed++) {
+      const skin = skinAt(seed, ORDERLY);
+      const plans = [
+        { cantTell: false, q: 'where' as const }, { cantTell: true, q: 'where' as const },
+        { cantTell: false, q: 'who' as const }, { cantTell: true, q: 'who' as const },
+        { conflict: 'ends' as const }, { conflict: 'between' as const },
+      ];
+      for (const plan of plans) {
+        const { item, ids, clues, q, target, k } = spotPuzzle(createRng(seed), { id: 'x', skin, ...plan });
+        const texts = sceneClues(item);
+        const n = ids.length;
+        const valueOf = (o: string[]) => (q === 'where' ? String(o.indexOf(target) + 1) : o[k - 1]);
+        const options = new Set(fitHolds(ids, clues).map(valueOf));
+        const cands = q === 'where' ? Array.from({ length: n }, (_, i) => String(i + 1)) : ids;
+        const claimOf = (v: string): LineClue => (q === 'where' ? { t: 'place', a: target, k: Number(v) } : { t: 'place', a: v, k });
+        checkTeachShape(item);
+        item.teach!.cases!.forEach((c, i) => {
+          const r = checkCase(c, { ids, clues, texts });
+          expect(valueOf(r.order)).toBe(cands[i]);
+          expect(r.broken.length === 0).toBe(options.has(cands[i]));
+        });
+        if (item.answer === CANT) {
+          const fitsShown = item.teach!.cases!.map((c) => checkCase(c, { ids, clues, texts })).filter((r) => !r.broken.length);
+          expect(new Set(fitsShown.map((r) => valueOf(r.order))).size).toBeGreaterThanOrEqual(2);
+        }
+        for (const ch of item.choices) {
+          if (ch.id === item.answer) continue;
+          const fb = item.feedback![ch.id];
+          const v = q === 'where' && ch.id !== CANT ? ch.id.slice(1) : ch.id;
+          const ctx: Ctx = { ids, clues, texts, claim: ch.id === CANT ? undefined : claimOf(v) };
+          const ex = checkCase(fb.example!, ctx);
+          checkDetail(fb.detail, ctx);
+          if (ch.id === CANT) {
+            note(byKind, 'decided', fb.headline.replace(/^Only (the \w+ spot|\w+) /, 'Only X ').replace(/for \w+\.$/, 'for Y.'));
+            // The headline names the one answer left: the spot, or the person (never "that spot").
+            const label = (id: string) => item.choices.find((c) => c.id === id)!.label;
+            const name = (id: string) => id.charAt(0).toUpperCase() + id.slice(1);
+            if (q === 'where') expect(fb.headline).toBe(`Only the ${label(item.answer).toLowerCase()} spot keeps every clue true for ${name(target)}.`);
+            else expect(fb.headline).toMatch(new RegExp(`^Only ${label(item.answer)} could .+ without breaking a clue\\.$`));
+            expect(ex.broken.length).toBeGreaterThan(0);
+          } else if (options.has(v)) {
+            note(byKind, 'not-sure', fb.headline.replace(/^.+, but/, '…, but'));
+            expect(fb.headline).toMatch(/, but not for sure\.$/);
+            expect(ex.broken).toEqual([]);
+            expect(ex.your).toBe(false);
+            const two = quotedOrders(fb.detail.join(' '));
+            expect(two.length).toBe(2);
+            for (const o of two) expect(brokenHolds(clues, o)).toEqual([]);
+            expect(valueOf(two[0])).toBe(v);
+            expect(valueOf(two[1])).not.toBe(v);
+          } else {
+            note(byKind, 'breaks', fb.headline.replace(/^.+ without/, '… without').replace(/\d+/g, 'k'));
+            const m = /without breaking (clue (\d+)|clue (\d+) or clue (\d+)|a clue)\.$/.exec(fb.headline)!;
+            expect(m).not.toBeNull();
+            // Every order with that answer breaks one of the named clues.
+            const named = nums(m[1]);
+            for (const o of perms(ids).filter((x) => valueOf(x) === v)) {
+              const br = brokenHolds(clues, o);
+              expect(br.length).toBeGreaterThan(0);
+              if (named.length) expect(br.some((i) => named.includes(i)), `${fb.headline} ${o}`).toBe(true);
+            }
+            expect(ex.your).toBe(true);
+            expect(ex.broken.length).toBeGreaterThan(0);
+          }
+        }
+      }
+    }
+    headlinesDifferByKind(byKind);
+    expect([...byKind.keys()].sort()).toEqual(['breaks', 'decided', 'not-sure']);
+  });
+
+  it('“Explain more simply” is a three- or four-name puzzle solved by trying each spot', () => {
+    for (const s of ORDERLY) {
+      for (const focus of ['ends', 'nextTo', 'notNextTo', 'between'] as SpotFocus[]) {
+        for (const forced of [true, false]) {
+          const mini = spotSimpler(SKINS[s], [], focus, forced);
+          const fit = fitHolds(mini.ids, mini.clues);
+          const values = 'where' in mini.q
+            ? new Set(fit.map((o) => o.indexOf((mini.q as { where: string }).where)))
+            : new Set(fit.map((o) => o[(mini.q as { who: number }).who - 1]));
+          expect(values.size === 1, `${s} ${focus} ${forced}`).toBe(forced);
+          expect(mini.text[mini.text.length - 1]).toMatch(forced ? /^Only one (spot )?works\. So / : /^More than one (spot )?works\. So you can’t tell\.$/);
+          for (const m of mini.text.join(' ').matchAll(/as in the order ((?:[A-Za-z]+, )+[A-Za-z]+)/g)) {
+            expect(brokenHolds(mini.clues, m[1].toLowerCase().split(', '))).toEqual([]);
+          }
+          const bad = /^The (.+) spots? breaks? a clue\.$/.exec(mini.text.find((x) => / breaks? a clue\.$/.test(x) && x.startsWith('The ')) ?? '');
+          if (bad && 'where' in mini.q) {
+            const x = mini.q.where;
+            for (const word of bad[1].split(/, | and /)) {
+              const j = ORDINALS.indexOf(word as (typeof ORDINALS)[number]);
+              expect(fit.some((o) => o.indexOf(x) === j)).toBe(false);
+            }
+          }
+        }
+      }
+    }
+  });
+});
+
+describe('teaching after a wrong answer: lesson 4 (build the line)', () => {
+  it('the cases show the right line with every clue true, then near misses that break one named clue each', () => {
+    for (let seed = 1; seed <= 150; seed++) {
+      const n = 3 + (seed % 3);
+      const { item, ids, order, clues } = buildPuzzle(createRng(seed), { id: 'x', skin: skinAt(seed), n });
+      const texts = sceneClues(item);
+      checkTeachShape(item);
+      const [first, ...near] = item.teach!.cases!.map((c) => checkCase(c, { ids, clues, texts, answer: order }));
+      expect(first.order).toEqual(order);
+      expect(first.shown).toEqual(clues.map((_, i) => i));
+      expect(first.broken).toEqual([]);
+      expect(item.teach!.cases![0].note).toBe('Every clue is true here. This is the only line that fits.');
+      expect(near.length).toBeGreaterThanOrEqual(1);
+      for (const r of near) {
+        // One swap away from the answer, and only its broken clues are listed (all false).
+        expect(r.order.filter((x, i) => x !== order[i]).length).toBe(2);
+        expect(r.shown).toEqual(r.broken);
+        expect(r.broken.length).toBeGreaterThan(0);
+      }
+      expect(item.teach!.terms!.map((t) => t.word)).toContain('To break a clue');
+      // grade() names the broken clues for any wrong line; they match the second checker.
+      const wrong = [...order].reverse();
+      const g = grade(item, { kind: 'order', ids: wrong });
+      expect(g.broken).toEqual(brokenHolds(clues, wrong));
+    }
+  });
+
+  it('“Explain more simply” is a three-name line with one answer', () => {
+    for (const s of SKIN_IDS) {
+      const mini = buildSimpler(SKINS[s], []);
+      const fit = fitHolds(mini.ids, mini.clues);
+      expect(fit.length).toBe(1);
+      const m = /The only line that fits is ((?:[A-Za-z]+, )+[A-Za-z]+)/.exec(mini.text.join(' '))!;
+      expect(m[1].toLowerCase().split(', ')).toEqual(fit[0]);
+    }
+  });
+});
+
+describe('teaching after a wrong answer: lesson 5 (which clue was not needed)', () => {
+  it('each needed clue’s example is an order that breaks only that clue; the cases cover each clue', () => {
+    const byKind = new Map<string, Set<string>>();
+    for (let seed = 1; seed <= 150; seed++) {
+      const { item, ids, order, clues, extra } = extraCluePuzzle(createRng(seed), { id: 'x', skin: skinAt(seed) });
+      const texts = sceneClues(item);
+      checkTeachShape(item);
+      const [first, ...side] = item.teach!.cases!.map((c) => checkCase(c, { ids, clues, texts }));
+      expect(first.order).toEqual(order);
+      expect(item.teach!.cases![0].note).toBe(`Every clue is true here. With clue ${extra + 1} covered, this is still the only order that fits. So clue ${extra + 1} is not needed.`);
+      for (const r of side) expect(r.broken.length).toBe(1);
+      for (const ch of item.choices) {
+        if (ch.id === item.answer) continue;
+        const fb = item.feedback![ch.id];
+        const i = clues.findIndex((c) => clueId(c) === ch.id);
+        const ex = checkCase(fb.example!, { ids, clues, texts });
+        expect(ex.broken).toEqual([i]);
+        note(byKind, 'needed', fb.headline);
+      }
+    }
+    headlinesDifferByKind(byKind);
+  });
+
+  it('“Explain more simply” shows one clue that is not needed and one that is', () => {
+    for (const s of SKIN_IDS) {
+      const mini = extraSimpler(SKINS[s], []);
+      expect(fitHolds(mini.ids, mini.clues.slice(0, 2)).length).toBe(1);
+      expect(fitHolds(mini.ids, mini.clues.slice(1)).length).toBeGreaterThan(1);
+    }
+  });
+});
+
+describe('teaching after a wrong answer: the whole stop', () => {
+  const all = (seed: number) => [...stop3.lessons.flatMap((l) => l.practice(createRng(seed))), ...stop3.check!(createRng(seed)), stop3.practice!(createRng(seed))];
+
+  it('every item teaches, every wrong choice has its own explanation, and no right answer gets one', () => {
+    for (let seed = 1; seed <= 80; seed++) {
+      for (const item of all(seed)) {
+        checkTeachShape(item);
+        cleanText(item);
+        if (item.kind === 'choose') whyWrongCoversWrongChoices(item);
+      }
+    }
+  });
+
+  it('teaching text: sentences of 25 words or fewer, and no vague “both”, “that row” or “the opposite”', () => {
+    for (let seed = 1; seed <= 100; seed++) {
+      for (const item of all(seed)) {
+        for (const s of [item.explain, ...teachStrings(item)]) {
+          // "That spot" and "like that" leave the reader to work out which spot or which order.
+          expect(s).not.toMatch(/\bboth\b|that row|the opposite|that spot|that end|like that/i);
+          for (const x of sentences(s)) expect(words(x).length, x).toBeLessThanOrEqual(25);
+        }
+        if (item.kind === 'choose') for (const fb of Object.values(item.feedback ?? {})) expect(fb.headline).not.toMatch(/^(Wrong|Try again)\b/);
+      }
+    }
+  });
+
+  it('a miss gets a new example built the same way (same lesson, skill and kind of answer), and in lessons 1 to 3 a partner with the other kind', () => {
+    const sameKind = (missed: Item, x: Item) =>
+      x.skill === missed.skill && !!x.conflict === !!missed.conflict &&
+      (missed.kind !== 'choose' || x.kind !== 'choose' ||
+        ((x.answer === CANT) === (missed.answer === CANT) &&
+          (missed.lesson !== 's3.l2' || x.answer === missed.answer) &&
+          (missed.lesson !== 's3.l3' || x.choices.some((c) => c.id === 'p1') === missed.choices.some((c) => c.id === 'p1'))));
+    for (let seed = 1; seed <= 40; seed++) {
+      for (const missed of all(seed)) {
+        const set = freshCheckSet(stop3, missed, seed, [], 1);
+        const paired = missed.kind === 'choose' && ['s3.l1', 's3.l2', 's3.l3'].includes(missed.lesson);
+        expect(set.length, missed.id).toBe(paired ? 2 : 1);
+        for (const x of set) {
+          expect(x.lesson).toBe(missed.lesson);
+          expect(looks(x)).not.toBe(looks(missed));
+        }
+        const twin = set.find((x) => sameKind(missed, x));
+        expect(twin, missed.id).toBeDefined();
+        if (missed.kind === 'order' && twin!.kind === 'order') expect(twin!.names.length).toBe(missed.names.length);
+        if (paired) {
+          const partner = set.find((x) => x !== twin)!;
+          if (partner.kind !== 'choose' || missed.kind !== 'choose') throw new Error('not a choose item');
+          expect(partner.answer, missed.id).not.toBe(missed.answer);
+          if (missed.lesson === 's3.l2') expect(partner.answer === 'might').toBe(missed.answer !== 'might');
+          else expect(partner.answer === CANT).toBe(missed.answer !== CANT);
+          if (missed.lesson === 's3.l3') expect(partner.choices.some((c) => c.id === 'p1')).toBe(missed.choices.some((c) => c.id === 'p1'));
+        }
       }
     }
   });
@@ -353,6 +989,186 @@ describe('stop 3 content', () => {
       expect(item.choices.length).toBeLessThanOrEqual(4);
     }
   });
+
+  it('lesson 4 defines “breaks” before the build questions use it', () => {
+    const card = stop3.lessons[3].ideas.find((c) => c.title === 'Test and fix')!;
+    expect(card.body.join(' ')).toContain('A clue breaks when it is false for your line.');
+  });
+
+  it('lesson 3 says what “breaks a clue” means the first time a card uses it', () => {
+    const bodies = stop3.lessons[2].ideas.flatMap((c) => c.body);
+    const first = bodies.find((b) => /\bbreak/.test(b))!;
+    expect(first).toContain('That makes the first clue false. We say it breaks the clue.');
+  });
+});
+
+// ---------- regressions for the review of the migrated teaching ----------
+
+describe('review fixes: stop 3 wrong-answer teaching', () => {
+  const all = (seed: number) => [...stop3.lessons.flatMap((l) => l.practice(createRng(seed))), ...stop3.check!(createRng(seed)), stop3.practice!(createRng(seed))];
+  const name = (id: string) => id.charAt(0).toUpperCase() + id.slice(1);
+
+  it('teaching cases that try many lines list only the clues each line breaks; an example that fits lists every clue', () => {
+    for (let seed = 1; seed <= 60; seed++) {
+      for (const item of all(seed)) {
+        const lines = (c: TeachCase) => (c.truths ?? []).filter((t) => t.who.startsWith('Clue ')).length;
+        for (const c of item.teach!.cases!) {
+          // The note says in words what the card leaves out.
+          const clueTruths = (c.truths ?? []).filter((t) => t.who.startsWith('Clue '));
+          if (!lines(c)) expect(c.note, c.label).toMatch(/Every clue is true here|This order fits every clue/);
+          // Otherwise the card lists the broken clues (all false), or, for the right line in lesson 4, every clue.
+          else if (!clueTruths.every((t) => !t.value)) expect(item.lesson === 's3.l4' && clueTruths.every((t) => t.value)).toBe(true);
+        }
+        if (item.kind !== 'choose' || !item.scene || item.scene.kind !== 'clues') continue;
+        for (const fb of Object.values(item.feedback ?? {})) {
+          const ex = fb.example!;
+          const shown = lines(ex);
+          const clueTruths = (ex.truths ?? []).filter((t) => t.who.startsWith('Clue '));
+          if (clueTruths.every((t) => t.value)) expect(shown, ex.label).toBe(item.scene.clues.length);
+        }
+      }
+    }
+  });
+
+  it('lesson 1: “Can’t tell” on a chain that decides says each other name is ruled out by a clue of its own', () => {
+    for (let seed = 1; seed <= 120; seed++) {
+      const { item, ids, clues, ask } = chainPuzzle(createRng(seed), { id: 'x', skin: skinAt(seed), cantTell: false });
+      const detail = item.feedback![CANT].detail.join(' ');
+      expect(detail).not.toMatch(/A clue rules out every/);
+      expect(detail).toMatch(/but \w+ is ruled out by at least one clue\./);
+      for (const id of ids) {
+        if (id === item.answer) continue;
+        // A clue on its own puts someone on the far side of this name.
+        expect(clues.some((c) => c.t === 'before' && (ask === 'first' ? c.b : c.a) === id), `seed ${seed} ${id}`).toBe(true);
+      }
+      // The name the chain rules out gets "makes the clue … false", and that clue really is false with it there.
+      for (const ch of item.choices) {
+        if (ch.id === item.answer || ch.id === CANT) continue;
+        const m = /^Your answer makes the clue “(.+)” false\.$/.exec(item.feedback![ch.id].headline)!;
+        const c = clues[sceneClues(item).indexOf(`${m[1]}.`)];
+        const end = ask === 'first' ? 0 : ids.length - 1;
+        for (const o of perms(ids).filter((x) => x[end] === ch.id)) expect(holds(c, o)).toBe(false);
+      }
+    }
+  });
+
+  it('lesson 2: “might” is “true in some, but not all” in the rule and the Remember line', () => {
+    for (let seed = 1; seed <= 20; seed++) {
+      const { item } = statusPuzzle(createRng(seed), { id: 'x', skin: skinAt(seed, ORDERLY) });
+      expect(item.teach!.rule).toContain('True in some but not all: it might be true.');
+      expect(item.teach!.remember![0]).toContain('Might: true in some, but not all.');
+    }
+  });
+
+  it('lesson 3: when clues rule out an answer together, the detail shows that fixing one clue breaks another', () => {
+    let seen = 0;
+    for (let seed = 1; seed <= 200; seed++) {
+      for (const cantTell of [false, true]) {
+        for (const q of ['where', 'who'] as const) {
+          const { item, ids, clues, target, k } = spotPuzzle(createRng(seed), { id: 'x', skin: skinAt(seed, ORDERLY), cantTell, q });
+          const valueOf = (o: string[]) => (q === 'where' ? `p${o.indexOf(target) + 1}` : o[k - 1]);
+          for (const [id, fb] of Object.entries(item.feedback!)) {
+            if (id === CANT) continue;
+            const any = /without breaking a clue\.$/.test(fb.headline);
+            const m = /without breaking clue (\d+) or clue (\d+)\.$/.exec(fb.headline);
+            if (!m && !any) continue;
+            seen++;
+            const now = fb.detail.find((x) => x.startsWith('Now think of the order '))!;
+            const g = /^Now think of the order ((?:[A-Z]\w*, )+[A-Z]\w*)(?: \([a-z ]+\))?\. Clue (\d+) is true there, but (clues? [\d, and]+) (?:is|are) false\.$/.exec(now)!;
+            expect(g, now).not.toBeNull();
+            const order = g[1].toLowerCase().split(', ');
+            const kept = Number(g[2]) - 1;
+            expect(valueOf(order)).toBe(id);
+            expect(holds(clues[kept], order)).toBe(true);
+            expect(nums(g[3])).toEqual(brokenHolds(clues, order));
+            // The clue kept true was broken by the first try.
+            const first = /^Think of the order ((?:[A-Z]\w*, )+[A-Z]\w*)/.exec(fb.detail.find((x) => x.startsWith('Think of the order '))!)!;
+            expect(holds(clues[kept], first[1].toLowerCase().split(', '))).toBe(false);
+            const last = fb.detail[fb.detail.length - 1];
+            if (m) {
+              const [a, b] = [Number(m[1]) - 1, Number(m[2]) - 1];
+              expect([a, b]).toContain(kept);
+              // "No order where … keeps clue a and clue b true together." Checked over every order.
+              expect(last).toMatch(new RegExp(`^No order where .+ keeps clue ${a + 1} and clue ${b + 1} true together\\.$`));
+              for (const o of perms(ids).filter((x) => valueOf(x) === id)) expect(holds(clues[a], o) && holds(clues[b], o)).toBe(false);
+            } else {
+              expect(last).toMatch(/^Every order where .+ breaks at least one clue\.$/);
+              for (const o of perms(ids).filter((x) => valueOf(x) === id)) expect(brokenHolds(clues, o).length).toBeGreaterThan(0);
+            }
+          }
+        }
+      }
+    }
+    expect(seen).toBeGreaterThan(20);
+  });
+
+  it('lesson 3: “not first” and “not last” on one name leave n − 2 spots, counted from those two clues only', () => {
+    for (let seed = 1; seed <= 120; seed++) {
+      const { item, ids, clues, target } = spotPuzzle(createRng(seed), { id: 'x', skin: skinAt(seed, ORDERLY), conflict: 'ends' });
+      const m = /With (\w+) spots, these two clues leave (\w+)\.$/.exec(item.teach!.meaning!)!;
+      expect(m).not.toBeNull();
+      const two = clues.filter((c) => (c.t === 'notFirst' || c.t === 'notLast') && c.a === target);
+      const left = new Set(fitHolds(ids, two).map((o) => o.indexOf(target))).size;
+      expect(m[2]).toBe(['zero', 'one', 'two', 'three', 'four'][left]);
+      expect(m[1]).toBe(['zero', 'one', 'two', 'three', 'four', 'five'][ids.length]);
+    }
+  });
+
+  it('lesson 3: a “who” question never says “that spot”; a can’t-tell answer names who each order puts there', () => {
+    for (let seed = 1; seed <= 120; seed++) {
+      const { item, ids, clues, k } = spotPuzzle(createRng(seed), { id: 'x', skin: skinAt(seed, ORDERLY), cantTell: true, q: 'who' });
+      const m = /: ((?:[A-Z]\w*, )+[A-Z]\w*)\. Or ((?:[A-Z]\w*, )+[A-Z]\w*)\. One puts (\w+) .+, and the other puts (\w+) there\. So you can’t tell\.$/.exec(item.explain)!;
+      expect(m, item.explain).not.toBeNull();
+      const [o1, o2] = [m[1], m[2]].map((x) => x.toLowerCase().split(', '));
+      for (const o of [o1, o2]) expect(brokenHolds(clues, o)).toEqual([]);
+      expect(name(o1[k - 1])).toBe(m[3]);
+      expect(name(o2[k - 1])).toBe(m[4]);
+      expect(m[3]).not.toBe(m[4]);
+      expect(ids.length).toBe(o1.length);
+      expect(item.teach!.remember![1]).toMatch(/^Ask: “Could anyone else .+\?”$/);
+      expect(item.hint).toMatch(/^Ask: “.+\?” Try each \w+\. Cross out anyone who breaks a clue\.$/);
+    }
+  });
+
+  it('heights and wings: what a “taller than” clue means says when it is true', () => {
+    for (let seed = 1; seed <= 60; seed++) {
+      for (const skin of ['height', 'dragons'] as const) {
+        const { item, clues } = buildPuzzle(createRng(seed), { id: 'x', skin, n: 4 });
+        if (!clues.some((c) => c.t === 'before') || clues.some((c) => c.t === 'notFirst' || c.t === 'notLast')) continue;
+        expect(item.teach!.meaning).toMatch(/^“\w+ (is taller than|has longer wings than) \w+” is true when \w+ comes anywhere before \w+ in the order (tallest to shortest|longest wings to shortest)\. Others may be in between\.$/);
+      }
+    }
+  });
+
+  it('a chain of clues is told one step per sentence, never as one long run-on sentence', () => {
+    // Seed 17, lesson 1 practice l1-1 once read: "C is somewhere to the left of B, B is somewhere to the left of D,
+    // and D is somewhere to the left of A." (25 words).
+    for (let seed = 1; seed <= 100; seed++) {
+      for (const l of [0, 1]) {
+        for (const item of stop3.lessons[l].practice(createRng(seed))) {
+          for (const x of sentences(item.explain)) expect(words(x).length, x).toBeLessThanOrEqual(20);
+        }
+      }
+    }
+  });
+
+  it('every explanation after a wrong answer fits the panel: at most 480 words, about 400 at the median', () => {
+    const counts: number[] = [];
+    for (let seed = 1; seed <= 40; seed++) {
+      for (const item of all(seed)) {
+        const picks = item.kind === 'choose'
+          ? item.choices.filter((c) => c.id !== item.answer).map((c) => ({ kind: 'choose' as const, id: c.id }))
+          : item.kind === 'order' ? [{ kind: 'order' as const, ids: [...item.answer].reverse() }] : [];
+        for (const a of picks) {
+          const n = words(explanationSpeech(explanationFor(item, a), false).join(' ')).length;
+          expect(n, `seed ${seed} ${item.id}`).toBeLessThanOrEqual(480);
+          counts.push(n);
+        }
+      }
+    }
+    counts.sort((x, y) => x - y);
+    expect(counts[counts.length >> 1]).toBeLessThanOrEqual(400);
+  });
 });
 
 describe('seeded generation', () => {
@@ -383,9 +1199,15 @@ describe('broken-clue feedback', () => {
       clues: [{ t: 'first', a: 'a' }, { t: 'place', a: 'b', k: 2 }, { t: 'place', a: 'c', k: 3 }, { t: 'last', a: 'd' }],
     };
     const fb = (ids: string[]) => grade(item, { kind: 'order', ids }).feedback;
-    expect(fb(['a', 'b', 'd', 'c'])).toBe('This line breaks clues 3 and 4.');
-    expect(fb(['b', 'a', 'd', 'c'])).toBe('This line breaks clues 1, 2, 3 and 4.');
-    expect(fb(['a', 'c', 'b', 'd'])).toBe('This line breaks clues 2 and 3.');
+    const head = (ids: string[]) => fb(ids).split('\n')[0];
+    expect(head(['a', 'b', 'd', 'c'])).toBe('This line breaks clues 3 and 4.');
+    expect(head(['b', 'a', 'd', 'c'])).toBe('This line breaks clues 1, 2, 3 and 4.');
+    expect(head(['a', 'c', 'b', 'd'])).toBe('This line breaks clues 2 and 3.');
+    // Then one line per broken clue, saying where the line breaks it.
+    expect(fb(['a', 'b', 'd', 'c']).split('\n').slice(1)).toEqual([
+      'Clue 3: In your line, C is fourth, not third.',
+      'Clue 4: In your line, D is third, not last.',
+    ]);
+    expect(fb(['b', 'a', 'd', 'c']).split('\n')[1]).toBe('Clue 1: In your line, A is second, not first.');
   });
 });
-

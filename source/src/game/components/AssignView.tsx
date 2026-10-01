@@ -68,7 +68,7 @@ export function assignReady(item: AssignItem, marks: Marks): boolean {
   return item.people.every((p) => item.categories.every((c) => ticksIn(item, marks, p.id, c.id).length === 1));
 }
 
-/** The solved state ("Show me"): a tick on each answer; in a grid, a cross in every other box. */
+/** The solved state: a tick on each answer; in a grid, a cross in every other box. */
 export function solvedMarks(item: AssignItem): Marks {
   const out: Record<string, Mark> = {};
   for (const p of item.people) {
@@ -277,4 +277,3 @@ export function AssignToggles(props: AssignBodyProps) {
     </div>
   );
 }
-

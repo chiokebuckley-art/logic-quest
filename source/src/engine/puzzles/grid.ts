@@ -9,9 +9,14 @@
  *
  * Skins give the same structure different words: kids with pets and snacks, dragons with gems and caves,
  * robots with colors and jobs, and letters with numbers and colors.
+ *
+ * Every item also carries the teaching shown after a wrong answer (Item.teach, and ChoiceFeedback for each wrong
+ * choice). Its cases are boxes, lines of the grid, or whole ways to fill it, and every true / false they show is
+ * computed from the case by the same brute force (see "teaching after a wrong answer" below).
  */
 import { gridClueHolds } from '../grade';
-import type { AssignItem, Choice, ChooseItem, GridClue, MultiItem, Rng, Scene } from '../types';
+import { syncWhyWrong } from '../teach';
+import type { AssignItem, Choice, ChoiceFeedback, ChooseItem, GridClue, MultiItem, Rng, Scene, Teach, TeachCase, Truth } from '../types';
 
 const STOP = 4;
 export const CANT = 'cant';
@@ -552,6 +557,116 @@ export function answerText(cast: Cast, sol: Sol): string {
   return cast.people.map((p) => `${w.is(p.id, c1, sol[p.id][c1])} and ${w.cat(c2).is} ${w.obj(c2, sol[p.id][c2])}.`).join(' ');
 }
 
+// ---------- teaching after a wrong answer ----------
+//
+// The explanation after a miss follows docs/CONTENT_GUIDE.md ("Wrong answers: teach first"). Its cases are of
+// three kinds, and every true / false on them is computed here, never written by hand:
+//   - a box ("Ava – cat."): could / must the person have the thing, over every assignment the case allows;
+//   - a line (one row or column) in words, with the same could / must truths;
+//   - one way to fill the grid, with whether each clue (or the grid's marks) holds there.
+// Each case keeps its Basis (the clues, marks or single way it is about), so the tests can recompute every truth.
+
+/** What a case's truths are about: every assignment that fits these clues and these marks, or one assignment. */
+export interface Basis {
+  clues?: GridClue[];
+  marks?: { c: string; marks: Marks };
+  way?: Sol;
+}
+
+/** The bases of an item's teaching cases (same order as teach.cases) and of each wrong choice's example. */
+export interface Bases {
+  cases: Basis[];
+  examples: Record<string, Basis>;
+}
+
+/** Every assignment a basis allows. */
+export function basisSols(spec: Spec, b: Basis): Sol[] {
+  if (b.way) return [b.way];
+  const sols = fitting(spec, b.clues ?? []);
+  if (!b.marks) return sols;
+  const ok = new Set(fittingMarks(spec, b.marks.c, b.marks.marks));
+  return sols.filter((s) => ok.has(s));
+}
+
+/** Does one assignment agree with the marks in category c? */
+export const marksHold = (c: string, marks: Marks, s: Sol) =>
+  Object.entries(marks).every(([p, m]) => Object.entries(m).every(([val, mk]) => (s[p][c] === val) === (mk === 'yes')));
+
+/** 'kids', 'dragons', … */
+const plural = (cast: Cast) => `${cast.skin.noun}s`;
+/** 'Two', 'Three' for counts in notes. */
+const COUNT = ['No', 'One', 'Two', 'Three', 'Four'];
+
+/** Words for the teaching of one cast: truths, box cases and ways. */
+function teachWords(cast: Cast) {
+  const w = wordsFor(cast);
+  const nm = cast.nm;
+  const could = (sols: readonly Sol[], p: string, c: string, v: string): Truth => ({ who: `${nm(p)} could ${w.base(c, v)}`, value: sols.some((s) => s[p][c] === v) });
+  const must = (sols: readonly Sol[], p: string, c: string, v: string): Truth => ({ who: `${nm(p)} must ${w.base(c, v)}`, value: sols.length > 0 && sols.every((s) => s[p][c] === v) });
+  /** The truth of "Mia has the cat" in one assignment. */
+  const fact = (way: Sol, p: string, c: string, v: string): Truth => ({ who: w.is(p, c, v), value: way[p][c] === v });
+  /** What a box's status means, as a note. */
+  const markNote = (sols: readonly Sol[], p: string, c: string, v: string) => {
+    const st = cellStatus(sols, p, c, v);
+    const cell = w.cell(p, v, c);
+    return st === 'yes' ? `So ${cell} gets a ✓.` : st === 'no' ? `So ${cell} gets a ✗.` : `So ${cell} stays empty for now.`;
+  };
+  /** One box as a case: could and must, computed over `sols`. */
+  const box = (sols: readonly Sol[], p: string, c: string, v: string, label = `${w.cell(p, v, c)}.`, note = markNote(sols, p, c, v)): TeachCase => ({
+    label,
+    truths: [could(sols, p, c, v), must(sols, p, c, v)],
+    note,
+  });
+  /** One assignment in words, one short sentence per person, for some categories (default: all of them). */
+  const way = (s: Sol, cats: readonly string[] = cast.cats.map((x) => x.cat.id)): string => {
+    if (cats.length === 1) return cast.people.map((p) => `${w.is(p.id, cats[0], s[p.id][cats[0]])}.`).join(' ');
+    return answerText(cast, s);
+  };
+  return { w, nm, could, must, fact, box, way, markNote };
+}
+
+/** The assignment in `sols` that keeps the most of `prefer` true (the first one in list order on a tie). */
+function bestWay(sols: readonly Sol[], prefer: readonly GridClue[]): Sol | undefined {
+  let best: Sol | undefined;
+  let score = -1;
+  for (const s of sols) {
+    const k = prefer.filter((c) => gridClueHolds(c, s)).length;
+    if (k > score) { best = s; score = k; }
+  }
+  return best;
+}
+
+/** Terms the explanations use, defined in place. */
+const TERMS = {
+  yes: (cast: Cast, c: string) => ({ word: 'A ✓ in a box', meaning: `yes. The ${cast.skin.noun} in its row goes with the ${wordsFor(cast).cat(c).noun} in its column.` }),
+  no: (cast: Cast, c: string) => ({ word: 'A ✗ in a box', meaning: `no. The ${cast.skin.noun} in its row does not go with the ${wordsFor(cast).cat(c).noun} in its column.` }),
+  empty: { word: 'An empty box', meaning: 'you can’t tell yet.' },
+  onlyOne: { word: '“Only one left”', meaning: 'every other box in a row or column has a ✗. The last empty box gets the ✓.' },
+  cant: { word: '“Can’t tell yet”', meaning: 'more than one answer still fits, so you can’t be sure.' },
+  spread: { word: 'Spreading a ✓', meaning: 'putting a ✗ in every other box of its row and its column.' },
+  link: (cast: Cast, c1: string, c2: string) => {
+    const w = wordsFor(cast);
+    return { word: 'A linking clue', meaning: `a clue that joins a ${w.cat(c1).noun} and a ${w.cat(c2).noun}. It does not say which ${cast.skin.noun} has them.` };
+  },
+  alone: { word: '“All by itself”', meaning: 'with only that one clue. Each row and each column still gets just one ✓.' },
+  proves: { word: 'A clue “proves” a mark', meaning: 'the clue shows the mark must be right, with no guessing.' },
+} as const;
+
+/** The smallest grid: two people and two values in one category, in the cast's own words. */
+function tinyGrid(cast: Cast, c: string, ps: readonly [string, string], vs: readonly [string, string]): string[] {
+  const w = wordsFor(cast);
+  const nm = cast.nm;
+  const [a, b] = ps;
+  const [x, y] = vs;
+  return [
+    `Imagine just two ${plural(cast)}, ${nm(a)} and ${nm(b)}, and just two ${w.cat(c).plural}, ${w.obj(c, x)} and ${w.obj(c, y)}.`,
+    `Say a clue tells you ${w.not(a, c, x)}. Put a ✗ in ${w.cell(a, x, c)}.`,
+    `Now ${nm(a)}’s row has one empty box left: ${w.obj(c, y)}. So ${w.is(a, c, y)}.`,
+    `Put a ✓ in ${w.cell(a, y, c)}. Spread it down its column: ${w.cell(b, y, c)} gets a ✗.`,
+    `Now ${nm(b)}’s row has one empty box left: ${w.obj(c, x)}. So ${w.is(b, c, x)}.`,
+  ];
+}
+
 // ---------- shared item parts ----------
 
 /** Puzzle data kept next to the item so tests can re-check it by brute force. */
@@ -609,8 +724,42 @@ export interface GridOpts {
   n?: number;
 }
 
+/**
+ * Teaching for a whole grid. grade() names the clue an answer breaks; this shows how the clues fill the grid, one ✓
+ * at a time (the human solver's steps, each with its reason), then checks every clue against the answer.
+ */
+function gridTeach(cast: Cast, sol: Sol, clues: readonly GridClue[], ticks: readonly Step[]): { teach: Teach; bases: Basis[] } {
+  const t = teachWords(cast);
+  const [c1, c2] = cast.cats.map((x) => x.cat.id);
+  const shown = ticks.slice(0, 3);
+  const steps: TeachCase[] = shown.map((s, k) => ({ label: `Step ${k + 1}: ${t.w.is(s.p, s.c, s.v)}.`, note: tickText(cast, clues, s) }));
+  const check: TeachCase = {
+    label: `Check the answer. ${t.way(sol)}`,
+    truths: clues.map((cl, i) => ({ who: `Clue ${i + 1}`, value: gridClueHolds(cl, sol) })),
+    note: 'Every clue is true, so this is the answer.',
+  };
+  // The tiny example agrees with the answer: a keeps its own value y, and b is the one who has x.
+  const a = cast.people[0].id;
+  const y = sol[a][c1];
+  const x = cast.cats[0].vals.map((v) => v.id).find((v) => v !== y)!;
+  const b = cast.people.map((p) => p.id).find((q) => sol[q][c1] === x)!;
+  return {
+    teach: {
+      rule: c2 ? 'Every clue must be true. In each part of the grid, each row and each column gets exactly one ✓.' : 'Every clue must be true. Each row and each column gets exactly one ✓.',
+      // Every word the steps and the Remember lines use: “Spread every ✓” needs spreading in both kinds of grid.
+      terms: c2 ? [TERMS.onlyOne, TERMS.spread, TERMS.link(cast, c1, c2)] : [TERMS.yes(cast, c1), TERMS.onlyOne, TERMS.spread],
+      meaning: 'Just one way to fill the grid makes every clue true. Find it one mark at a time, with a reason for each mark.',
+      casesTitle: shown.length < ticks.length ? `The first ${COUNT[shown.length].toLowerCase()} ✓ marks, step by step` : 'How the clues fill the grid, step by step',
+      cases: [...steps, check],
+      remember: ['Put in the clue marks. Spread every ✓. Then look for only one left.', 'Ask: “Does my grid make every clue true?”'],
+      simpler: tinyGrid(cast, c1, [a, b], [x, y]),
+    },
+    bases: [...steps.map(() => ({})), { way: sol }],
+  };
+}
+
 /** A full logic grid to fill in (AssignItem, layout 'grid'). */
-export function gridPuzzle(rng: Rng, o: GridOpts): Built<AssignItem> & { clues: GridClue[] } {
+export function gridPuzzle(rng: Rng, o: GridOpts): Built<AssignItem> & { clues: GridClue[]; bases: Bases; steps: Step[] } {
   const skin = SKINS[o.skin];
   const n = o.n ?? 3;
   const pz = o.ncat === 1
@@ -623,6 +772,7 @@ export function gridPuzzle(rng: Rng, o: GridOpts): Built<AssignItem> & { clues: 
   const first = ticks[0];
   const next = first.why.k === 'clue' ? ticks.find((s) => s.why.k !== 'clue') : undefined;
   const lead = next ? `${tickText(cast, clues, first)} Then ${lowerFirst(tickText(cast, clues, next))}` : tickText(cast, clues, first);
+  const { teach, bases } = gridTeach(cast, sol, clues, ticks);
   const item: AssignItem = {
     kind: 'assign',
     layout: 'grid',
@@ -636,18 +786,24 @@ export function gridPuzzle(rng: Rng, o: GridOpts): Built<AssignItem> & { clues: 
     categories: cast.cats.map(({ cat, vals }) => ({ id: cat.id, label: cat.label, values: vals.map((x) => ({ id: x.id, label: x.label })), oneEach: true })),
     answer: Object.fromEntries(cast.people.map((p) => [p.id, { ...sol[p.id] }])),
     gridClues: clues,
-    explain: `${lead} Keep going the same way until every row has one ✓. ${answerText(cast, sol)}`,
+    explain: `${lead} Keep going the same way until every row has one ✓${o.ncat === 2 ? ' in each part of the grid' : ''}. ${answerText(cast, sol)}`,
     hint: o.ncat === 1
       ? 'Put in the marks the clues give you. Then look for a row or column with just one empty box.'
       : 'Put in the marks the clues give you. A linking clue lets you carry a ✓ or ✗ from one part of the grid to the other.',
     seconds: o.ncat === 1 ? 150 : 180,
+    teach,
   };
-  return { item, cast, sol, clues };
+  return { item, cast, sol, clues, bases: { cases: bases, examples: {} }, steps: ticks.slice(0, 3) };
 }
 
 // ---------- lesson 1: one clue, one box ----------
 
 export type MarkClue = 'is' | 'isnt' | 'either';
+/**
+ * How a wrong box misses the clue's box: in the right row but the wrong column, the right column but the wrong
+ * row, neither, or (for an "or" clue) one of the two things the clue names.
+ */
+export type MarkMiss = 'row' | 'col' | 'neither' | 'named';
 
 export interface MarkOpts {
   id: string;
@@ -655,8 +811,8 @@ export interface MarkOpts {
   t?: MarkClue;
 }
 
-/** "A clue says: Leo does not have the dog. Which box gets a ✗?" with an empty grid to look at. */
-export function markPuzzle(rng: Rng, o: MarkOpts): Built<ChooseItem> & { clue: GridClue; ask: Mark; target: { p: string; v: string } } {
+/** "A clue says: Leo does not have the dog. Which box gets a ✗ from this clue?" with an empty grid to look at. */
+export function markPuzzle(rng: Rng, o: MarkOpts): Built<ChooseItem> & { clue: GridClue; ask: Mark; target: { p: string; v: string }; bases: Bases; kinds: Record<string, MarkMiss> } {
   const skin = SKINS[o.skin];
   const t = o.t ?? rng.pick(['is', 'isnt', 'either'] as const);
   for (let tries = 0; tries < 200; tries++) {
@@ -665,39 +821,30 @@ export function markPuzzle(rng: Rng, o: MarkOpts): Built<ChooseItem> & { clue: G
     const c = cast.cats[0].cat.id;
     const vals = cast.spec.cats[0].values;
     const ppl = cast.spec.people;
-    const w = wordsFor(cast);
+    const tw = teachWords(cast);
+    const { w, nm } = tw;
     const p = rng.pick(ppl);
     const mine = sol[p][c];
     const others = rng.shuffle(ppl.filter((q) => q !== p));
     let clue: GridClue;
     let ask: Mark;
     let target: { p: string; v: string };
-    let wrong: { p: string; v: string; why: string; status: Mark | 'open' }[];
+    let wrong: { p: string; v: string; kind: MarkMiss }[];
     if (t === 'is') {
       clue = { t: 'is', p, c, v: mine };
       ask = 'yes';
       target = { p, v: mine };
       const rowV = rng.pick(vals.filter((x) => x !== mine));
-      const q = others[0], q2 = others[1];
       const otherV = rng.pick(vals.filter((x) => x !== mine));
-      wrong = [
-        { p, v: rowV, status: 'no', why: `${w.one(p, c)}, so ${w.cell(p, rowV, c)} gets a ✗, not a ✓.` },
-        { p: q, v: mine, status: 'no', why: `${w.onlyOne(c, mine)}, so ${w.cell(q, mine, c)} gets a ✗, not a ✓.` },
-        { p: q2, v: otherV, status: 'open', why: `The clue is about ${cast.nm(p)} and ${w.obj(c, mine)}. It does not decide ${w.cell(q2, otherV, c)} yet.` },
-      ];
+      wrong = [{ p, v: rowV, kind: 'row' }, { p: others[0], v: mine, kind: 'col' }, { p: others[1], v: otherV, kind: 'neither' }];
     } else if (t === 'isnt') {
       const bad = rng.pick(vals.filter((x) => x !== mine));
       clue = { t: 'isnt', p, c, v: bad };
       ask = 'no';
       target = { p, v: bad };
       const rowV = rng.pick(vals.filter((x) => x !== bad));
-      const q = others[0], q2 = others[1];
       const otherV = rng.pick(vals.filter((x) => x !== bad));
-      wrong = [
-        { p, v: rowV, status: 'open', why: `The clue is about ${w.obj(c, bad)}, not ${w.obj(c, rowV)}. ${cast.nm(p)} could still ${w.base(c, rowV)}.` },
-        { p: q, v: bad, status: 'open', why: `The clue is about ${cast.nm(p)}, not ${cast.nm(q)}. ${cast.nm(q)} could still ${w.base(c, bad)}.` },
-        { p: q2, v: otherV, status: 'open', why: `The clue is about ${cast.nm(p)} and ${w.obj(c, bad)}. It does not decide ${w.cell(q2, otherV, c)} yet.` },
-      ];
+      wrong = [{ p, v: rowV, kind: 'row' }, { p: others[0], v: bad, kind: 'col' }, { p: others[1], v: otherV, kind: 'neither' }];
     } else {
       const v2 = rng.pick(vals.filter((x) => x !== mine));
       const [a, b] = vals.filter((x) => x === mine || x === v2);
@@ -705,48 +852,105 @@ export function markPuzzle(rng: Rng, o: MarkOpts): Built<ChooseItem> & { clue: G
       clue = { t: 'either', p, c, v1: a, v2: b };
       ask = 'no';
       target = { p, v: left };
-      const q = others[0];
-      const said = `The clue says ${cast.nm(p)} ${w.cat(c).is} ${w.obj(c, a)} or ${w.obj(c, b)}.`;
-      wrong = [
-        { p, v: a, status: 'open', why: `${said} So ${cast.nm(p)} could ${w.base(c, a)}.` },
-        { p, v: b, status: 'open', why: `${said} So ${cast.nm(p)} could ${w.base(c, b)}.` },
-        { p: q, v: left, status: 'open', why: `The clue is about ${cast.nm(p)}, not ${cast.nm(q)}. ${cast.nm(q)} could still ${w.base(c, left)}.` },
-      ];
+      wrong = [{ p, v: a, kind: 'named' }, { p, v: b, kind: 'named' }, { p: others[0], v: left, kind: 'col' }];
     }
-    // Check every choice against the clue alone.
+    // Check every box against the clue alone. The target gets the asked mark. A "has" clue also gives a ✗ to the
+    // rest of its row and column; every other box stays open. Nothing else is decided, so the texts below hold.
     const sols = fitting(cast.spec, [clue]);
-    // The target gets the asked mark; each other choice is what its message says (✗, or still open).
-    if (cellStatus(sols, target.p, c, target.v) !== ask) continue;
-    if (wrong.some((x) => x.status === ask || cellStatus(sols, x.p, c, x.v) !== x.status)) continue;
-    const cells = gridOrder(cast, 0, [target, ...wrong]);
-    const whyWrong = Object.fromEntries(wrong.map((x) => [cellId(x.p, x.v), x.why]));
+    const status = (q: string, x: string) => cellStatus(sols, q, c, x);
+    if (status(target.p, target.v) !== ask) continue;
+    const expected = (q: string, x: string): Mark | 'open' => (q === target.p && x === target.v ? ask : t === 'is' && (q === p || x === mine) ? 'no' : 'open');
+    if (!ppl.every((q) => vals.every((x) => status(q, x) === expected(q, x)))) continue;
+
     const text = clueText(cast, clue);
-    const cell = w.cell(target.p, target.v, c);
+    const T = w.cell(target.p, target.v, c);
+    const col = `the ${w.val(c, target.v).label} column`;
+    const P = nm(p);
+    const catNoun = w.cat(c).noun;
+    const says = clue.t === 'either' ? `The clue says ${P} ${w.cat(c).is} ${w.obj(c, clue.v1)} or ${w.obj(c, clue.v2)}.` : `The clue says ${clue.t === 'is' ? w.is(p, c, mine) : w.not(p, c, target.v)}.`;
+    const puts = `It puts a ${ask === 'yes' ? '✓' : '✗'} in ${T}.`;
+    const heads: Record<MarkMiss, string> = {
+      row: `Your box is in ${P}’s row, but not in ${col}.`,
+      col: `Your box is in ${col}, but not in ${P}’s row.`,
+      neither: `Your box is not in ${P}’s row or ${col}.`,
+      named: `Your box is one of the two ${w.cat(c).plural} the clue names.`,
+    };
+    const detail = (x: { p: string; v: string; kind: MarkMiss }): string[] => {
+      const cell = w.cell(x.p, x.v, c);
+      const Q = nm(x.p);
+      if (x.kind === 'named') return [says, `So ${P} could ${w.base(c, x.v)}. A ✗ in ${cell} would say ${P} can’t.`, `The ✗ goes on the ${catNoun} the clue leaves out: ${T}.`];
+      if (clue.t === 'is') {
+        if (x.kind === 'row') return [`${says} ${puts}`, `${w.one(p, c)}. So ${cell} gets a ✗, not a ✓.`];
+        if (x.kind === 'col') return [`${says} ${puts}`, `${w.onlyOne(c, mine)}. So ${cell} gets a ✗, not a ✓.`];
+        const [v1, v2] = options(sols, x.p, c, vals);
+        const alt = v1 === x.v ? v2 : v1;
+        return [`${says} ${puts}`, `${cell} is in a different row and a different column. ${Q} could ${w.base(c, x.v)}, but ${Q} could also ${w.base(c, alt)}. So ${cell} stays empty for now.`];
+      }
+      if (clue.t === 'either') return [says, `It is about ${P}’s row only. ${Q} could still ${w.base(c, x.v)}, so ${cell} stays empty.`];
+      if (x.kind === 'row') return [`${says} ${puts}`, `The clue says nothing about ${w.obj(c, x.v)}. ${P} could still ${w.base(c, x.v)}, so ${cell} stays empty.`];
+      if (x.kind === 'col') return [`${says} ${puts}`, `The clue is about ${P}, not ${Q}. ${Q} could still ${w.base(c, x.v)}, so ${cell} stays empty.`];
+      return [`${says} ${puts}`, `${cell} is in a different row and a different column. ${Q} could still ${w.base(c, x.v)}, so ${cell} stays empty.`];
+    };
+    const feedback: Record<string, ChoiceFeedback> = {};
+    const examples: Record<string, Basis> = {};
+    const kinds: Record<string, MarkMiss> = {};
+    for (const x of wrong) {
+      const id = cellId(x.p, x.v);
+      feedback[id] = { headline: heads[x.kind], detail: detail(x), example: tw.box(sols, x.p, c, x.v) };
+      examples[id] = { clues: [clue] };
+      kinds[id] = x.kind;
+    }
+    // Cases: the clue's box, then one box of each other kind (a ✗ when the clue gives one, an empty box).
+    const caseBoxes = t === 'is' ? [target, wrong[0], wrong[2]] : t === 'isnt' ? [target, wrong[0], wrong[1]] : [target, wrong[0], wrong[2]];
+    const [n1, n2] = clue.t === 'either' ? [clue.v1, clue.v2] : [mine, mine];
+    const teach: Teach = {
+      rule: t === 'either'
+        ? `An “or” clue names two ${w.cat(c).plural}. The ${catNoun} it leaves out gets a ✗ in the named ${skin.noun}’s row.`
+        : `A clue gives its mark to one box: where the named ${skin.noun}’s row meets the named ${catNoun}’s column.`,
+      terms: [TERMS.yes(cast, c), TERMS.no(cast, c), TERMS.empty],
+      meaning: t === 'is'
+        ? `“${text}” This puts a ✓ in one box: ${T}. Then the rest of ${P}’s row and the rest of ${col} get a ✗.`
+        : t === 'isnt'
+          ? `“${text}” This puts a ✗ in one box: ${T}. It does not decide any other box.`
+          : `“${text}” This means ${P} ${w.cat(c).is} one of two: ${w.obj(c, n1)} or ${w.obj(c, n2)}. So ${T} gets a ✗. It does not decide any other box.`,
+      casesTitle: 'What does the clue say about each box?',
+      cases: caseBoxes.map((x) => tw.box(sols, x.p, c, x.v)),
+      remember: t === 'either'
+        ? [`An “or” clue gives a ✗ to the ${catNoun} it leaves out.`, `Ask: “Which ${catNoun} does the clue leave out?”`]
+        : ['A clue’s mark goes where its row and its column meet.', 'Ask: “Which row and which column does this clue name?”'],
+      simpler: t === 'either'
+        ? [`There are three ${w.cat(c).plural}: ${joinNames(vals.map((x) => w.obj(c, x)))}.`, `The clue names two of them for ${P}: ${w.obj(c, n1)} and ${w.obj(c, n2)}.`, `The one it leaves out is ${w.obj(c, target.v)}. So ${T} gets a ✗.`]
+        : [`Put one finger on ${P}’s row. Put another finger on ${col}.`, `Slide them until they meet. They meet at ${T}.`, `The clue says ${ask === 'yes' ? 'yes' : 'no'}, so ${T} gets a ${ask === 'yes' ? '✓' : '✗'}.`],
+    };
+    const cell = T;
     const explain = t === 'is'
       ? `The clue says ${w.is(p, c, mine)}. So ${cell} gets a ✓.`
       : t === 'isnt'
         ? `The clue says ${w.not(p, c, target.v)}. So ${cell} gets a ✗.`
-        : `${cast.nm(p)} ${w.cat(c).is} one of the two named in the clue. So ${w.not(p, c, target.v)}, and ${cell} gets a ✗.`;
+        : `${P} ${w.cat(c).is} one of the two named in the clue. So ${w.not(p, c, target.v)}, and ${cell} gets a ✗.`;
     const hint = t === 'either'
       ? `The clue names two ${w.cat(c).plural}. What about the third one?`
       : t === 'is'
         ? 'A ✓ goes where the right row meets the right column.'
-        : 'A clue with “not” gives a ✗. Find the box where that row and column meet.';
+        : 'A clue with “not” gives a ✗. Find the box where the right row and column meet.';
+    const cells = gridOrder(cast, 0, [target, ...wrong]);
     const item: ChooseItem = {
       kind: 'choose',
       id: o.id,
       stop: STOP,
       lesson: 's4.l1',
       skill: 's4.grid-marks',
-      prompt: `${settingText(cast)} A clue says: “${text}” Which box gets a ${ask === 'yes' ? '✓' : '✗'}?`,
+      prompt: `${settingText(cast)} A clue says: “${text}” Which box gets a ${ask === 'yes' ? '✓' : '✗'} from this clue?`,
       scene: gridScene(cast, 0, {}),
       choices: cells.map((x) => ({ id: cellId(x.p, x.v), label: w.cell(x.p, x.v, c) })),
       answer: cellId(target.p, target.v),
-      whyWrong,
+      feedback,
       explain,
       hint,
+      teach,
     };
-    return { item, cast, sol, clue, ask, target };
+    syncWhyWrong(item);
+    return { item, cast, sol, clue, ask, target, bases: { cases: caseBoxes.map(() => ({ clues: [clue] })), examples }, kinds };
   }
   throw new Error('markPuzzle: no puzzle found');
 }
@@ -754,6 +958,8 @@ export function markPuzzle(rng: Rng, o: MarkOpts): Built<ChooseItem> & { clue: G
 // ---------- lesson 2: only one left ----------
 
 export type OnlyMode = 'col' | 'row' | 'cant';
+/** How a wrong pick misses: its box has a ✗; “Can’t tell yet” when one box is left; one of two empty boxes. */
+export type OnlyMiss = 'crossed' | 'cant' | 'open';
 
 export interface OnlyOpts {
   id: string;
@@ -766,7 +972,7 @@ export interface OnlyOpts {
 }
 
 /** A partly marked grid and "Who must have the fish?" or "Which pet must Leo have?", with Can't tell yet. */
-export function onlyOnePuzzle(rng: Rng, o: OnlyOpts): Built<ChooseItem> & { marks: Marks; ask: 'col' | 'row'; p: string; val: string } {
+export function onlyOnePuzzle(rng: Rng, o: OnlyOpts): Built<ChooseItem> & { marks: Marks; ask: 'col' | 'row'; p: string; val: string; bases: Bases; kinds: Record<string, OnlyMiss>; boundary: Marks } {
   const skin = SKINS[o.skin];
   const ask: 'col' | 'row' = o.mode === 'cant' ? (o.ask ?? (rng.chance(0.6) ? 'col' : 'row')) : o.mode;
   for (let tries = 0; tries < 500; tries++) {
@@ -809,65 +1015,183 @@ export function onlyOnePuzzle(rng: Rng, o: OnlyOpts): Built<ChooseItem> & { mark
     if (o.mode === 'cant' && ask === 'col' && !extra.some(({ q }) => pair.includes(q))) continue;
 
     const sols = fittingMarks(cast.spec, c, marks);
-    const who = ask === 'col' ? holders(sols, c, val, ppl) : [];
-    const opts = ask === 'row' ? options(sols, p, c, vals) : [];
-    const whyWrong: Record<string, string> = {};
-    let answer: string;
+    const cant = o.mode === 'cant';
+    if (ask === 'col') {
+      const who = holders(sols, c, val, ppl);
+      if (cant ? who.length !== 2 || !pair.every((q) => who.includes(q)) : who.length !== 1 || who[0] !== holder) continue;
+    } else {
+      const opts = options(sols, p, c, vals);
+      if (cant ? opts.length !== 2 || !pair.every((x) => opts.includes(x)) : opts.length !== 1 || opts[0] !== mine) continue;
+    }
+
+    // The line the question is about: the people in the column, or the values in the row.
+    const tw = teachWords(cast);
+    const P = nm(p);
+    const catNoun = w.cat(c).noun;
+    const colName = `the ${w.val(c, val).label} column`;
+    const slots = ask === 'col' ? ppl : vals;
+    const boxOf = (s: string): [string, string] => (ask === 'col' ? [s, val] : [p, s]);
+    const crossedIn = (m: Marks) => slots.filter((s) => { const [q, x] = boxOf(s); return m[q][x] === 'no'; });
+    const crossedS = crossedIn(marks);
+    const openS = slots.filter((s) => !crossedS.includes(s));
+    const say = (s: string) => (ask === 'col' ? nm(s) : w.obj(c, s));
+    const lineText = (lead: string, cr: readonly string[], op: readonly string[]) => {
+      const has = cr.length === 1 ? 'has' : 'have';
+      const empty = op.length === 1
+        ? ask === 'col' ? `${nm(op[0])}’s box is empty.` : `The box for ${w.obj(c, op[0])} is empty.`
+        : `The boxes for ${joinNames(op.map(say))} are empty.`;
+      return ask === 'col'
+        ? `${lead}, ${joinNames(cr.map(nm))} ${has} a ✗ in ${colName}. ${empty}`
+        : `${lead}, ${P}’s ${cr.length === 1 ? 'box' : 'boxes'} for ${joinNames(cr.map(say))} ${has} a ✗. ${empty}`;
+    };
+    // One empty box: it must get the ✓. Two: each could still get it (computed over every mark in the grid, not
+    // only this line's), and only then is it “Can’t tell yet”.
+    const lineTruths = (ss: readonly Sol[], op: readonly string[]) =>
+      op.map((s) => { const [q, x] = boxOf(s); return op.length === 1 ? tw.must(ss, q, c, x) : tw.could(ss, q, c, x); });
+    const lineCase = (lead: string, ss: readonly Sol[], cr: readonly string[], op: readonly string[]): TeachCase => {
+      const truths = lineTruths(ss, op);
+      if (!truths.every((t) => t.value)) throw new Error('onlyOnePuzzle: a line case must be decided by its empty boxes');
+      const note = op.length === 1 ? 'One empty box is left, so it gets the ✓.' : `${COUNT[op.length]} boxes are empty, and each could still get the ✓. So you can’t tell yet.`;
+      return { label: lineText(lead, cr, op), truths, note };
+    };
+    const nowCase = lineCase('In this grid', sols, crossedS, openS);
+    // The boundary: the same line with one more empty box (when one is left) or one fewer (when two are left), in a
+    // grid with no other marks. (With this grid's other marks kept, the other rows and columns could still decide it.)
+    const lineMarks = (cr: readonly string[]): Marks => {
+      const m: Marks = Object.fromEntries(ppl.map((q) => [q, {}]));
+      for (const s of cr) { const [q, x] = boxOf(s); m[q][x] = 'no'; }
+      return m;
+    };
+    const crB = cant ? slots.filter((s) => crossedS.includes(s) || s === openS[openS.length - 1]) : crossedS.slice(1);
+    const boundary = lineMarks(crB);
+    const solsB = fittingMarks(cast.spec, c, boundary);
+    const opB = slots.filter((s) => !crB.includes(s));
+    const thenCase = lineCase('In a grid with no other marks', solsB, crB, opB);
+
+    const H = ask === 'col' ? holder : mine;
+    const answer = cant ? CANT : H;
+    const wrongIds = [...slots, CANT].filter((id) => id !== answer);
+    const feedback: Record<string, ChoiceFeedback> = {};
+    const examples: Record<string, Basis> = {};
+    const kinds: Record<string, OnlyMiss> = {};
+    const gridBasis: Basis = { marks: { c, marks } };
+    for (const id of wrongIds) {
+      if (id === CANT) {
+        kinds[id] = 'cant';
+        feedback[id] = ask === 'col'
+          ? {
+            headline: `Only one box in ${colName} is empty, so you can tell.`,
+            detail: [`${joinNames(crossedS.map(nm))} ${crossedS.length === 1 ? 'has' : 'have'} a ✗ in ${colName}.`, `${nm(H)}’s box is the only one left. Each ${catNoun} goes to one ${skin.noun}, so ${nm(H)} must ${w.base(c, val)}.`],
+            example: nowCase,
+          }
+          : {
+            headline: `Only one box in ${P}’s row is empty, so you can tell.`,
+            detail: [`${P}’s boxes for ${joinNames(crossedS.map(say))} have a ✗.`, `${w.one(p, c)}, so ${P} must ${w.base(c, mine)}.`],
+            example: nowCase,
+          };
+        examples[id] = gridBasis;
+      } else if (crossedS.includes(id)) {
+        kinds[id] = 'crossed';
+        const [q, x] = boxOf(id);
+        const right = cant
+          ? ask === 'col'
+            ? `Only ${joinNames(openS.map(nm))} still have an empty box in ${colName}. So you can’t tell yet.`
+            : `The boxes for ${joinNames(openS.map(say))} are still empty. So you can’t tell yet.`
+          : ask === 'col'
+            ? `Only ${nm(H)}’s box in ${colName} is empty. So ${nm(H)} must ${w.base(c, val)}.`
+            : `Only the box for ${w.obj(c, mine)} is left in ${P}’s row. So ${P} must ${w.base(c, mine)}.`;
+        feedback[id] = {
+          headline: ask === 'col' ? `${nm(q)}’s box in ${colName} has a ✗.` : `${P}’s box for ${w.obj(c, x)} has a ✗.`,
+          detail: [`A ✗ means no. So ${nm(q)} can’t ${w.base(c, x)}.`, right],
+          // The pick could not, and the line's empty boxes: the one that must, or the two that each could.
+          example: { label: nowCase.label, truths: [tw.could(sols, q, c, x), ...nowCase.truths!], note: nowCase.note },
+        };
+        examples[id] = gridBasis;
+      } else {
+        // One of two empty boxes: show a way that fits every mark where the other one gets the ✓.
+        kinds[id] = 'open';
+        const other = openS.find((s) => s !== id)!;
+        const [oq, ox] = boxOf(other);
+        const way = sols.find((s) => s[oq][c] === ox)!;
+        const [q, x] = boxOf(id);
+        const tempt = ask === 'col'
+          ? [id, other].flatMap((r) => {
+            const off = vals.find((y) => y !== val && marks[r][y] === 'no');
+            return off ? [`${nm(r)}’s ✗ for ${w.obj(c, off)} is in a different column, so it does not decide ${w.obj(c, val)}.`] : [];
+          })
+          : [];
+        feedback[id] = {
+          headline: ask === 'col' ? `${nm(id)} could ${w.base(c, val)}, but so could ${nm(other)}.` : `${P} could ${w.base(c, id)}, but ${P} could ${w.base(c, other)} too.`,
+          detail: [
+            ask === 'col' ? `Two boxes in ${colName} are still empty: ${joinNames(openS.map((s) => `${nm(s)}’s`))}.` : `Two boxes in ${P}’s row are still empty: ${joinNames(openS.map(say))}.`,
+            ...tempt,
+            'So you can’t tell yet.',
+          ],
+          example: {
+            label: `One way that fits every mark: ${tw.way(way)}`,
+            truths: [{ who: 'Fits every mark in the grid', value: marksHold(c, marks, way) }, tw.fact(way, q, c, x)],
+            note: `So ${nm(q)} does not have to ${w.base(c, x)}.`,
+          },
+        };
+        examples[id] = { way };
+      }
+    }
+
     let explain: string;
     let choices: Choice[];
     if (ask === 'col') {
       choices = [...cast.people, CANT_YET];
-      const col = `the ${w.val(c, val).label} column`;
-      for (const q of ppl) if (marks[q][val] === 'no') whyWrong[q] = `${nm(q)} has a ✗ in ${col}, so ${nm(q)} can’t ${w.base(c, val)}.`;
-      if (o.mode === 'cant') {
-        if (who.length !== 2 || !pair.every((q) => who.includes(q))) continue;
-        answer = CANT;
+      if (cant) {
         const [a, b] = [...pair].sort();
-        whyWrong[a] = `${nm(a)} could ${w.base(c, val)}, but so could ${nm(b)}. The grid does not decide between them yet.`;
-        whyWrong[b] = `${nm(b)} could ${w.base(c, val)}, but so could ${nm(a)}. The grid does not decide between them yet.`;
-        explain = `Only ${nm(a)} and ${nm(b)} have an empty box in ${col}. Either one could still ${w.base(c, val)}. So you can’t tell yet.`;
+        explain = `Only ${nm(a)} and ${nm(b)} have an empty box in ${colName}. Either one could still ${w.base(c, val)}. So you can’t tell yet.`;
       } else {
-        if (who.length !== 1 || who[0] !== holder) continue;
-        answer = holder;
         const rest = ppl.filter((q) => q !== holder).map(nm);
-        explain = `${joinNames(rest)} ${rest.length === 2 ? 'both have' : 'all have'} a ✗ in ${col}. Only ${nm(holder)}’s box is left. So ${nm(holder)} must ${w.base(c, val)}.`;
-        whyWrong[CANT] = `Every other box in ${col} has a ✗. Only ${nm(holder)} is left, so ${nm(holder)} must ${w.base(c, val)}.`;
+        explain = `${joinNames(rest)} ${rest.length === 2 ? 'both have' : 'all have'} a ✗ in ${colName}. Only ${nm(holder)}’s box is left. So ${nm(holder)} must ${w.base(c, val)}.`;
       }
     } else {
       choices = [...cast.cats[0].vals.map((x) => ({ id: x.id, label: cap(x.label) })), CANT_YET];
-      for (const x of vals) if (marks[p][x] === 'no') whyWrong[x] = `${nm(p)}’s box for ${w.obj(c, x)} has a ✗, so ${nm(p)} can’t ${w.base(c, x)}.`;
-      if (o.mode === 'cant') {
-        if (opts.length !== 2 || !pair.every((x) => opts.includes(x))) continue;
-        answer = CANT;
+      if (cant) {
         const [a, b] = vals.filter((x) => pair.includes(x));
-        whyWrong[a] = `${nm(p)} could ${w.base(c, a)}, but ${nm(p)} could ${w.base(c, b)} too. The grid does not decide it yet.`;
-        whyWrong[b] = `${nm(p)} could ${w.base(c, b)}, but ${nm(p)} could ${w.base(c, a)} too. The grid does not decide it yet.`;
-        explain = `${nm(p)}’s row still has two empty boxes: ${w.obj(c, a)} and ${w.obj(c, b)}. Either one could still be right. So you can’t tell yet.`;
+        explain = `${P}’s row still has two empty boxes: ${w.obj(c, a)} and ${w.obj(c, b)}. Either one could still be right. So you can’t tell yet.`;
       } else {
-        if (opts.length !== 1 || opts[0] !== mine) continue;
-        answer = mine;
         const crossed = vals.filter((x) => x !== mine).map((x) => w.obj(c, x));
-        explain = `In ${nm(p)}’s row, the boxes for ${joinNames(crossed)} have a ✗. Only the box for ${w.obj(c, mine)} is left. So ${nm(p)} must ${w.base(c, mine)}.`;
-        whyWrong[CANT] = `Every other box in ${nm(p)}’s row has a ✗. Only the box for ${w.obj(c, mine)} is left, so ${nm(p)} must ${w.base(c, mine)}.`;
+        explain = `In ${P}’s row, the boxes for ${joinNames(crossed)} have a ✗. Only the box for ${w.obj(c, mine)} is left. So ${P} must ${w.base(c, mine)}.`;
       }
     }
-    const question = ask === 'col' ? `${cast.skin.who} must ${w.base(c, val)}?` : fill(w.cat(c).ask, { p: nm(p) });
+    const teach: Teach = {
+      rule: 'When every other box in a row or column has a ✗, the last empty box gets the ✓.',
+      terms: [TERMS.no(cast, c), TERMS.onlyOne, TERMS.cant],
+      meaning: ask === 'col'
+        ? `The question is about ${colName}. Each ${catNoun} goes to one ${skin.noun}, so count the empty boxes in ${colName}.`
+        : `The question is about ${P}’s row. ${w.one(p, c)}, so count the empty boxes in ${P}’s row.`,
+      casesTitle: 'One empty box, or more than one?',
+      cases: [nowCase, thenCase],
+      // Two empty boxes in one line do not by themselves mean “Can’t tell yet”: another row or column can still rule
+      // one out (lesson 2’s “Count the empty boxes” card says so too).
+      remember: ['One empty box left: it gets the ✓. Two or more: check the other marks before you say “Can’t tell yet.”', 'Ask: “How many empty boxes are left in this row or column?”'],
+      simpler: ask === 'col'
+        ? [`Start with ${colName}. Each ✗ there says one ${skin.noun} can’t ${w.base(c, val)}.`, `If one box is left, the ${skin.noun} in its row must ${w.base(c, val)}.`, 'If two boxes are left, look at the other marks too.', 'If they do not rule out one of the two, you can’t tell yet.']
+        : [`Start with ${P}’s row. Each ✗ there rules out one ${catNoun} for ${P}.`, `If one box is left, the ${catNoun} in its column is the answer.`, 'If two boxes are left, look at the other marks too.', 'If they do not rule out one of the two, you can’t tell yet.'],
+    };
+    const question = ask === 'col' ? `${cast.skin.who} must ${w.base(c, val)}?` : fill(w.cat(c).ask, { p: P });
     const item: ChooseItem = {
       kind: 'choose',
       id: o.id,
       stop: STOP,
       lesson: 's4.l2',
-      skill: o.mode === 'cant' ? 's4.not-decided' : 's4.only-one-left',
+      skill: cant ? 's4.not-decided' : 's4.only-one-left',
       prompt: `${settingText(cast)} Look at the grid. ${question}`,
       scene: gridScene(cast, 0, marks),
       choices,
       answer,
-      whyWrong,
+      feedback,
       explain,
-      hint: ask === 'col' ? `Count the empty boxes in the ${w.val(c, val).label} column.` : `Count the empty boxes in ${nm(p)}’s row.`,
-      ...(o.mode === 'cant' ? { conflict: true } : {}),
+      hint: ask === 'col' ? `Count the empty boxes in ${colName}.` : `Count the empty boxes in ${P}’s row.`,
+      ...(cant ? { conflict: true } : {}),
+      teach,
     };
-    return { item, cast, sol, marks, ask, p: ask === 'row' ? p : holder, val };
+    syncWhyWrong(item);
+    return { item, cast, sol, marks, ask, p: ask === 'row' ? p : holder, val, bases: { cases: [gridBasis, { marks: { c, marks: boundary } }], examples }, kinds, boundary };
   }
   throw new Error('onlyOnePuzzle: no puzzle found');
 }
@@ -882,8 +1206,8 @@ export interface SpreadOpts {
   n?: number;
 }
 
-/** "Mia has the cat. Which of these boxes must now get a ✗?" (MultiItem). */
-export function spreadPuzzle(rng: Rng, o: SpreadOpts): Built<MultiItem> & { marks: Marks; p: string; val: string } {
+/** "Mia has the cat, so Mia – cat gets a ✓. Choose every box that must now get a ✗." (MultiItem). */
+export function spreadPuzzle(rng: Rng, o: SpreadOpts): Built<MultiItem> & { marks: Marks; p: string; val: string; bases: Bases } {
   const skin = SKINS[o.skin];
   for (let tries = 0; tries < 200; tries++) {
     const n = o.n ?? rng.pick([3, 3, 4]);
@@ -912,36 +1236,70 @@ export function spreadPuzzle(rng: Rng, o: SpreadOpts): Built<MultiItem> & { mark
     const must = picked.filter((x) => cellStatus(sols, x.p, c, x.v) === 'no');
     const open = picked.filter((x) => cellStatus(sols, x.p, c, x.v) === 'open');
     if (must.length + open.length !== picked.length) continue;
+    const tw = teachWords(cast);
     const cards = gridOrder(cast, 0, picked);
     const inRow = (x: { p: string }) => x.p === p;
+    const P = nm(p);
+    const colName = `the ${w.val(c, val).label} column`;
+    const T = w.cell(p, val, c);
+    // grade() shows the tips of every box left out, then of every box picked by mistake. The first sentence of the
+    // first tip becomes the headline, so each tip opens by naming its box and where it sits.
     const missTips: Record<string, string> = {};
     const pickTips: Record<string, string> = {};
     for (const x of must) {
+      const cell = w.cell(x.p, x.v, c);
       missTips[cellId(x.p, x.v)] = inRow(x)
-        ? `${w.cell(x.p, x.v, c)} needs a ✗ too. ${w.one(p, c)}.`
-        : `${w.cell(x.p, x.v, c)} needs a ✗ too. ${w.onlyOne(c, val)}.`;
+        ? `You left out ${cell}, which is in ${P}’s row. ${w.one(p, c)}, so the rest of ${P}’s row gets a ✗.`
+        : `You left out ${cell}, which is in ${colName}. ${w.onlyOne(c, val)}, so the rest of ${colName} gets a ✗.`;
     }
     for (const x of open) {
-      pickTips[cellId(x.p, x.v)] = `${w.cell(x.p, x.v, c)} is not in ${nm(p)}’s row or the ${w.val(c, val).label} column. ${nm(x.p)} could still ${w.base(c, x.v)}.`;
+      const cell = w.cell(x.p, x.v, c);
+      pickTips[cellId(x.p, x.v)] = `${cell} is not in ${P}’s row or ${colName}. The ✓ in ${T} does not decide it, so ${nm(x.p)} could still ${w.base(c, x.v)}.`;
     }
     const mustLabels = gridOrder(cast, 0, must).map((x) => w.cell(x.p, x.v, c));
+    // Cases: a box in the ✓'s row, one in its column, and one outside both (one the item offers, when it can).
+    const rowBox = gridOrder(cast, 0, row)[0];
+    const colBox = gridOrder(cast, 0, col)[0];
+    const outBox = gridOrder(cast, 0, open)[0] ?? gridOrder(cast, 0, rest)[0];
+    const [q2] = ppl.filter((q) => q !== p);
+    const [y] = vals.filter((x) => x !== val);
+    const teach: Teach = {
+      rule: 'A ✓ gives a ✗ to every other box in its row and every other box in its column.',
+      terms: [TERMS.yes(cast, c), TERMS.spread],
+      meaning: `${w.is(p, c, val)}. ${w.one(p, c)}, and ${lowerFirst(w.onlyOne(c, val))}.`,
+      casesTitle: `What does the ✓ in ${T} decide?`,
+      cases: [
+        tw.box(sols, rowBox.p, c, rowBox.v, `${w.cell(rowBox.p, rowBox.v, c)}, in ${P}’s row.`),
+        tw.box(sols, colBox.p, c, colBox.v, `${w.cell(colBox.p, colBox.v, c)}, in ${colName}.`),
+        tw.box(sols, outBox.p, c, outBox.v, `${w.cell(outBox.p, outBox.v, c)}, outside ${P}’s row and ${colName}.`),
+      ],
+      remember: ['Spread every ✓: cross out the rest of its row, then the rest of its column.', 'Ask: “Did I cross out the column too?”'],
+      simpler: [
+        `Imagine just two ${plural(cast)}, ${P} and ${nm(q2)}, and just two ${w.cat(c).plural}, ${w.obj(c, val)} and ${w.obj(c, y)}.`,
+        `${w.is(p, c, val)}, so ${T} gets a ✓.`,
+        `${w.one(p, c)}, so ${w.cell(p, y, c)} gets a ✗. It is in ${P}’s row.`,
+        `${w.onlyOne(c, val)}, so ${w.cell(q2, val, c)} gets a ✗. It is in ${colName}.`,
+      ],
+    };
     const item: MultiItem = {
       kind: 'multi',
       id: o.id,
       stop: STOP,
       lesson: 's4.l3',
       skill: o.column ? 's4.spread-column' : 's4.spread-tick',
-      prompt: `${settingText(cast)} ${w.is(p, c, val)}, so that box gets a ✓. Which of these boxes must now get a ✗?`,
+      prompt: `${settingText(cast)} ${w.is(p, c, val)}, so ${T} gets a ✓. Choose every box that must now get a ✗.`,
       scene: gridScene(cast, 0, marks),
       choices: cards.map((x) => ({ id: cellId(x.p, x.v), label: w.cell(x.p, x.v, c) })),
       answer: must.map((x) => cellId(x.p, x.v)),
       missTips,
       pickTips,
-      explain: `${w.is(p, c, val)}. So every other box in ${nm(p)}’s row gets a ✗. So does every other box in the ${w.val(c, val).label} column. Here that means ${joinNames(mustLabels)}.`,
+      explain: `${w.is(p, c, val)}. So every other box in ${P}’s row gets a ✗. So does every other box in ${colName}. Here that means ${joinNames(mustLabels)}.`,
       hint: 'A ✓ tells you about its whole row and its whole column.',
       ...(o.column ? { conflict: true } : {}),
+      teach,
     };
-    return { item, cast, sol, marks, p, val };
+    const basis: Basis = { marks: { c, marks } };
+    return { item, cast, sol, marks, p, val, bases: { cases: [basis, basis, basis], examples: {} } };
   }
   throw new Error('spreadPuzzle: no puzzle found');
 }
@@ -949,6 +1307,8 @@ export function spreadPuzzle(rng: Rng, o: SpreadOpts): Built<MultiItem> & { mark
 // ---------- lesson 4: linking clues ----------
 
 export type LinkMode = 'link' | 'notLink2' | 'notLink';
+/** How a wrong pick misses: not the one the link points to; crossed out by a clue; “Can’t tell yet” when one is left; one of two left. */
+export type LinkMiss = 'not-holder' | 'crossed' | 'cant' | 'open';
 
 export interface LinkOpts {
   id: string;
@@ -958,7 +1318,7 @@ export interface LinkOpts {
 }
 
 /** The first category is filled in; linking clues tell you who has a value in the second. */
-export function linkPuzzle(rng: Rng, o: LinkOpts): Built<ChooseItem> & { clues: GridClue[]; c1: string; c2: string; val: string } {
+export function linkPuzzle(rng: Rng, o: LinkOpts): Built<ChooseItem> & { clues: GridClue[]; c1: string; c2: string; val: string; bases: Bases; kinds: Record<string, LinkMiss> } {
   const skin = SKINS[o.skin];
   for (let tries = 0; tries < 200; tries++) {
     const first = rng.int(0, 1);
@@ -986,29 +1346,115 @@ export function linkPuzzle(rng: Rng, o: LinkOpts): Built<ChooseItem> & { clues: 
     if ((answer === CANT) !== (o.mode === 'notLink')) continue;
     if (answer !== CANT && answer !== T) continue;
     const texts = clues.map((c) => clueText(cast, c));
+    const tw = teachWords(cast);
     const has1 = (q: string) => w.is(q, c1, sol[q][c1]);
-    const whyWrong: Record<string, string> = {};
+    const base2 = w.base(c2, val);
+    const obj2 = w.obj(c2, val);
+    const one = clues.length === 1;
+    const clueName = (i: number) => (one ? 'the clue' : `clue ${i + 1}`);
+    const linkBasis: Basis = { clues: [...known, ...clues] };
+    // Who each clue crosses out by itself, with the first part of the grid filled in.
+    const crossers = (q: string) => clues.map((cl, i) => (cellStatus(fitting(cast.spec, [...known, cl]), q, c2, val) === 'no' ? i : -1)).filter((i) => i >= 0);
+    const holderSays = (q: string, not: boolean) => `${w.holder(c1, sol[q][c1])} ${not ? w.cat(c2).not : w.cat(c2).is} ${obj2}`;
+    const personNote = (q: string) => {
+      const st = cellStatus(sols, q, c2, val);
+      if (st === 'yes') return o.mode === 'link' ? `${cap(holderSays(q, false))}, so ${nm(q)} must ${base2}.` : `Only ${nm(q)} is left, so ${nm(q)} must ${base2}.`;
+      if (st === 'open') return `No clue crosses out ${nm(q)}.`;
+      const by = crossers(q);
+      return by.length ? `${cap(clueName(by[0]))} crosses out ${nm(q)}.` : `The clues together cross out ${nm(q)}.`;
+    };
+    const personCase = (q: string, extra: Truth[] = []): TeachCase => {
+      const truths = [tw.could(sols, q, c2, val)];
+      if (cellStatus(sols, q, c2, val) === 'yes') truths.push(tw.must(sols, q, c2, val));
+      return { label: `${has1(q)}.`, truths: [...truths, ...extra], note: personNote(q) };
+    };
+    const feedback: Record<string, ChoiceFeedback> = {};
+    const examples: Record<string, Basis> = {};
+    const kinds: Record<string, LinkMiss> = {};
+    const cantRight = `“Can’t tell yet” fits only when two or more ${plural(cast)} could still ${base2}.`;
+    const add = (id: string, kind: LinkMiss, fb: ChoiceFeedback, basis: Basis = linkBasis) => { feedback[id] = fb; kinds[id] = kind; examples[id] = basis; };
     let explain: string;
     if (o.mode === 'link') {
-      explain = `The grid shows that ${has1(T)}. The clue says ${w.holder(c1, sol[T][c1])} ${w.cat(c2).is} ${w.obj(c2, val)}. So ${w.is(T, c2, val)}.`;
-      for (const q of [L, M]) whyWrong[q] = `${has1(q)}, not ${w.obj(c1, sol[T][c1])}. So ${w.not(q, c2, val)}.`;
-      whyWrong[CANT] = `You can tell. ${has1(T)}, so ${w.is(T, c2, val)}.`;
+      explain = `The grid shows that ${has1(T)}. The clue says ${w.holder(c1, sol[T][c1])} ${w.cat(c2).is} ${obj2}. So ${w.is(T, c2, val)}.`;
+      for (const q of [L, M]) {
+        add(q, 'not-holder', {
+          headline: `${nm(q)} is not ${w.holder(c1, sol[T][c1])}.`,
+          detail: [`The clue says ${holderSays(T, false)}. The grid shows ${has1(T)}, and ${has1(q)}.`, `So ${w.is(T, c2, val)}. ${w.onlyOne(c2, val)}, so ${nm(q)} can’t.`],
+          example: personCase(q, [tw.must(sols, T, c2, val)]),
+        });
+      }
+      add(CANT, 'cant', {
+        headline: `You can tell, because the grid shows ${w.holder(c1, sol[T][c1])}.`,
+        detail: [`${cap(has1(T))}. The clue says ${holderSays(T, false)}.`, `So ${w.is(T, c2, val)}. ${cantRight}`],
+        example: personCase(T),
+      });
     } else if (o.mode === 'notLink2') {
       const second = clues[1];
-      const mWhy = second.t === 'isnt'
-        ? `Clue 2 says ${w.not(M, c2, val)}.`
-        : `${has1(M)}, and ${w.holder(c1, sol[M][c1])} ${w.cat(c2).not} ${w.obj(c2, val)}.`;
       explain = `Clue 1 crosses out ${nm(L)}, who ${w.cat(c1).is} ${w.obj(c1, sol[L][c1])}. Clue 2 crosses out ${nm(M)}. Only ${nm(T)} is left, so ${w.is(T, c2, val)}.`;
-      whyWrong[L] = `${has1(L)}, and ${w.holder(c1, sol[L][c1])} ${w.cat(c2).not} ${w.obj(c2, val)}.`;
-      whyWrong[M] = mWhy;
-      whyWrong[CANT] = `You can tell. The clues cross out ${nm(L)} and ${nm(M)}. Only ${nm(T)} is left.`;
+      add(L, 'crossed', {
+        headline: `Clue 1 crosses out ${nm(L)}.`,
+        detail: [`${cap(has1(L))}. Clue 1 says ${holderSays(L, true)}. So ${nm(L)} can’t ${base2}.`, `Clue 2 crosses out ${nm(M)}, so only ${nm(T)} is left.`],
+        example: personCase(L, [tw.must(sols, T, c2, val)]),
+      });
+      add(M, 'crossed', {
+        headline: `Clue 2 crosses out ${nm(M)}.`,
+        detail: [
+          second.t === 'isnt' ? `Clue 2 says ${w.not(M, c2, val)}.` : `${cap(has1(M))}. Clue 2 says ${holderSays(M, true)}. So ${nm(M)} can’t ${base2}.`,
+          `Clue 1 crosses out ${nm(L)}, so only ${nm(T)} is left.`,
+        ],
+        example: personCase(M, [tw.must(sols, T, c2, val)]),
+      });
+      add(CANT, 'cant', {
+        headline: `You can tell, because the two clues leave only ${nm(T)}.`,
+        detail: [`Clue 1 crosses out ${nm(L)}. Clue 2 crosses out ${nm(M)}.`, `So ${w.is(T, c2, val)}. ${cantRight}`],
+        example: personCase(T),
+      });
     } else {
       const [a, b] = [...who].sort();
-      explain = `${has1(L)}, so the clue crosses out ${nm(L)}. ${nm(a)} and ${nm(b)} could each still ${w.base(c2, val)}. So you can’t tell yet.`;
-      whyWrong[L] = `${has1(L)}, and ${w.holder(c1, sol[L][c1])} ${w.cat(c2).not} ${w.obj(c2, val)}. So ${nm(L)} can’t ${w.base(c2, val)}.`;
-      whyWrong[a] = `${nm(a)} could ${w.base(c2, val)}, but so could ${nm(b)}. The clue only crosses out ${nm(L)}.`;
-      whyWrong[b] = `${nm(b)} could ${w.base(c2, val)}, but so could ${nm(a)}. The clue only crosses out ${nm(L)}.`;
+      explain = `${cap(has1(L))}, so the clue crosses out ${nm(L)}. ${nm(a)} and ${nm(b)} could each still ${base2}. So you can’t tell yet.`;
+      add(L, 'crossed', {
+        headline: `The clue crosses out ${nm(L)}.`,
+        detail: [`${cap(has1(L))}, and the clue says ${holderSays(L, true)}. So ${nm(L)} can’t ${base2}.`, `${nm(a)} and ${nm(b)} could each still ${base2}, so you can’t tell yet.`],
+        example: personCase(L),
+      });
+      for (const [x, y] of [[a, b], [b, a]]) {
+        const way = sols.find((s) => s[y][c2] === val)!;
+        add(x, 'open', {
+          headline: `${nm(x)} could ${base2}, but so could ${nm(y)}.`,
+          detail: [`The clue crosses out only ${nm(L)}.`, `${nm(x)} and ${nm(y)} could each still ${base2}, so you can’t tell yet.`],
+          example: {
+            label: `One way that fits the grid and the clue: ${tw.way(way, [c2])}`,
+            truths: [
+              { who: 'Fits the grid', value: ppl.every((q) => way[q][c1] === sol[q][c1]) },
+              { who: 'The clue', value: gridClueHolds(clues[0], way) },
+              tw.fact(way, x, c2, val),
+            ],
+            note: `So ${nm(x)} does not have to ${base2}.`,
+          },
+        }, { way });
+      }
     }
+    const meaningOf = (cl: GridClue, i: number) => {
+      const said = `“${texts[i]}”`;
+      if (cl.t === 'link') return `${said} This means ${w.obj(c1, cl.v1)} and ${w.obj(c2, cl.v2)} go to the same ${skin.noun}.`;
+      if (cl.t === 'notLink') return `${said} This means ${w.obj(c1, cl.v1)} and ${w.obj(c2, cl.v2)} go to different ${plural(cast)}.`;
+      return `${said} This crosses out ${nm(M)}.`;
+    };
+    const teach: Teach = {
+      rule: o.mode === 'link' ? `A linking clue says two things go to the same ${skin.noun}.` : `A “not” linking clue says two things go to different ${plural(cast)}.`,
+      terms: o.mode === 'link' ? [TERMS.link(cast, c1, c2)] : [TERMS.link(cast, c1, c2), TERMS.cant],
+      meaning: clues.map(meaningOf).join(' '),
+      casesTitle: `Who could ${base2}?`,
+      cases: ppl.map((q) => personCase(q)),
+      remember: o.mode === 'link'
+        ? [`Find who ${w.cat(c1).is} ${w.obj(c1, sol[T][c1])} in the grid. The same ${skin.noun} ${w.cat(c2).is} ${obj2}.`, 'Ask: “Who has the thing the clue names?”']
+        : [`A “not” link crosses out one ${skin.noun}. Then count who is left.`, `Ask: “Is only one ${skin.noun} left, or more than one?”`],
+      simpler: o.mode === 'link'
+        ? [`Step 1: find ${w.obj(c1, sol[T][c1])} in the grid. ${cap(has1(T))}.`, `Step 2: the clue says ${holderSays(T, false)}.`, `So ${w.is(T, c2, val)}.`]
+        : o.mode === 'notLink2'
+          ? [`Step 1: clue 1 crosses out ${nm(L)}.`, `Step 2: clue 2 crosses out ${nm(M)}.`, `Step 3: only ${nm(T)} is left, so ${w.is(T, c2, val)}.`]
+          : [`Step 1: find ${w.obj(c1, sol[L][c1])} in the grid. ${cap(has1(L))}.`, `Step 2: the clue says ${holderSays(L, true)}. So cross out ${nm(L)}.`, `Step 3: ${joinNames([...who].sort().map(nm))} are left. Two are left, so you can’t tell yet.`],
+    };
     const clueLine = texts.length === 1 ? `Clue: “${texts[0]}”` : texts.map((t, i) => `Clue ${i + 1}: “${t}”`).join(' ');
     const marks: Marks = Object.fromEntries(ppl.map((q) => [q, Object.fromEntries(cast.spec.cats[0].values.map((x) => [x, sol[q][c1] === x ? 'yes' : 'no'] as const))]));
     const item: ChooseItem = {
@@ -1017,18 +1463,20 @@ export function linkPuzzle(rng: Rng, o: LinkOpts): Built<ChooseItem> & { clues: 
       stop: STOP,
       lesson: 's4.l4',
       skill: o.mode === 'link' ? 's4.link' : 's4.not-link',
-      prompt: `${settingText(cast, [false, true])} The grid shows the ${w.cat(c1).plural}. ${clueLine} ${w.whoIs(c2, val)}`,
+      prompt: `${settingText(cast, [false, true])} The grid shows the ${w.cat(c1).plural}. ${clueLine} ${cast.skin.who} must ${base2}?`,
       scene: gridScene(cast, 0, marks),
       choices: [...cast.people, CANT_YET],
       answer,
-      whyWrong,
+      feedback,
       explain,
       hint: o.mode === 'link'
         ? `Find ${w.holder(c1, sol[T][c1])} in the grid first.`
-        : `Cross out everyone who can’t ${w.base(c2, val)}. Who is left?`,
+        : `Cross out everyone who can’t ${base2}. Who is left?`,
       ...(o.mode === 'notLink' ? { conflict: true } : {}),
+      teach,
     };
-    return { item, cast, sol, clues, c1, c2, val };
+    syncWhyWrong(item);
+    return { item, cast, sol, clues, c1, c2, val, bases: { cases: ppl.map(() => linkBasis), examples }, kinds };
   }
   throw new Error('linkPuzzle: no puzzle found');
 }
@@ -1042,8 +1490,18 @@ export interface ProofOpts {
   n?: number;
 }
 
+/**
+ * Why a clue that is not the answer fails to prove the ✗: an "or" clue that names the thing for the person; a "not"
+ * clue about the person but another thing; a clue about the other part of the grid (it says nothing about this part);
+ * a clue that names the thing but another person; a clue about another person that, by itself, crosses out other
+ * boxes in the person's row or the thing's column (an "or" clue that leaves the thing out, a "has" clue); a linking
+ * clue (it names no one); or a clue that, by itself, decides no box in the person's row or the thing's column.
+ * The last two kinds that are not "link" are computed from what the clue alone decides, never from its words.
+ */
+export type ProofMiss = 'or-names-it' | 'same-person' | 'other-part' | 'same-thing' | 'other-box' | 'link' | 'neither';
+
 /** "Which clue, all by itself, proves that Leo does not have the dog?" Exactly one clue does. */
-export function proofPuzzle(rng: Rng, o: ProofOpts): Built<ChooseItem> & { clues: GridClue[]; target: Cell } {
+export function proofPuzzle(rng: Rng, o: ProofOpts): Built<ChooseItem> & { clues: GridClue[]; target: Cell; bases: Bases; kinds: Record<string, ProofMiss> } {
   const skin = SKINS[o.skin];
   const ncat = o.ncat ?? 1;
   for (let tries = 0; tries < 200; tries++) {
@@ -1064,8 +1522,8 @@ export function proofPuzzle(rng: Rng, o: ProofOpts): Built<ChooseItem> & { clues
     }
     if (!targets.length) continue;
     const { cell, prover } = rng.pick(targets);
-    const w = wordsFor(cast);
-    const nm = cast.nm;
+    const tw = teachWords(cast);
+    const { w, nm } = tw;
     const { p, c, v: x } = cell;
     const pc = clues[prover];
     let explain: string;
@@ -1073,14 +1531,125 @@ export function proofPuzzle(rng: Rng, o: ProofOpts): Built<ChooseItem> & { clues
     else if (pc.t === 'is') explain = `Clue ${prover + 1} says ${w.is(pc.p, c, x)}. ${w.onlyOne(c, x)}, so ${w.not(p, c, x)}.`;
     else if (pc.t === 'either') explain = `Clue ${prover + 1} says ${nm(p)} ${w.cat(c).is} ${w.obj(c, pc.v1)} or ${w.obj(c, pc.v2)}. Either way, ${w.not(p, c, x)}.`;
     else continue;
-    const whyWrong: Record<string, string> = {};
-    clues.forEach((cl, j) => {
-      if (j === prover) return;
+
+    const P = nm(p);
+    const X = w.obj(c, x);
+    const T = w.cell(p, x, c);
+    const catNoun = w.cat(c).noun;
+    const ci = cast.cats.findIndex((k) => k.cat.id === c);
+    const xCol = `the ${w.val(c, x).label} column`;
+    /** The boxes in P's row or X's column (P – X aside) that clue j, all by itself, crosses out. Computed. */
+    const crossedBy = (j: number) => gridOrder(cast, ci, [
+      ...cast.spec.people.filter((q) => q !== p && cellStatus(alone[j], q, c, x) === 'no').map((q) => ({ p: q, v: x })),
+      ...cast.spec.cats[ci].values.filter((y) => y !== x && cellStatus(alone[j], p, c, y) === 'no').map((y) => ({ p, v: y })),
+    ]).map((b) => w.cell(b.p, b.v, c));
+    const kindOf = (cl: GridClue, j: number): ProofMiss => {
+      if (cl.t === 'link' || cl.t === 'notLink') return 'link';
+      // A clue about the other part of the grid says nothing, by itself, about this part.
+      if (cl.c !== c) return 'other-part';
+      if (cl.p === p) {
+        if (cl.t === 'either' && (cl.v1 === x || cl.v2 === x)) return 'or-names-it';
+        if (cl.t === 'isnt') return 'same-person';
+        throw new Error('proofPuzzle: any other clue about the person in this part proves the ✗');
+      }
+      if (mentions(cl, null, c, x)) return 'same-thing';
+      // About another person and not naming the thing: what it decides by itself, not its words, says which kind.
+      return crossedBy(j).length ? 'other-box' : 'neither';
+    };
+    /** A clue's words after "Clue 2 says": names stay as they are, "The dragon in …" starts small. */
+    const said = (i: number) => {
+      const t = unstop(clueText(cast, clues[i]));
+      return clues[i].t === 'link' || clues[i].t === 'notLink' ? lowerFirst(t) : t;
+    };
+    const feedback: Record<string, ChoiceFeedback> = {};
+    const examples: Record<string, Basis> = {};
+    const kinds: Record<string, ProofMiss> = {};
+    for (let j = 0; j < clues.length; j++) {
+      if (j === prover) continue;
+      const cl = clues[j];
       if (cellStatus(alone[j], p, c, x) !== 'open') throw new Error('proofPuzzle: a clue that does not prove it must leave it open');
-      whyWrong[`k${j + 1}`] = cl.t === 'either' && cl.p === p && cl.c === c && (cl.v1 === x || cl.v2 === x)
-        ? `Clue ${j + 1} says ${nm(p)} ${w.cat(c).is} ${w.obj(c, cl.v1)} or ${w.obj(c, cl.v2)}. So ${nm(p)} could ${w.base(c, x)}.`
-        : `Clue ${j + 1} alone still lets ${nm(p)} ${w.base(c, x)}.`;
-    });
+      const kind = kindOf(cl, j);
+      const k = j + 1;
+      const crossed = crossedBy(j);
+      const still = `With only this clue, ${P} could still ${w.base(c, x)}.`;
+      // The words of each kind. Only the kinds a clue can have are ever built (cl narrows inside each one).
+      const head = (): string => {
+        if (cl.t === 'link' || cl.t === 'notLink') return `Clue ${k} is a linking clue, and it does not name ${P}.`;
+        switch (kind) {
+          case 'or-names-it': return `Clue ${k} names ${X} as one of two choices for ${P}.`;
+          case 'same-person': return `Clue ${k} is about ${P}, but not about ${X}.`;
+          case 'other-part': return `Clue ${k} is about ${nm(cl.p)}’s ${w.cat(cl.c).noun}, not ${P}’s ${catNoun}.`;
+          case 'same-thing': return `Clue ${k} is about ${X}, but not about ${P}.`;
+          case 'other-box': return `Clue ${k} crosses out ${joinNames(crossed)}, not ${T}.`;
+          default: return `Clue ${k} is not about ${P} or ${X}.`;
+        }
+      };
+      const why = (): string => {
+        if (cl.t === 'link' || cl.t === 'notLink') {
+          return `It joins ${w.obj(cl.c1, cl.v1)} and ${w.obj(cl.c2, cl.v2)}, but it does not say which ${skin.noun} has them. So by itself, it does not rule out ${X} for ${P}.`;
+        }
+        switch (kind) {
+          case 'or-names-it': return `So ${P} could ${w.base(c, x)}.`;
+          case 'same-person': return `That rules out ${cl.t === 'isnt' ? w.obj(c, cl.v) : 'another one'} for ${P}, not ${X}.`;
+          case 'other-part': return `It is about the ${w.cat(cl.c).plural}, so it says nothing about the ${w.cat(c).plural}. ${still}`;
+          case 'same-thing': return `It is about ${nm(cl.p)}, not ${P}. ${still}`;
+          case 'other-box': {
+            const how = cl.t === 'is'
+              ? `So ${w.cell(cl.p, cl.v, c)} gets a ✓, and ${joinNames(crossed)} ${crossed.length === 1 ? 'gets' : 'get'} a ✗.`
+              : cl.t === 'either' ? `So ${w.not(cl.p, c, x)}.` : `By itself, it crosses out ${joinNames(crossed)}.`;
+            return `${how} ${still}`;
+          }
+          default: return `By itself, it does not cross out any box in ${P}’s row or ${xCol}. ${still}`;
+        }
+      };
+      // The counterexample: a way where clue k is true and the person has the thing (keeping the most other clues true).
+      const way = bestWay(alone[j].filter((s) => s[p][c] === x), clues)!;
+      feedback[`k${k}`] = {
+        headline: head(),
+        detail: [`Clue ${k} says ${said(j)}. ${why()}`, `Here is a way where clue ${k} is true and ${w.is(p, c, x)}.`],
+        example: {
+          label: `One way where clue ${k} is true: ${tw.way(way)}`,
+          truths: [{ who: `Clue ${k}`, value: gridClueHolds(cl, way) }, tw.fact(way, p, c, x)],
+          note: `So clue ${k} alone does not prove that ${T} gets a ✗.`,
+        },
+      };
+      examples[`k${k}`] = { way };
+      kinds[`k${k}`] = kind;
+    }
+    // Cases: each clue alone. With more than four clues, leave out the ones about neither the person nor the thing.
+    let shown = clues.map((_, i) => i);
+    while (shown.length > 4) {
+      const drop = [...shown].reverse().find((i) => i !== prover && (kinds[`k${i + 1}`] === 'neither' || kinds[`k${i + 1}`] === 'other-part'))
+        ?? [...shown].reverse().find((i) => i !== prover)!;
+      shown = shown.filter((i) => i !== drop);
+    }
+    // The simpler example uses facts that are true in the answer: a has x0, and a does not have y0.
+    const [a, b] = cast.spec.people;
+    const x0 = sol[a][c];
+    const y0 = cast.spec.cats.find((k) => k.id === c)!.values.find((y) => y !== x0)!;
+    const tiny = (cl: GridClue) => cellStatus(fitting(cast.spec, [cl]), b, c, x0);
+    if (tiny({ t: 'is', p: a, c, v: x0 }) !== 'no' || tiny({ t: 'isnt', p: a, c, v: y0 }) !== 'open') throw new Error('proofPuzzle: the simpler example must hold');
+    const teach: Teach = {
+      rule: 'A clue proves a ✗ when, with that clue alone, the box could never get a ✓.',
+      // A wrong pick can be a linking clue (two-part grids); then that word needs defining more than ✗ does.
+      terms: [...(ncat === 2 && clues.some((cl) => cl.t === 'link' || cl.t === 'notLink')
+        ? [TERMS.link(cast, cast.cats[0].cat.id, cast.cats[1].cat.id)]
+        : [TERMS.no(cast, c)]), TERMS.alone, TERMS.proves],
+      meaning: `The question is about one box: ${T}. Test each clue alone. With only that clue, could ${P} still ${w.base(c, x)}?`,
+      casesTitle: `Test each clue alone. Could ${P} ${w.base(c, x)}?`,
+      cases: shown.map((i) => ({
+        label: `Clue ${i + 1}: ${clueText(cast, clues[i])}`,
+        truths: [tw.could(alone[i], p, c, x)],
+        note: i === prover ? `So clue ${i + 1} proves the ✗.` : `So clue ${i + 1} alone does not prove the ✗.`,
+      })),
+      remember: ['Test one clue at a time, as if it were the only clue.', 'Ask: “With only this clue, could the box still get a ✓?”'],
+      simpler: [
+        `Say the only clue is “${w.is(a, c, x0)}.” Could ${nm(b)} ${w.base(c, x0)}?`,
+        `No. ${w.onlyOne(c, x0)}. So this clue proves that ${w.cell(b, x0, c)} gets a ✗.`,
+        `Now say the only clue is “${w.not(a, c, y0)}.” Could ${nm(b)} ${w.base(c, x0)}?`,
+        `Yes. This clue is not about ${nm(b)} or ${w.obj(c, x0)}. So it does not prove the ✗.`,
+      ],
+    };
     const tempting = clues.some((cl, j) => j !== prover && mentions(cl, null, c, x));
     const item: ChooseItem = {
       kind: 'choose',
@@ -1092,13 +1661,15 @@ export function proofPuzzle(rng: Rng, o: ProofOpts): Built<ChooseItem> & { clues
       scene: { kind: 'clues', clues: clues.map((cl) => clueText(cast, cl)) },
       choices: clues.map((_, i) => ({ id: `k${i + 1}`, label: `Clue ${i + 1}` })),
       answer: `k${prover + 1}`,
-      whyWrong,
+      feedback,
       explain,
-      hint: `Test one clue at a time. If it were the only clue, could ${nm(p)} still ${w.base(c, x)}?`,
+      hint: `Test one clue at a time. If it were the only clue, could ${P} still ${w.base(c, x)}?`,
       ...(tempting ? { conflict: true } : {}),
       ...(ncat === 2 ? { seconds: 120 } : {}),
+      teach,
     };
-    return { item, cast, sol, clues, target: cell };
+    syncWhyWrong(item);
+    return { item, cast, sol, clues, target: cell, bases: { cases: shown.map((i) => ({ clues: [clues[i]] })), examples }, kinds };
   }
   throw new Error('proofPuzzle: no puzzle found');
 }
@@ -1113,7 +1684,7 @@ export interface EnoughOpts {
 }
 
 /** "Use only clues 1 and 2. Can you tell who has the fish yet?" Yes / Can't tell yet. */
-export function enoughPuzzle(rng: Rng, o: EnoughOpts): Built<ChooseItem> & { clues: GridClue[]; c: string; val: string } {
+export function enoughPuzzle(rng: Rng, o: EnoughOpts): Built<ChooseItem> & { clues: GridClue[]; c: string; val: string; bases: Bases } {
   const skin = SKINS[o.skin];
   const ncat = o.ncat ?? 1;
   for (let tries = 0; tries < 200; tries++) {
@@ -1139,37 +1710,92 @@ export function enoughPuzzle(rng: Rng, o: EnoughOpts): Built<ChooseItem> & { clu
     }
     if (!cands.length) continue;
     const { c, val, who, step } = rng.pick(cands);
-    const w = wordsFor(cast);
-    const nm = cast.nm;
+    const tw = teachWords(cast);
+    const { w, nm } = tw;
     const names = joinNames(who.map(nm));
-    const whyWrong: Record<string, string> = {};
+    const base = w.base(c, val);
+    const obj = w.obj(c, val);
+    const twoBasis: Basis = { clues: two };
+    const by = (i: number, q: string) => cellStatus(fitting(cast.spec, [two[i]]), q, c, val) === 'no';
+    const personNote = (q: string) => {
+      const st = cellStatus(sols, q, c, val);
+      if (st === 'yes') return `Only ${nm(q)} is left, so ${nm(q)} must ${base}.`;
+      if (st === 'open') return `Clues 1 and 2 do not cross out ${nm(q)}.`;
+      return by(0, q) ? `Clue 1 crosses out ${nm(q)}.` : by(1, q) ? `Clue 2 crosses out ${nm(q)}.` : `Clues 1 and 2 together cross out ${nm(q)}.`;
+    };
+    const personCase = (q: string): TeachCase => {
+      const truths = [tw.could(sols, q, c, val)];
+      if (cellStatus(sols, q, c, val) === 'yes') truths.push(tw.must(sols, q, c, val));
+      return { label: `${w.cell(q, val, c)}.`, truths, note: personNote(q) };
+    };
+    const feedback: Record<string, ChoiceFeedback> = {};
+    const examples: Record<string, Basis> = {};
     let explain: string;
     if (o.tell) {
       const why = tickText(cast, two, step!);
       explain = `Yes. ${why}`;
-      whyWrong[CANT] = `You can tell. ${why}`;
+      feedback[CANT] = {
+        headline: `Clues 1 and 2 already leave only ${nm(who[0])}.`,
+        detail: [why, `“Can’t tell yet” fits only when two or more ${plural(cast)} could still ${base}.`],
+        example: personCase(who[0]),
+      };
+      examples[CANT] = twoBasis;
     } else {
-      explain = `With only clues 1 and 2, ${names} could each still ${w.base(c, val)}. So you can’t tell yet.`;
-      whyWrong.yes = `Clues 1 and 2 are not enough. ${names} could each still ${w.base(c, val)}.`;
+      explain = `With only clues 1 and 2, ${names} could each still ${base}. So you can’t tell yet.`;
+      const out = ppl.filter((q) => !who.includes(q));
+      feedback.yes = {
+        headline: `With only clues 1 and 2, ${names} could each ${base}.`,
+        detail: [
+          out.length ? `Clues 1 and 2 cross out ${joinNames(out.map(nm))} for ${obj}, and no one else.` : `Clues 1 and 2 do not cross out anyone for ${obj}.`,
+          `“Yes” fits only when just one ${skin.noun} is left. Here ${COUNT[who.length].toLowerCase()} are left, so you can’t tell yet.`,
+        ],
+        example: {
+          label: `Who could ${base}, using only clues 1 and 2.`,
+          truths: ppl.map((q) => tw.could(sols, q, c, val)),
+          note: `${COUNT[who.length]} ${plural(cast)} could, so you can’t tell yet.`,
+        },
+      };
+      examples.yes = twoBasis;
     }
+    // The smallest example: two people and one "not" clue leave one; three people and the same clue leave two.
+    const b = ppl.find((q) => sol[q][c] === val)!;
+    const a = ppl.find((q) => q !== b)!;
+    const small: Spec = { people: [a, b], cats: [{ id: c, values: [val, cast.spec.cats.find((k) => k.id === c)!.values.find((y) => y !== val)!] }] };
+    const notA: GridClue = { t: 'isnt', p: a, c, v: val };
+    if (holders(fitting(small, [notA]), c, val, small.people).join() !== b) throw new Error('enoughPuzzle: the simpler example must hold');
+    const teach: Teach = {
+      rule: `You can tell only when one ${skin.noun} is left who could ${base}.`,
+      terms: [TERMS.cant, TERMS.onlyOne],
+      meaning: `Use only clues 1 and 2. Cross out every ${skin.noun} they rule out for ${obj}. Then count who is left.`,
+      casesTitle: `With only clues 1 and 2, who could ${base}?`,
+      cases: ppl.map(personCase),
+      remember: [`One ${skin.noun} left: you can tell. Two or more: you can’t tell yet.`, `Ask: “How many ${plural(cast)} could still ${base}?”`],
+      simpler: [
+        `Imagine just two ${plural(cast)}, ${joinNames(ppl.filter((q) => q === a || q === b).map(nm))}.`,
+        `Say the only clue is “${w.not(a, c, val)}.” Then only ${nm(b)} could ${base}.`,
+        'One is left, so you can tell.',
+        `With a third ${skin.noun}, the same clue would leave two who could. Then you can’t tell yet.`,
+      ],
+    };
     const item: ChooseItem = {
       kind: 'choose',
       id: o.id,
       stop: STOP,
       lesson: 's4.l5',
       skill: 's4.enough-clues',
-      prompt: `${settingText(cast)} Use only clues 1 and 2. Can you tell ${cast.skin.who.charAt(0).toLowerCase()}${cast.skin.who.slice(1)} ${w.cat(c).is} ${w.obj(c, val)} yet?`,
+      prompt: `${settingText(cast)} Use only clues 1 and 2. Can you tell ${cast.skin.who.charAt(0).toLowerCase()}${cast.skin.who.slice(1)} ${w.cat(c).is} ${obj} yet?`,
       scene: { kind: 'clues', clues: clues.map((cl) => clueText(cast, cl)) },
       choices: [{ id: 'yes', label: 'Yes' }, CANT_YET],
       answer: o.tell ? 'yes' : CANT,
-      whyWrong,
+      feedback,
       explain,
-      hint: `Use only clues 1 and 2. Could more than one ${cast.skin.noun} still ${w.base(c, val)}?`,
+      hint: `Use only clues 1 and 2. Could more than one ${cast.skin.noun} still ${base}?`,
       ...(o.tell ? {} : { conflict: true }),
       ...(ncat === 2 ? { seconds: 120 } : {}),
+      teach,
     };
-    return { item, cast, sol, clues, c, val };
+    syncWhyWrong(item);
+    return { item, cast, sol, clues, c, val, bases: { cases: ppl.map(() => twoBasis), examples } };
   }
   throw new Error('enoughPuzzle: no puzzle found');
 }
-

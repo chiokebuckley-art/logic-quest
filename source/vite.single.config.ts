@@ -12,4 +12,3 @@ export default defineConfig({
   define: info.define,
   build: { outDir: 'dist-single', target: 'es2020', assetsInlineLimit: 1e9, cssCodeSplit: false, sourcemap: false },
 });
-

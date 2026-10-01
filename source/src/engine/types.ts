@@ -92,6 +92,72 @@ export type Claim =
   | { t: 'or'; cs: Claim[] }
   | { t: 'if'; a: Claim; b: Claim }; // "If I am a knight, then Cal is a knave."
 
+// ---------- teaching after a wrong answer ----------
+
+/** A labelled group of things to count, drawn as that many dots beside its numeral: "Red dragons 3". */
+export interface CountGroup {
+  label: string;
+  n: number;
+  /** Dot colour. The label always names the group, so colour never carries the meaning alone. */
+  color?: Color;
+}
+
+/** Whether one sentence is true in a case: { who: 'Your answer', value: false }. */
+export interface Truth {
+  who: string;
+  value: boolean;
+}
+
+/**
+ * One worked case, drawn as a card: its label in words (enough on its own if the picture cannot load),
+ * an optional picture (counted groups or shape cards), whether each sentence is true there, and a note.
+ */
+export interface TeachCase {
+  /** "3 red dragons and 3 yellow dragons." */
+  label: string;
+  groups?: CountGroup[];
+  things?: Thing[];
+  truths?: Truth[];
+  /** "The counts are equal. This is a tie." */
+  note?: string;
+}
+
+/**
+ * What one wrong choice gets wrong. It describes the answer's gap, never the player's private reasoning.
+ * Every wrong choice of a choose item has one, keyed by the choice id (see ChooseItem.feedback).
+ */
+export interface ChoiceFeedback {
+  /** One sentence naming the gap: "Your answer leaves out one possibility: a tie." */
+  headline: string;
+  /** What the answer means and exactly where it fails. Short paragraphs, concrete, with labelled numbers. */
+  detail: string[];
+  /** The case that shows the failure (a counterexample). */
+  example?: TeachCase;
+  /** "Explain more simply" for this choice, when it needs its own smallest example (else Teach.simpler). */
+  simpler?: string[];
+}
+
+/**
+ * Item-level teaching, shown after any wrong answer (and the whole explanation when a choice has no
+ * ChoiceFeedback). Grade-6 reading level, like every other player-facing text. See docs/CONTENT_GUIDE.md.
+ */
+export interface Teach {
+  /** The plain-language rule: "NOT means the original statement is false." */
+  rule: string;
+  /** Words the explanation needs, defined in place: { word: 'A tie', meaning: 'the two groups have the same number.' }. */
+  terms?: { word: string; meaning: string }[];
+  /** What the original sentence or clue says, and when it is true. */
+  meaning?: string;
+  /** Cases that cover every way the question can go, e.g. red has more, red has fewer, a tie. */
+  cases?: TeachCase[];
+  /** Heading above the cases: "When is the dragon’s sentence false?" */
+  casesTitle?: string;
+  /** "Remember" lines: the rule in a few words, and a question to ask yourself. */
+  remember?: string[];
+  /** "Explain more simply": the smallest worked example, step by step. */
+  simpler?: string[];
+}
+
 // ---------- items ----------
 
 interface ItemBase {
@@ -117,6 +183,8 @@ interface ItemBase {
    * take longer: use 150-180 for those.
    */
   seconds?: number;
+  /** Teaching shown after a wrong answer in lessons and practice (never in checks). */
+  teach?: Teach;
 }
 
 export interface ChooseItem extends ItemBase {
@@ -124,8 +192,10 @@ export interface ChooseItem extends ItemBase {
   choices: Choice[];
   /** Id of the one right choice. */
   answer: string;
-  /** Choice id -> what that pick gets wrong. Missing keys fall back to `explain`. */
+  /** Choice id -> what that pick gets wrong, as one string. Kept in step with `feedback` (see withFeedback). */
   whyWrong?: Record<string, string>;
+  /** Choice id -> the structured explanation for that wrong choice. Choice ids stay fixed when choices are shuffled. */
+  feedback?: Record<string, ChoiceFeedback>;
 }
 
 export interface TapAllItem extends ItemBase {
@@ -234,5 +304,9 @@ export interface StopDef {
   check?(rng: Rng): Item[];
   /** One Arcade practice item drawn from anywhere in the stop. */
   practice?(rng: Rng): Item;
+  /**
+   * New examples after a miss in a lesson or practice (see engine/fresh.ts). Return [] to use the default: one
+   * item with the same skill from the same lesson. Used when one skill needs a set, e.g. a tie and no tie.
+   */
+  fresh?(missed: Item, rng: Rng): Item[];
 }
-

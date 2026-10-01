@@ -1,5 +1,25 @@
 # LOGIC QUEST
 
+**v0.3.1 — Wrong answers teach first:** every wrong answer, in every lesson, now gets a full explanation:
+
+- **What your answer means, and exactly where it fails.** Each wrong choice has its own explanation, with a worked
+  case that proves it fails (for example, “3 red dragons and 3 yellow dragons” for a NOT that leaves out a tie).
+  Line-ups and grids quote each broken clue and say where your answer breaks it. Knights and knaves quote the words
+  that do not fit. Card puzzles name the cards left out or wrongly picked, and show them.
+- **Why the right answer works,** a short **Remember** with a question to ask yourself, and **Explain more
+  simply** with the smallest example, step by step. Everything can be read aloud.
+- **Then try again, then new examples.** After the explanation, "Try this question again" is practice with help.
+  Then come new examples on the same idea, answered on your own. A NOT comparison gets two: one with the tie or
+  exactly k in the answer, and one without. A missed “Can’t tell” gets one more and one that the clues decide.
+- **Check results** show the same explanation for each missed question.
+- **Grown-ups** see what happened after a miss: explanations shown, right retries with help, and new examples
+  passed on their own. These are counted apart from first-try answers, and are in the CSV.
+- A lesson left partway (a refresh, a closed app) picks up at the same try.
+- Each stop's audit worksheet, distractor by distractor, is in [`docs/audit/`](docs/audit/).
+
+**v0.3.0 — Pattern Lab bridges:** the Pattern Lab artwork, an optional Explorer Pattern Workshop, preparation
+events, age paths, reasoning prompts and saved bridge badges. See [docs/PATTERN_BRIDGES.md](docs/PATTERN_BRIDGES.md).
+
 **v0.2.0 — Deduction:** three more Journey stops and the Wrong-Answer Notebook:
 
 - **Grid Detective.** Ticks and crosses, only one left, spreading a tick, linking clues, and proving every mark.
@@ -53,7 +73,8 @@ npm run dev        # http://localhost:5192
 - **The Journey** has 12 stops, in first-principles order, from "True or False?" to "Clues & Chances". The
   plan for all of them is in [`../docs/logic-quest-plan.md`](../docs/logic-quest-plan.md).
 - **Learn first.** Every lesson opens with short key-idea cards, which can be read aloud. Then come 3–5 tries
-  with instant feedback. A miss names the exact mistake, and after two misses "Show me" gives the answer.
+  with instant feedback. A miss opens the explanation at once: what the answer means, exactly where it fails, and
+  why the right answer works. Then "Try this question again", then new examples on the same idea, on your own.
 - **Show what you know.** The stop check opens after every lesson is done. It passes only when every answer is
   right. A miss is "not yet": the result lists each missed idea with "Learn this again". The retry opens after
   those lessons are redone, and it uses new questions. Two not-yets in one day rest the stop until tomorrow.
@@ -63,7 +84,8 @@ npm run dev        # http://localhost:5192
   Settings.
 - **"Can't tell" is a real answer** whenever the clues don't decide it.
 - **Every puzzle is generated fresh** and proven to have exactly one answer before it is shown.
-- **Wrong-Answer Notebook:** a wrong check answer, a timeout, or "Show me" puts that idea in the notebook. It
+- **Wrong-Answer Notebook:** a wrong check answer, a timeout, or a lesson try not passed on its own after the
+  explanation puts that idea in the notebook. It
   comes back as a new question on the same idea: right away, 3 days after the first fix, then a week after the
   second. Three first-try fixes clear it.
 - **Arcade:** unlimited practice for every stop you have passed. Blitz, Conquer and more games come later.
@@ -78,4 +100,3 @@ npm run dev        # http://localhost:5192
   rules and the save model.
 - [docs/CONTENT_GUIDE.md](docs/CONTENT_GUIDE.md): how to write a stop, and the rules the contract test enforces.
 - [docs/PUBLISHING.md](docs/PUBLISHING.md): `/logic` on the Command Center, and GitHub Pages.
-

@@ -7,8 +7,12 @@
  * listing every assignment that fits and checks that full grids can be solved without guessing. Skins:
  * everyday (kids, pets and snacks), fantasy (dragons, gems and caves; robots, colors and jobs) and abstract
  * (letters, numbers and colors).
+ *
+ * Every item also carries the teaching shown after a wrong answer (Item.teach and, on choose items, one
+ * ChoiceFeedback per wrong choice), built and computed in the engine. A miss gets new examples from fresh() below.
  */
 import {
+  CANT,
   EVERYDAY,
   FANTASY,
   SKIN_IDS,
@@ -20,6 +24,7 @@ import {
   proofPuzzle,
   spreadPuzzle,
   type LinkMode,
+  type MarkClue,
   type SkinId,
 } from '../engine/puzzles/grid';
 import type { Choice, Item, LessonDef, Rng, Scene, StopDef } from '../engine/types';
@@ -123,7 +128,7 @@ const lessons: LessonDef[] = [
         scene: { kind: 'clues', clues: ['Ava has the dog or the fish.'] },
         body: [
           '“Ava has the dog or the fish” does not give you a ✓ yet.',
-          'But it does tell you that Ava does not have the cat. So that box gets a ✗.',
+          'But it does tell you that Ava does not have the cat. So the box for Ava and the cat gets a ✗.',
           'Look for the choice an “or” clue leaves out.',
         ],
       },
@@ -173,9 +178,9 @@ const lessons: LessonDef[] = [
       {
         title: 'Count the empty boxes',
         body: [
-          'Before you put a ✓, count the empty boxes in that row or column.',
+          'Before you put a ✓, count the empty boxes in its row or its column.',
           'Is just one box left? Then it gets the ✓.',
-          'Are two or more left? Then that row or column does not decide it yet. Look at the other rows and columns too.',
+          'Are two or more left? Then you can’t tell from the boxes you counted. Look at the other rows and columns too.',
         ],
       },
     ],
@@ -197,7 +202,7 @@ const lessons: LessonDef[] = [
         title: 'A ✓ fills its row',
         scene: CARD_GRIDS.spreadRow,
         body: [
-          'Say you find out that Mia has the cat. Put a ✓ in that box.',
+          'Say you find out that Mia has the cat. Put a ✓ in the box for Mia and the cat.',
           'Mia has just one pet. So every other box in Mia’s row gets a ✗.',
         ],
       },
@@ -213,7 +218,7 @@ const lessons: LessonDef[] = [
         title: 'Don’t forget the column',
         body: [
           'It is easy to fill in the row and forget the column.',
-          'Each time you put a ✓, do both. Cross out the rest of the row. Then cross out the rest of the column.',
+          'Each time you put a ✓, cross out the rest of its row. Then cross out the rest of its column.',
         ],
       },
       {
@@ -222,7 +227,7 @@ const lessons: LessonDef[] = [
         body: [
           'Mia has the cat, and a clue says Leo does not have the dog.',
           'Now Leo’s row has only one empty box: the fish. So Leo has the fish.',
-          'Spread that ✓ too. Then the dog is the only pet left for Ava.',
+          'Spread Leo’s ✓ too. Then the dog is the only pet left for Ava.',
         ],
       },
       {
@@ -391,6 +396,38 @@ function arcade(rng: Rng): Item {
   }
 }
 
+/** The kind of clue a lesson 1 item turns into a mark: “has” asks for a ✓; an “or” clue names two things. */
+function markClueOf(item: Item): MarkClue {
+  if (/gets a ✓ from this clue\?$/.test(item.prompt)) return 'is';
+  const clue = /“([^”]*)”/.exec(item.prompt)?.[1] ?? '';
+  return / or /.test(clue) ? 'either' : 'isnt';
+}
+
+/**
+ * New examples after a miss (see engine/fresh.ts). Where “Can’t tell yet” is a choice, a miss gets two: one the
+ * marks or clues decide and one they do not, so each side of the boundary is checked, starting with the missed
+ * skill. A missed lesson 1 mark gets the same kind of clue again. Other skills use the default (one new item on the
+ * same skill from the same lesson).
+ */
+function fresh(missed: Item, rng: Rng): Item[] {
+  const id = 'new';
+  const skin = () => rng.pick(SKIN_IDS);
+  const decided = () => onlyOnePuzzle(rng, { id, skin: skin(), mode: rng.pick(['col', 'row'] as const) }).item;
+  const open = () => onlyOnePuzzle(rng, { id, skin: skin(), mode: 'cant' }).item;
+  const link = (mode: LinkMode) => linkPuzzle(rng, { id, skin: skin(), mode }).item;
+  const enough = (tell: boolean) => enoughPuzzle(rng, { id, skin: skin(), tell }).item;
+  const answer = missed.kind === 'choose' ? missed.answer : '';
+  switch (missed.skill) {
+    case 's4.grid-marks': return [markPuzzle(rng, { id, skin: skin(), t: markClueOf(missed) }).item];
+    case 's4.only-one-left': return [decided(), open()];
+    case 's4.not-decided': return [open(), decided()];
+    case 's4.link': return [link('link'), link('notLink')];
+    case 's4.not-link': return answer === CANT ? [link('notLink'), link('notLink2')] : [link('notLink2'), link('notLink')];
+    case 's4.enough-clues': return [enough(answer === 'yes'), enough(answer !== 'yes')];
+    default: return [];
+  }
+}
+
 export const stop4: StopDef = {
   n: 4,
   id: 's4',
@@ -400,5 +437,5 @@ export const stop4: StopDef = {
   lessons,
   check,
   practice: arcade,
+  fresh,
 };
-

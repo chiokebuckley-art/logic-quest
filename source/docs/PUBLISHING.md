@@ -33,4 +33,3 @@ On a phone, open the link and choose Add to Home Screen. The game then opens ful
 ## One offline file
 
 `npm run build:single` writes `dist-single/logic-quest.html`, the whole game in one HTML file.
-

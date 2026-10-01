@@ -12,12 +12,16 @@
 import {
   FANTASY,
   RULE,
+  SAY_TARGETS,
   SKIN_IDS,
   andOrItem,
+  andOrPlanOf,
   puzzleItem,
+  sayPlanOf,
   supposeItem,
   whoCanSayItem,
   wordsItem,
+  wordsPlanOf,
   type Claims,
   type Kind,
   type SayType,
@@ -101,7 +105,7 @@ export const L4_EXAMPLE: { ids: string[]; claims: Claims; answer: Record<string,
   answer: { ava: 'knave', ben: 'knight', cal: 'knave' },
 };
 
-/** Lesson 5: Raj says "I am a knave and Vic is a knight." Only answer: both are knaves. */
+/** Lesson 5: Raj says "I am a knave and Vic is a knight." Only answer: Raj and Vic are both knaves. */
 export const L5_EXAMPLE: { ids: string[]; claims: Claims; answer: Record<string, Kind> } = {
   ids: ['raj', 'vic'],
   claims: { raj: { t: 'and', cs: [{ t: 'is', who: 'raj', kind: 'knave' }, { t: 'is', who: 'vic', kind: 'knight' }] } },
@@ -121,6 +125,8 @@ const lessons: LessonDef[] = [
           'On Riddle Island, every person is a knight or a knave.',
           'A knight always tells the truth. Every sentence a knight says is true.',
           'A knave always lies. Every sentence a knave says is false.',
+          'Knight or knave is an islander’s kind.',
+          'That is the rule. A knight with true words fits the rule. So does a knave with false words.',
           'Some puzzles have elves, wizards or islanders named A, B and C. The rules stay the same.',
         ],
       },
@@ -145,8 +151,8 @@ const lessons: LessonDef[] = [
         title: 'When you can’t tell',
         body: [
           'Cal says, “I can swim.” But no one knows if Cal is a knight or a knave.',
-          'If Cal is a knight, Cal can swim. If Cal is a knave, Cal cannot swim.',
-          'So you can’t tell. That is a real answer. It is not giving up.',
+          'If Cal is a knight, Cal can swim. If Cal is a knave, Cal cannot swim. Each of these is a case: one full way things could be.',
+          'The two cases both work, but they give different answers. So you can’t tell. That is a real answer. It is not giving up.',
         ],
       },
       {
@@ -182,7 +188,7 @@ const lessons: LessonDef[] = [
     title: 'What nobody can say',
     ideas: [
       {
-        title: 'Test both kinds',
+        title: 'Test each kind',
         body: [
           'Could a knight say a sentence? Pretend a knight says it. The words must be true.',
           'Could a knave say it? Pretend a knave says it. The words must be false.',
@@ -194,7 +200,7 @@ const lessons: LessonDef[] = [
         body: [
           'A knight who says, “I am a knight,” tells the truth. That works.',
           'A knave who says it is lying, since a knave is not a knight. That works too.',
-          'So both could say it. These words don’t tell you who is who.',
+          'So either kind could say it. These words don’t tell you who is who.',
         ],
       },
       {
@@ -211,7 +217,7 @@ const lessons: LessonDef[] = [
         body: [
           'A sentence that is always true, like “Two plus two is four,” fits only a knight.',
           'A sentence that is always false fits only a knave.',
-          '“I am a knight” fits both. “I am a knave” fits neither.',
+          '“I am a knight” fits either kind. “I am a knave” fits no one.',
         ],
       },
       {
@@ -221,7 +227,7 @@ const lessons: LessonDef[] = [
           'Ben is a knave. Who could say, “Ben and I are the same kind”?',
           'A knight is not the same kind as Ben. So from a knight, the words would be false.',
           'A knave is the same kind as Ben. So from a knave, the words would be true.',
-          'Neither one works. So no one could say it.',
+          'A knight can’t say it, and a knave can’t say it. So no one could say it.',
         ],
       },
     ],
@@ -273,11 +279,11 @@ const lessons: LessonDef[] = [
         ],
       },
       {
-        title: 'Four ways it can go',
+        title: 'Four possible answers',
         body: [
           'Suppose one islander is a knight. Then try the other islander as a knight, and then as a knave.',
-          'Each of those is a case. If just one case works, you know what the other islander must be.',
-          'If both cases work, you can’t tell. If both break the rule, your guess crashes.',
+          'Each of those is a case: one full way things could be. If just one case works, you know what the other islander must be.',
+          'If the two cases both work, you can’t tell. If the two cases both break the rule, your guess crashes.',
         ],
       },
     ],
@@ -349,8 +355,8 @@ const lessons: LessonDef[] = [
         scene: speakers([['Cal', 'Ava and Ben are both knights.']]),
         body: [
           'Cal is a knave. Cal says, “Ava and Ben are both knights.”',
-          'The words are false. But that does not mean both are knaves.',
-          'An “and” sentence is false when at least one part is false. So at least one of them is a knave, but maybe not both.',
+          'The words are false. But that does not mean Ava and Ben are both knaves.',
+          'An “and” sentence is false when at least one part is false. So at least one of Ava and Ben is a knave. It could be just one.',
         ],
       },
       {
@@ -359,22 +365,22 @@ const lessons: LessonDef[] = [
         body: [
           'Cal is a knave. Cal says, “Ava is a knight or Ben is a knight.”',
           'An “or” sentence is false only when both parts are false.',
-          'So Ava is not a knight, and Ben is not a knight. Both are knaves.',
+          'So Ava is not a knight, and Ben is not a knight. Ava and Ben are both knaves.',
         ],
       },
       {
         title: 'A knight’s “or”',
         body: [
           'Now say Dee is a knight. Dee says, “Ava is a knight or Ben is a knight.”',
-          'Those words are true. So at least one of them is a knight. Maybe both are.',
-          'Remember: in logic, “or” includes both.',
+          'Those words are true. So at least one of Ava and Ben is a knight. Maybe Ava and Ben both are.',
+          'Remember: in logic, “or” includes the case where both parts are true.',
         ],
       },
       {
         title: 'List the cases',
         body: [
           'Not sure? List the four cases for Ava and Ben.',
-          'Both are knights. Only Ava is a knight. Only Ben is a knight. Both are knaves.',
+          'Ava and Ben are both knights. Only Ava is a knight. Only Ben is a knight. Ava and Ben are both knaves.',
           'Cross out each case where the speaker’s words don’t fit. Then see what is left.',
         ],
       },
@@ -458,6 +464,76 @@ function arcade(rng: Rng): Item {
   }
 }
 
+// ---------- new examples after a miss ----------
+
+const KIND_PICK = ['knight', 'knave'] as const;
+
+/** Lesson 1: the other side of the "can you tell?" edge. A known speaker or fact becomes unknown, and back. */
+function wordsContrast(plan: Omit<WordsOpts, 'id' | 'skin'>, rng: Rng): Omit<WordsOpts, 'id' | 'skin'> {
+  switch (plan.type) {
+    case 'fact': return { type: 'fact', speaker: plan.speaker === 'unknown' ? rng.pick(KIND_PICK) : 'unknown', negative: rng.chance(0.5) };
+    case 'other': return plan.speaker === 'unknown' ? { type: 'other', speaker: rng.pick(KIND_PICK) } : { type: 'other', speaker: 'unknown' };
+    case 'kindFromFact': return { type: 'kindFromFact', truth: plan.truth === 'unknown' ? rng.chance(0.5) : 'unknown', negative: rng.chance(0.5) };
+    case 'speakerFromOther': return { type: 'other', speaker: 'unknown' };
+  }
+}
+
+/** Lesson 3: a different outcome. One case works, two work, or none: each is checked against another. */
+function supposeContrast(ans: SupposeAnswer, rng: Rng): SupposeAnswer {
+  return ans === 'knight' || ans === 'knave' ? rng.pick(['cant', 'crash'] as const) : rng.pick(KIND_PICK);
+}
+
+/**
+ * New examples after a miss, on both sides of the idea's edge, like the NOT flip's tie and no tie. Each set has an
+ * item like the missed one (the same kind of question and the same kind of answer, with new names and words) and,
+ * for the choice questions, one where the answer is of another kind:
+ *  - lesson 1: a known speaker (or fact) and an unknown one, so "Can’t tell" is tested both ways
+ *  - lesson 2: the same answer from other words, and a different answer
+ *  - lesson 3: the same outcome (one case, two cases, or a crash), and a different one
+ *  - lesson 5: the same speaker and "and" or "or", and the same speaker with the other word
+ *  - puzzles: one more puzzle of the same size and words
+ */
+function fresh(missed: Item, rng: Rng): Item[] {
+  const skin = () => rng.pick(SKIN_IDS);
+  const id = 'new';
+  if (missed.kind === 'assign') {
+    const n = missed.people.length === 3 ? 3 : 2;
+    const pool = missed.lesson === L5 ? 'andor' : 'basic';
+    return [puzzleItem(rng, { id, skin: skin(), n, pool, lesson: missed.lesson, skill: missed.skill }).item];
+  }
+  if (missed.kind !== 'choose') return [];
+  switch (missed.lesson) {
+    case L1: {
+      const plan = wordsPlanOf(missed);
+      if (!plan) return [];
+      return [wordsItem(rng, { id, skin: skin(), ...plan }).item, wordsItem(rng, { id, skin: skin(), ...wordsContrast(plan, rng) }).item];
+    }
+    case L2: {
+      const plan = sayPlanOf(missed);
+      if (!plan) return [];
+      // The same answer from other words (a "self" sentence has only one other way to give its answer).
+      const sameType: SayType = plan.type === 'self' ? 'partner' : plan.type;
+      const otherType = rng.pick((['self', 'fact', 'partner'] as const).filter((t) => SAY_TARGETS[t].some((x) => x !== plan.target)));
+      const otherTarget = rng.pick(SAY_TARGETS[otherType].filter((x) => x !== plan.target));
+      return [
+        whoCanSayItem(rng, { id, skin: skin(), type: sameType, target: plan.target }).item,
+        whoCanSayItem(rng, { id, skin: skin(), type: otherType, target: otherTarget }).item,
+      ];
+    }
+    case L3: {
+      const ans = missed.answer as SupposeAnswer;
+      return [supposeItem(rng, { id, skin: skin(), target: ans }).item, supposeItem(rng, { id, skin: skin(), target: supposeContrast(ans, rng) }).item];
+    }
+    case L5: {
+      const plan = andOrPlanOf(missed);
+      if (!plan) return [];
+      const other = plan.op === 'and' ? 'or' : 'and';
+      return [andOrItem(rng, { id, skin: skin(), speaker: plan.speaker, op: plan.op }).item, andOrItem(rng, { id, skin: skin(), speaker: plan.speaker, op: other }).item];
+    }
+    default: return [];
+  }
+}
+
 export const stop5: StopDef = {
   n: 5,
   id: 's5',
@@ -467,5 +543,5 @@ export const stop5: StopDef = {
   lessons,
   check,
   practice: arcade,
+  fresh,
 };
-

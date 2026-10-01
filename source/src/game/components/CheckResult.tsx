@@ -7,8 +7,10 @@ import { useEffect, useRef } from 'react';
 import type { CheckKind } from '../../engine/journey/mastery';
 import type { Answer, Item, Thing } from '../../engine/types';
 import { describeAnswer, describeAssignLines, describeRight, rightAnswer } from '../describe';
+import { explanationFor } from '../explanation';
 import { CHECK_LABEL } from './CheckRunner';
 import type { AnswerRecord, CheckResultProps } from './contracts';
+import { ExplanationPanel } from './ExplanationPanel';
 import { PlayHeader } from './ItemView';
 import { SceneView } from './SceneView';
 import { PlayIcon, ThingCard } from './ThingCard';
@@ -85,8 +87,9 @@ function YouSaid({ item, record }: { item: Item; record?: AnswerRecord }) {
   return <AnswerWords item={item} answer={a} />;
 }
 
-function MissedItem({ item, record }: { item: Item; record?: AnswerRecord }) {
+function MissedItem({ item, record, readAloud }: { item: Item; record?: AnswerRecord; readAloud: boolean }) {
   const said = record?.timedOut || record?.answer;
+  const model = explanationFor(item, record?.answer ?? null);
   return (
     <li className="play-missed">
       <p className="play-missed-prompt">{item.prompt}</p>
@@ -120,14 +123,13 @@ function MissedItem({ item, record }: { item: Item; record?: AnswerRecord }) {
         <div>
           <RightAnswer item={item} />
         </div>
-        <span className="play-muted">Why</span>
-        <span>{item.explain}</span>
       </div>
+      <ExplanationPanel model={model} readAloud={readAloud} tone="review" autoFocus={false} showAnswers={false} />
     </li>
   );
 }
 
-export function CheckResult({ stop, kind, items, records, passed, missed, onLearnAgain, onDone }: CheckResultProps) {
+export function CheckResult({ stop, kind, items, records, passed, missed, onLearnAgain, onDone, readAloud = false }: CheckResultProps) {
   const label = CHECK_LABEL[kind];
   const total = items.length;
   const headRef = useRef<HTMLHeadingElement>(null);
@@ -196,7 +198,7 @@ export function CheckResult({ stop, kind, items, records, passed, missed, onLear
                 </h3>
                 <ul className="play-missed-list">
                   {mine.map((w) => (
-                    <MissedItem key={w.item.id} item={w.item} record={w.record} />
+                    <MissedItem key={w.item.id} item={w.item} record={w.record} readAloud={readAloud} />
                   ))}
                 </ul>
                 {missed.includes(id) && (
@@ -252,4 +254,3 @@ export function CheckResult({ stop, kind, items, records, passed, missed, onLear
     </div>
   );
 }
-

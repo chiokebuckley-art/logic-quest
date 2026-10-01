@@ -81,4 +81,3 @@ export const STOP_ICONS: Record<string, IconName> = {
   s11: 'shield',
   s12: 'progress',
 };
-

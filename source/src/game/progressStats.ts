@@ -112,6 +112,26 @@ export function firstTryWinsThisWeek(stats: Readonly<Record<string, Record<strin
   return totals(stats, today, 7).firstTry;
 }
 
+/** What happened after misses in the last `days` days: explanations shown, right retries with help, new examples
+ * tried, new-example sets passed on their own, and "Explain more simply" used. */
+export function helpTotals(
+  help: Readonly<Record<string, Record<string, readonly number[]>>> | undefined,
+  today: string,
+  days: number,
+): { explained: number; retried: number; fresh: number; freshPassed: number; simpler: number } {
+  const t = { explained: 0, retried: 0, fresh: 0, freshPassed: 0, simpler: 0 };
+  for (const day of dayRange(today, days)) {
+    for (const h of Object.values(help?.[day] ?? {})) {
+      t.explained += h[0] ?? 0;
+      t.retried += h[1] ?? 0;
+      t.fresh += h[2] ?? 0;
+      t.freshPassed += h[3] ?? 0;
+      t.simpler += h[4] ?? 0;
+    }
+  }
+  return t;
+}
+
 /** Whole-number percent, or null when there is nothing to divide. */
 export function percent(part: number, whole: number): number | null {
   return whole > 0 ? Math.round((part / whole) * 100) : null;
@@ -127,13 +147,13 @@ export const SKILL_NAMES: Readonly<Record<string, string>> = {
   's1.which-not-statement': 'Spot what is not a statement',
   's1.check-cards': 'True or false from the cards',
   's1.cant-tell': 'Can’t tell yet',
-  's1.not-every': 'Opposite of “every”',
-  's1.not-some': 'Opposite of “there is”',
-  's1.not-none': 'Opposite of “no”',
-  's1.not-exactly': 'Opposite of “exactly”',
-  's1.not-at-least': 'Opposite of “at least”',
-  's1.not-first': 'Opposite of “the first card”',
-  's1.not-more': 'Opposite of “more than”',
+  's1.not-every': 'The NOT of “every”',
+  's1.not-some': 'The NOT of “there is”',
+  's1.not-none': 'The NOT of “no”',
+  's1.not-exactly': 'The NOT of “exactly”',
+  's1.not-at-least': 'The NOT of “at least”',
+  's1.not-first': 'The NOT of “the first card”',
+  's1.not-more': 'The NOT of “more than” (a tie or exactly k)',
   's1.signs-count': 'Treasure signs: count the true signs',
   's1.signs-owner': 'Treasure signs: the treasure box’s sign',
   's2.not': 'NOT',
@@ -267,4 +287,3 @@ export function shortDay(day: string): string {
 export function fileSlug(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'player';
 }
-

@@ -1,6 +1,8 @@
 /**
- * Draws one item and runs it. 'learn' mode: Check, then feedback (right / not yet), a hint, Try again,
- * and "Show me" after two misses. 'check' mode: no feedback and no hint, one answer, an optional calm
+ * Draws one item and runs it. 'learn' mode teaches first: a wrong answer opens the full explanation at once
+ * (ExplanationPanel: the gap in the chosen answer, a labelled case, the right answer and the rule), then
+ * "Try this question again". A right retry after the explanation is practice with help, so the host (LearnItem)
+ * follows it with a new example. 'check' mode: no feedback and no hint, one answer, an optional calm
  * timer that pauses while the page is hidden. Grading always goes through grade() from the engine.
  * Every record carries the player's last answer (not on a timeout), for "You said" on the check result.
  *
@@ -12,11 +14,15 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import type { KeyboardEvent, ReactElement, Ref } from 'react';
 import { clueHolds, grade } from '../../engine/grade';
-import type { Answer, Graded, Item, LineClue, OrderItem } from '../../engine/types';
-import { canSpeak, itemSpeech, speak, stopSpeaking } from '../speech';
-import { AssignGrid, AssignToggles, assignReady, assignValues, solvedMarks, type Marks } from './AssignView';
+import type { Answer, Item, LineClue, OrderItem } from '../../engine/types';
+import { explanationFor, type ExplanationModel } from '../explanation';
+import { ExplanationPanel } from './ExplanationPanel';
+import { itemSpeech } from '../speech';
+import { AssignGrid, AssignToggles, assignReady, assignValues, type Marks } from './AssignView';
 import type { AnswerRecord, ItemViewProps } from './contracts';
 import { MultiView } from './MultiView';
+import { ReadAloudButton } from './ReadAloud';
+export { ReadAloudButton };
 import { SceneView, type ClueState } from './SceneView';
 import { PlayIcon, ThingCard } from './ThingCard';
 
@@ -124,45 +130,6 @@ export function waitNoteFor(item: Item, ready: boolean): string {
 
 // ---------- shared pieces ----------
 
-/** Speaker button. Reads `text()` aloud; press again to stop. */
-export function ReadAloudButton({ text }: { text: () => readonly string[] }) {
-  const [on, setOn] = useState(false);
-  const [available, setAvailable] = useState(true);
-  const mounted = useRef(true);
-  const onRef = useRef(false);
-  onRef.current = on;
-  useEffect(() => {
-    mounted.current = true;
-    setAvailable(canSpeak());
-    return () => {
-      mounted.current = false;
-      if (onRef.current) stopSpeaking();
-    };
-  }, []);
-  const click = () => {
-    if (on) {
-      stopSpeaking();
-      setOn(false);
-      return;
-    }
-    const ok = speak(text(), { onEnd: () => { if (mounted.current) setOn(false); } });
-    setOn(ok);
-    if (!ok) setAvailable(false);
-  };
-  return (
-    <button
-      type="button"
-      className="play-speak"
-      aria-label="Read aloud"
-      aria-pressed={on}
-      disabled={!available}
-      title={available ? (on ? 'Stop reading' : 'Read aloud') : 'This browser cannot read aloud'}
-      onClick={click}
-    >
-      <PlayIcon name={on ? 'stop' : 'speaker'} />
-    </button>
-  );
-}
 
 export type DotState = 'done' | 'now' | 'todo';
 
@@ -242,7 +209,14 @@ function TimerBar({ left, limit }: { left: number; limit: number }) {
 
 // ---------- the item ----------
 
-type Phase = 'answer' | 'right' | 'wrong' | 'shown';
+/** The title of the "right" panel: first try, on your own (a new example), or right after help. */
+export function rightTitle(stage: 'first' | 'fresh', misses: number, hint: boolean): string {
+  if (misses > 0) return 'Right.';
+  if (stage === 'fresh') return hint ? 'Right.' : 'Right, on your own.';
+  return 'Right, first try.';
+}
+
+type Phase = 'answer' | 'right' | 'explained';
 
 export interface ItemViewExtraProps {
   /** Small label above the question. Default: "Your turn" (learn) or "Question" (check). */
@@ -251,6 +225,15 @@ export interface ItemViewExtraProps {
   nextLabel?: string;
   /** Move focus to the question when it appears. Default true. */
   autoFocus?: boolean;
+  /**
+   * Learn mode. 'first': the item itself (a miss leads to the explanation and a retry). 'fresh': a new example
+   * after a miss (a miss shows its explanation, then the host brings another new example).
+   */
+  stage?: 'first' | 'fresh';
+  /** First stage: the button after a right retry. The host sets it to "Try a new example" when one follows. */
+  afterHelpLabel?: string;
+  /** Fresh stage: also offer "Move on for now" after a miss. */
+  canMoveOn?: boolean;
 }
 
 /** One item. Its state resets whenever the item changes. */
@@ -258,7 +241,7 @@ export function ItemView(props: ItemViewProps & ItemViewExtraProps) {
   return <ItemRun key={props.item.id} {...props} />;
 }
 
-function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, nextLabel = 'Next', autoFocus = true }: ItemViewProps & ItemViewExtraProps) {
+function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, nextLabel = 'Next', autoFocus = true, stage = 'first', afterHelpLabel = nextLabel, canMoveOn = false }: ItemViewProps & ItemViewExtraProps) {
   const learn = mode === 'learn';
   const uid = useId().replace(/[^A-Za-z0-9_-]/g, '');
   const promptId = `${uid}-prompt`;
@@ -273,15 +256,18 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
   const [flagged, setFlagged] = useState<number[] | null>(null);
   const [phase, setPhase] = useState<Phase>('answer');
   const [misses, setMisses] = useState(0);
-  const [graded, setGraded] = useState<Graded | null>(null);
   const [hintOpen, setHintOpen] = useState(false);
+  /** The explanation of the latest wrong answer. Kept for "Review the explanation" during a retry. */
+  const [explained, setExplained] = useState<ExplanationModel | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const help = useRef({ hint: false, simpler: false, gap: undefined as string | undefined });
   const [submitted, setSubmitted] = useState(false);
   const [left, setLeft] = useState(1);
   const [live, setLive] = useState('');
 
   const finished = useRef(false);
   const solvedMs = useRef<number | null>(null);
-  /** The answer at the last Check (learn mode), for the record. "Show me" does not replace it. */
+  /** The answer at the last Check (learn mode), for the record. */
   const lastAnswer = useRef<Answer | null>(null);
   const elapsed = useRef(0);
   const promptRef = useRef<HTMLParagraphElement>(null);
@@ -305,6 +291,19 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
     ms: Math.max(0, solvedMs.current ?? Date.now() - startedAt),
     ...(timedOut ? { timedOut: true } : {}),
     ...(given && !timedOut ? { answer: given } : {}),
+    ...(learn
+      ? {
+          help: {
+            explained: misses > 0,
+            simpler: help.current.simpler,
+            hint: help.current.hint,
+            retried: misses > 0 && correct,
+            fresh: 0,
+            freshPassed: false,
+            ...(help.current.gap ? { gap: help.current.gap } : {}),
+          },
+        }
+      : {}),
   });
 
   // ----- check mode -----
@@ -351,40 +350,37 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
     if (phase !== 'answer' || !canSubmit) return;
     const g = grade(item, answer);
     lastAnswer.current = answer;
-    setGraded(g);
     setHintOpen(false);
+    setReviewOpen(false);
     setFlagged(!g.correct && item.kind === 'assign' && g.broken?.length ? [...g.broken] : null);
     if (g.correct) {
       solvedMs.current = Date.now() - startedAt;
       setPhase('right');
-      setLive(misses === 0 ? 'Right, first try.' : 'Right.');
+      setLive(misses === 0 ? (stage === 'fresh' && !help.current.hint ? 'Right, on your own.' : 'Right, first try.') : 'Right.');
     } else {
-      setMisses((m) => m + 1);
-      setPhase('wrong');
-      setLive(`Not yet. ${g.feedback}`);
+      // Teach at once: no second wrong guess before the explanation.
+      const m = explanationFor(item, answer);
+      if (m.gap && !help.current.gap) help.current.gap = m.gap;
+      setExplained(m);
+      setMisses((n) => n + 1);
+      setPhase('explained');
+      setLive(`Not yet. ${m.title}`);
     }
   };
+  /** Clear only the chosen answer, keep the explanation for review, and let the player answer again. */
   const tryAgain = () => {
+    if (item.kind === 'choose') setPick(null);
+    if (item.kind === 'tapall' || item.kind === 'multi') setChosen([]);
     setPhase('answer');
-    setGraded(null);
-    setLive('');
+    setLive('Try the question again. You can review the explanation.');
   };
-  const showMe = () => {
-    solvedMs.current = Date.now() - startedAt;
-    if (item.kind === 'choose') setPick(item.answer);
-    if (item.kind === 'tapall') setChosen([...item.answer]);
-    if (item.kind === 'order') setSlots([...item.answer]);
-    if (item.kind === 'assign') setMarks(solvedMarks(item));
-    if (item.kind === 'multi') setChosen([...item.answer]);
-    setFlagged(null);
-    setPhase('shown');
-    setLive('Here is the answer.');
-  };
-  const next = () => {
+  const finish = (correct: boolean, extra?: { moveOn?: boolean }) => {
     if (finished.current) return;
     finished.current = true;
-    onDone(record(phase === 'right', phase === 'right' && misses === 0, lastAnswer.current));
+    const r = record(correct, correct && misses === 0, lastAnswer.current);
+    onDone(extra?.moveOn && r.help ? { ...r, help: { ...r.help, moveOn: true } } : r);
   };
+  const next = () => finish(phase === 'right');
 
   // ----- focus -----
   // Only when the item first appears.
@@ -392,8 +388,9 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
     if (autoFocus) promptRef.current?.focus({ preventScroll: true });
   }, []);
   useEffect(() => {
-    if (phase !== 'answer') panelBtnRef.current?.focus();
-    else if (misses > 0) promptRef.current?.focus();
+    // The explanation focuses its own title. A right answer focuses its button; a retry goes back to the question.
+    if (phase === 'right') panelBtnRef.current?.focus();
+    else if (phase === 'answer' && misses > 0) promptRef.current?.focus();
   }, [phase]);
   useEffect(() => {
     if (focusName.current) {
@@ -417,7 +414,8 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
     if (!locked) setPick(item.choices[j].id);
   };
 
-  const revealed = learn && (phase === 'right' || phase === 'shown');
+  // After a wrong answer the explanation gives the answer away, so the choices show it too.
+  const revealed = learn && (phase === 'right' || phase === 'explained');
 
   let controls: ReactElement;
   if (item.kind === 'choose') {
@@ -427,7 +425,7 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
       <div role="radiogroup" aria-labelledby={promptId} className={`play-choices${short ? ' play-choices--short' : ''}`}>
         {item.choices.map((c, i) => {
           const isRight = revealed && c.id === item.answer;
-          const isMiss = learn && phase === 'wrong' && c.id === pick;
+          const isMiss = learn && phase === 'explained' && c.id === pick;
           const cls = ['play-choice', c.id === pick ? 'is-picked' : '', isRight ? 'is-right' : '', isMiss ? 'is-miss' : ''].filter(Boolean).join(' ');
           return (
             <button
@@ -597,6 +595,12 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
 
       {learn && phase === 'answer' && (
         <>
+          {explained && (
+            <button type="button" className="play-btn play-btn--ghost play-btn--small play-review-toggle" aria-expanded={reviewOpen} onClick={() => setReviewOpen((o) => !o)}>
+              {reviewOpen ? 'Hide the explanation' : 'Review the explanation'}
+            </button>
+          )}
+          {explained && reviewOpen && <ExplanationPanel model={explained} readAloud={readAloud} autoFocus={false} tone="review" onSimpler={() => { help.current.simpler = true; }} />}
           {hintOpen && item.hint && (
             <div id={hintId} className="play-hint">
               <PlayIcon name="bulb" size={18} />
@@ -605,7 +609,16 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
           )}
           <div className="play-actions">
             {item.hint && (
-              <button type="button" className="play-btn play-btn--ghost" aria-expanded={hintOpen} aria-controls={hintId} onClick={() => setHintOpen((o) => !o)}>
+              <button
+                type="button"
+                className="play-btn play-btn--ghost"
+                aria-expanded={hintOpen}
+                aria-controls={hintId}
+                onClick={() => {
+                  if (!hintOpen) help.current.hint = true;
+                  setHintOpen((o) => !o);
+                }}
+              >
                 Hint
               </button>
             )}
@@ -632,45 +645,47 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
         <div className="play-feedback play-feedback--right">
           <div className="play-feedback-title">
             <PlayIcon name="check" size={20} />
-            <span>{misses === 0 ? 'Right, first try.' : 'Right.'}</span>
+            <span>{rightTitle(stage, misses, help.current.hint)}</span>
           </div>
+          {stage === 'first' && misses > 0 && (
+            <p className="play-feedback-note">You fixed it with the explanation’s help. That counts as practice with help.</p>
+          )}
+          {stage === 'fresh' && help.current.hint && <p className="play-feedback-note">You used a hint, so this idea will come back in your notebook for another try later.</p>}
           <p>{item.explain}</p>
           <button ref={panelBtnRef} type="button" className="play-btn play-btn--teal play-btn--block" onClick={next}>
-            {nextLabel}
+            {stage === 'first' && misses > 0 ? afterHelpLabel : nextLabel}
           </button>
         </div>
       )}
 
-      {learn && phase === 'wrong' && graded && (
-        <div className="play-feedback play-feedback--wrong">
-          <div className="play-feedback-title">
-            <span>Not yet</span>
-          </div>
-          <p>{graded.feedback}</p>
-          {misses >= 2 && <p className="play-feedback-note">You can try again, or let me show you the answer.</p>}
-          <div className="play-actions">
-            <button ref={panelBtnRef} type="button" className="play-btn play-btn--retry play-btn--grow" onClick={tryAgain}>
-              Try again
-            </button>
-            {misses >= 2 && (
-              <button type="button" className="play-btn play-btn--ghost play-btn--grow" onClick={showMe}>
-                Show me
+      {learn && phase === 'explained' && explained && (
+        <ExplanationPanel
+          key={misses}
+          model={explained}
+          readAloud={readAloud}
+          simplerOpen={misses >= 2 || stage === 'fresh'}
+          onSimpler={() => {
+            help.current.simpler = true;
+          }}
+          actions={
+            stage === 'first' ? (
+              <button type="button" className="play-btn play-btn--retry play-btn--grow" onClick={tryAgain}>
+                Try this question again
               </button>
-            )}
-          </div>
-        </div>
-      )}
-
-      {learn && phase === 'shown' && (
-        <div className="play-feedback play-feedback--shown">
-          <div className="play-feedback-title">
-            <span>Here is the answer</span>
-          </div>
-          <p>{item.explain}</p>
-          <button ref={panelBtnRef} type="button" className="play-btn play-btn--primary play-btn--block" onClick={next}>
-            {nextLabel}
-          </button>
-        </div>
+            ) : (
+              <>
+                <button type="button" className="play-btn play-btn--retry play-btn--grow" onClick={() => finish(false)}>
+                  Try a new example
+                </button>
+                {canMoveOn && (
+                  <button type="button" className="play-btn play-btn--ghost play-btn--grow" onClick={() => finish(false, { moveOn: true })}>
+                    Move on for now
+                  </button>
+                )}
+              </>
+            )
+          }
+        />
       )}
 
       <div className="play-sr" role="status" aria-live="polite">
@@ -679,4 +694,3 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
     </section>
   );
 }
-

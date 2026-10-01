@@ -56,6 +56,7 @@ export function CheckScreen({ route }: { route: CheckRoute }) {
           passed={last.passed}
           missed={missed}
           onLearnAgain={(lessonId) => actions.navigate({ name: 'lesson', stopId: stop.id, lessonId, from: 'check' })}
+          readAloud={save.settings.readAloud}
           onDone={toJourney}
         />
       </div>
@@ -99,4 +100,3 @@ function NotOpen({ onBack }: { onBack(): void }) {
     </div>
   );
 }
-

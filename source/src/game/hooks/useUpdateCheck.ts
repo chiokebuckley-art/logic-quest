@@ -60,4 +60,3 @@ export function reloadFresh(): void {
   u.searchParams.set('u', Date.now().toString(36));
   window.location.replace(u.toString());
 }
-

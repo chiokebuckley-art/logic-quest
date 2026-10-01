@@ -56,4 +56,3 @@ describe('cards this version cannot ask about', () => {
     expect(canFix(nb['s7.some'], STOPS)).toBe(false);
   });
 });
-

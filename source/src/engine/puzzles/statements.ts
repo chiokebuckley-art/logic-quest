@@ -6,14 +6,15 @@
  *    True in every filling -> 'true', false in every filling -> 'false', otherwise 'cant'.
  *  - rowItem(): a "true, false or can't tell" question. Its explanation comes from the case check:
  *    a visible card that settles it, or the face-down card that could go either way.
- *  - notItem(): "pick the exact opposite". The right choice is checked to equal NOT(statement) on every
- *    test row, and each wrong choice is checked to agree with the statement on some row. The row that
- *    proves each wrong choice is wrong is shown in its feedback.
+ *  - notItem(): "pick the NOT". The right choice is checked to equal NOT(statement) on every test row, and
+ *    each wrong choice is checked to agree with the statement on some row. That row becomes the labelled
+ *    example in the choice's feedback, and the item teaches with cases that cover every way it can go.
  *
  * Only the rng passed in is used for variety. The fixed test rows come from their own fixed seed.
  */
 import { createRng } from '../rng';
-import type { Choice, ChooseItem, Color, Rng, Shape, Size, Thing } from '../types';
+import { syncWhyWrong } from '../teach';
+import type { Choice, ChoiceFeedback, ChooseItem, Color, Rng, Shape, Size, Teach, TeachCase, Thing, Truth } from '../types';
 
 export const COLORS: readonly Color[] = ['red', 'blue', 'yellow'];
 export const SHAPES: readonly Shape[] = ['circle', 'square', 'triangle'];
@@ -62,7 +63,7 @@ export interface Made {
   stmt?: Stmt;
   claims?: Claim[];
   /** NOT-flip items: the statement, the right opposite and each wrong pick (in choice order, skipping the right one). For tests. */
-  flip?: { s: Stmt; right: Stmt; wrongs: Stmt[]; noun: Noun };
+  flip?: { s: Stmt; right: Stmt; wrongs: Stmt[]; noun: Noun; examples: Card[][]; cases: Card[][] };
 }
 
 // ---------- truth ----------
@@ -542,20 +543,409 @@ export const VERDICT_CHOICES: readonly Choice[] = [
 const NAMES = ['Maya', 'Leo', 'Sam', 'Ana', 'Ben', 'Zoe', 'Omar', 'Lily', 'Kai', 'Nora'];
 const CREATURES = ['wizard', 'troll', 'dragon', 'elf', 'fairy', 'giant'];
 
-function rowPrompt(rng: Rng, frame: Frame, text: string): string {
+/** The prompt, and whose sentence it is ("Maya’s sentence", "the wizard’s sentence" or "the sentence"). */
+function rowPrompt(rng: Rng, frame: Frame, text: string): { prompt: string; whose: string } {
   const ask = 'Is that true, false, or can’t you tell yet?';
   switch (frame) {
     case 'abstract':
-      return `Look at the cards. “${text}” Is this true, false, or can’t you tell yet?`;
+      return { prompt: `Look at the cards. “${text}” Is this true, false, or can’t you tell yet?`, whose: 'the sentence' };
     case 'everyday': {
       const name = rng.pick(NAMES);
-      return `${name} set out these cards and turned some face down. ${name} says, “${text}” ${ask}`;
+      return { prompt: `${name} set out these cards and turned some face down. ${name} says, “${text}” ${ask}`, whose: `${name}’s sentence` };
     }
     case 'fantasy': {
       const who = rng.pick(CREATURES);
-      return `${cap(withA(who))} used magic to turn some cards face down. The ${who} says, “${text}” ${ask}`;
+      return { prompt: `${cap(withA(who))} used magic to turn some cards face down. The ${who} says, “${text}” ${ask}`, whose: `the ${who}’s sentence` };
     }
   }
+}
+
+// ---------- teaching for "true, false or can't tell" ----------
+//
+// Every case is a real way to fill the face-down cards, drawn as the row with those cards turned face up. Its truth
+// comes from judge() on that row: a card left face down must not matter, so the verdict there is settled.
+
+export const FACE_DOWN_TERM = { word: 'Face down', meaning: 'turned over, so you can’t see it. A face-down card could be any shape, any color and any size.' };
+export const CANT_TELL_TERM = { word: '“Can’t tell”', meaning: 'the face-down cards could make the sentence true, and they could also make it false. You need more clues to know which.' };
+const ORDINAL = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh'];
+/** "Card 3 means the third card, counting from the left." */
+export const cardTerm = (n: number) => ({ word: `Card ${n}`, meaning: `the ${ORDINAL[n - 1] ?? `number ${n}`} card, counting from the left.` });
+const CARD_ONE_TERM = cardTerm(1);
+export const ROW_RULE = 'Try every way the face-down cards could be. If every way gives the same answer, that is the answer. If some ways give true and some give false, you can’t tell yet.';
+const ROW_ASK = 'Ask: “Could the face-down cards make it true? Could they make it false?”';
+
+/** The one word or phrase in a row statement that needs defining, if any. */
+function rowTerm(s: Stmt): { word: string; meaning: string } | null {
+  switch (s.t) {
+    case 'some': return s.style === 'atLeastOne' ? { word: '“At least one”', meaning: 'one or more.' } : null;
+    case 'everyIs': return { word: `“Every ${np(s.a, false)}”`, meaning: `each card that is ${adj(s.a)}. The other cards do not matter here.` };
+    case 'count':
+      if (s.op === 'eq') return { word: `“Exactly ${numWord(s.k)}”`, meaning: `${s.k}, no more and no fewer.` };
+      if (s.op === 'ge') return { word: `“At least ${numWord(s.k)}”`, meaning: `${s.k} or more.` };
+      return null;
+    case 'more': return { word: '“More”', meaning: 'a larger number. If the two numbers are the same, that is a tie, and neither color has more.' };
+    case 'pos': return CARD_ONE_TERM;
+    default: return null;
+  }
+}
+
+/** When a row statement is true, in plain words. */
+export function rowMeaning(s: Stmt): string {
+  const S = `“${bare(s)}”`;
+  switch (s.t) {
+    case 'some': return `${S} is true when one or more cards are ${adj(s.d, true)}. One is enough.`;
+    case 'every': return `${S} is true only when every card is ${adj(s.d)}. One card that is not ${adj(s.d)} makes it false.`;
+    case 'none': return `${S} is true only when no card is ${adj(s.d)}. One ${np(s.d, false)} makes it false.`;
+    case 'everyIs': return `${S} is only about the ${np(s.a, true)}. It is true when each ${np(s.a, false)} is ${adj(s.b)}.`;
+    case 'count':
+      if (s.op === 'ge') return `${S} is true when there are ${s.k} or more ${np(s.d, true)}.`;
+      return `${S} is true only when the number of ${np(s.d, true)} is exactly ${s.k}.`;
+    case 'more': return `${S} is true only when there are more ${np(s.a, true)} than ${np(s.b, true)}. A tie makes it false.`;
+    case 'pos': return `${S} is only about card 1, the first card. It is true when card 1 is ${adj(s.d)}.`;
+    default: return `${S} is a sentence about the cards.`;
+  }
+}
+
+/** One feature of the statement to build a tiny example on: its color, else its shape, else its size. */
+function keyDesc(s: Stmt): Desc {
+  const d = descsOf(s)[0];
+  if (d.color) return { color: d.color };
+  if (d.shape) return { shape: d.shape };
+  return { size: d.size ?? 'big' };
+}
+
+/** A card that does not fit d (for the tiny examples). */
+const unlike1 = (d: Desc): Desc => (d.color ? { color: COLORS.find((c) => c !== d.color)! } : d.shape ? { shape: SHAPES.find((x) => x !== d.shape)! } : { size: d.size === 'big' ? 'small' : 'big' });
+
+/** "Cards 1 and 2", "Cards 1, 2 and 3". */
+const firstCards = (n: number) => (n === 1 ? 'Card 1' : `Cards ${joinList(Array.from({ length: n }, (_, i) => String(i + 1)))}`);
+
+/** A tiny row for a worked example: these cards face up, with one face-down card at index `at`. */
+function tinyRow(shown: readonly Card[], at: number): Thing[] {
+  const cards: Thing[] = shown.map((c, i) => ({ id: `t${i + 1}`, shape: c.shape, color: c.color, size: c.size }));
+  cards.splice(at, 0, { id: 't0', shape: 'circle', color: 'red', size: 'big', hidden: true });
+  return cards.map((c, i) => ({ ...c, id: `t${i + 1}` }));
+}
+
+/** "Card 1 is red. Card 2 is yellow. Card 3 is face down." Cards that read the same are told together. */
+function describeTiny(row: readonly Thing[], feats: Set<Feature>): string {
+  const say1 = (t: Thing, many: boolean) => (t.hidden ? 'face down' : adj(onlyFeats(t, feats), many));
+  const out: string[] = [];
+  for (let i = 0; i < row.length; ) {
+    let j = i + 1;
+    while (j < row.length && say1(row[j], false) === say1(row[i], false)) j++;
+    const n = j - i;
+    out.push(`${n === 1 ? `Card ${i + 1} is` : `Cards ${cardNums(Array.from({ length: n }, (_, k) => i + k))} are`} ${say1(row[i], n > 1)}.`);
+    i = j;
+  }
+  return out.join(' ');
+}
+
+/**
+ * "Explain more simply" for a "can't tell" row: the same sentence on the smallest row where one face-down card
+ * decides it. Every truth here comes from holds() on the filled row, and the row is checked to be "can't tell".
+ */
+function cantSimpler(s: Stmt): string[] {
+  const feats = featuresOf(s);
+  let shown: Card[] = [];
+  let at = -1;
+  const [yes, other] = proCon(s);
+  let no = other;
+  switch (s.t) {
+    case 'count':
+      shown = Array.from({ length: Math.max(0, s.k - 1) }, () => kindFor(s.d));
+      break;
+    case 'every':
+      shown = [kindFor(s.d)];
+      break;
+    case 'everyIs':
+      shown = [kindFor({ ...s.a, ...s.b })];
+      break;
+    case 'more': {
+      // One of each color, so the face-down card decides it: a second one of the first color, or a tie.
+      shown = [kindFor(s.a), kindFor(s.b)];
+      no = KINDS.find((c) => !fits(c, s.a) && !fits(c, s.b)) ?? kindFor(s.b);
+      break;
+    }
+    case 'pos':
+      // The first card is face down; a card after it that fits shows it does not matter.
+      shown = [kindFor(s.d)];
+      at = 0;
+      break;
+  }
+  if (at < 0) at = shown.length;
+  const row = tinyRow(shown, at);
+  if (judge(s, row) !== 'cant') throw new Error(`cantSimpler: “${say(s)}” is not “can’t tell” on the tiny row`);
+  const fill = (k: Card) => row.map((t, i) => (i === at ? k : plainCard(t)));
+  const vYes = holds(s, fill(yes)), vNo = holds(s, fill(no));
+  if (vYes === vNo) throw new Error(`cantSimpler: both fillings of “${say(s)}” agree`);
+  const what = (k: Card) => adj(onlyFeats(k, feats));
+  const card = `card ${at + 1}`;
+  let second = `If ${card} is ${what(no)}, it is ${vNo ? 'true' : 'false'}.`;
+  if (s.t === 'more') {
+    const na = countOf(fill(no), s.a), nb = countOf(fill(no), s.b);
+    if (na === nb) {
+      second = `If ${card} is ${what(no)}, there ${na === 1 ? 'is' : 'are'} ${na} ${np(s.a, na !== 1)} and ${nb} ${np(s.b, nb !== 1)}. That is a tie, so it is ${vNo ? 'true' : 'false'}.`;
+    }
+  }
+  return [
+    `Imagine ${row.length} card${row.length === 1 ? '' : 's'}. ${describeTiny(row, feats)}`,
+    `“${say(s)}” If ${card} is ${what(yes)}, the sentence is ${vYes ? 'true' : 'false'}.`,
+    second,
+    'It could go either way. So you can’t tell yet.',
+  ];
+}
+
+/**
+ * "Explain more simply": the smallest row that makes the same point, with the same kind of sentence. A "can't tell"
+ * row shrinks to one face-down card that decides it; a settled row to the visible cards that settle it plus one
+ * face-down card. Each tiny row is judged here, so the answer it gives is computed, not assumed.
+ */
+function rowSimpler(s: Stmt, verdict: Verdict, row: readonly Thing[]): string[] {
+  return verdict === 'cant' ? cantSimpler(s) : settledSimpler(s, verdict, row);
+}
+
+/** The settled tiny row: n cards of one kind, then one face-down card. Its verdict must be the item's. */
+function settledSimpler(s: Stmt, verdict: Verdict, row: readonly Thing[]): string[] {
+  const d = keyDesc(s);
+  const end = `So the answer is ${verdict}, not “Can’t tell.”`;
+  /** n visible cards of one kind, then one face-down card, checked to give the item's answer. */
+  const setUp = (n: number, what: Desc) => {
+    const tiny = tinyRow(Array.from({ length: n }, () => kindFor(what)), n);
+    if (judge(s, tiny) !== verdict) throw new Error(`rowSimpler: “${say(s)}” is not ${verdict} on the tiny row`);
+    return `Imagine ${n + 1} cards. ${firstCards(n)} ${n === 1 ? 'is' : 'are'} ${adj(what, n !== 1)}. Card ${n + 1} is face down.`;
+  };
+  const last = (n: number) => `card ${n + 1}`;
+  switch (s.t) {
+    case 'some':
+      return [setUp(1, s.d), `Is there ${withA(np(s.d, false))}? Yes: card 1.`, `Card 2 can’t take card 1 away. ${end}`];
+    case 'none':
+      return [setUp(1, s.d), `Is it true that no card is ${adj(s.d)}? No: card 1 is ${adj(s.d)}.`, `Card 2 can’t change card 1. ${end}`];
+    case 'everyIs': {
+      const c1 = { ...s.a, ...unlike1(s.b) };
+      return [setUp(1, c1), `“${say(s)}” Card 1 is ${adj(s.a)}, but it is not ${adj(s.b)}.`, `Card 2 can’t change card 1. ${end}`];
+    }
+    case 'count': {
+      if (verdict === 'true') {
+        const them = s.k === 1 ? 'it' : 'them';
+        return [setUp(s.k, s.d), `“${say(s)}” Yes: ${firstCards(s.k).toLowerCase()} ${s.k === 1 ? 'is' : 'are'} ${adj(s.d, s.k !== 1)}.`, `${cap(last(s.k))} can’t take ${them} away. ${end}`];
+      }
+      // Too many already showing, or too few even if every face-down card fits: the same way the item is settled.
+      const showing = row.filter((t) => !t.hidden && fits(t, s.d)).length;
+      if (s.op === 'eq' && showing > s.k && s.k + 1 <= 4) {
+        const n = s.k + 1;
+        return [setUp(n, s.d), `“${say(s)}” You can already see ${n} ${np(s.d, true)}. That is more than ${s.k}.`, `${cap(last(n))} can’t take one away. ${end}`];
+      }
+      // "At least k" needs k or more, so 1 falls short; "exactly k" needs k, so 1 is not it.
+      const short = s.op === 'ge' ? `That is fewer than ${s.k}.` : `That is not ${s.k}.`;
+      return [setUp(1, unlike1(d)), `“${say(s)}” Even if card 2 is ${adj(s.d)}, only 1 card is ${adj(s.d)}.`, `${short} ${end}`];
+    }
+    case 'more': {
+      const [win, lose] = verdict === 'true' ? [s.a, s.b] : [s.b, s.a];
+      const two = (x: Desc, n: number) => `${n} ${np(x, n !== 1)}`;
+      const counts = verdict === 'true' ? `${two(s.a, 2)} and ${two(s.b, 1)}` : `${two(s.a, 1)} and ${two(s.b, 2)}`;
+      return [setUp(2, win), `Even if card 3 is ${adj(lose)}, there ${verdict === 'true' ? 'are' : 'is'} ${counts}.`, end];
+    }
+    case 'pos': {
+      const c1 = verdict === 'true' ? s.d : unlike1(d);
+      return [setUp(1, c1), `“${say(s)}” It is only about card 1, and card 1 is ${verdict === 'true' ? '' : 'not '}${adj(s.d)}.`, `Card 2 can’t change that. ${end}`];
+    }
+    default: {
+      // "Every card is red": one card you can see that is not red settles it.
+      return [setUp(1, unlike1(d)), `Is every card ${adj(d)}? No: card 1 is not.`, `Card 2 can’t change card 1. ${end}`];
+    }
+  }
+}
+
+/** "3", "3 and 5", "1, 3 and 5". */
+const cardNums = (idx: readonly number[]) => joinList(idx.map((i) => String(i + 1)));
+
+/** A fact about a row with every card face up, counted by the engine: "Now there are 3 blue cards and 2 yellow cards." */
+export function rowTally(s: Stmt, cards: readonly Card[]): string | undefined {
+  const cnt = (d: Desc) => cards.filter((c) => fits(c, d)).length;
+  switch (s.t) {
+    case 'some': case 'none': case 'count': {
+      if (s.t === 'count' && s.not) return undefined;
+      const n = cnt(s.d);
+      return `Now ${n === 0 ? 'no card is' : n === 1 ? '1 card is' : `${n} cards are`} ${adj(s.d, n > 1)}.`;
+    }
+    case 'every': {
+      const n = cnt(s.d);
+      if (n === cards.length) return `Now every card is ${adj(s.d)}.`;
+      if (n === 0) return `Now no card is ${adj(s.d)}.`;
+      return `Now ${n} of the ${cards.length} cards ${n === 1 ? 'is' : 'are'} ${adj(s.d, n !== 1)}.`;
+    }
+    case 'everyIs': {
+      const na = cnt(s.a);
+      const nab = cards.filter((c) => fits(c, s.a) && fits(c, s.b)).length;
+      if (na === 0) return `Now no card is ${adj(s.a)}.`;
+      if (na === 1) return `Now there is 1 ${np(s.a, false)}, and it is ${nab ? '' : 'not '}${adj(s.b)}.`;
+      return `Now there are ${na} ${np(s.a, true)}. ${nab === 0 ? 'None' : nab === na ? `All ${nab}` : nab} of them ${nab === 1 ? 'is' : 'are'} ${adj(s.b, nab !== 1)}.`;
+    }
+    case 'more': {
+      const na = cnt(s.a), nb = cnt(s.b);
+      const num = (n: number) => (n === 0 ? 'no' : String(n));
+      const t = `Now there ${na === 1 ? 'is' : 'are'} ${num(na)} ${np(s.a, na !== 1)} and ${num(nb)} ${np(s.b, nb !== 1)}.`;
+      return na === nb ? `${t} That is a tie, so ${np(s.a, true)} do not have more.` : t;
+    }
+    case 'pos': return cards[0] ? `Now card 1 is ${adj(onlyFeats(cards[0], featuresOf(s)))}.` : undefined;
+    default: return undefined;
+  }
+}
+
+/** One filled-in row: the cards (some may stay face down), what was filled, and the sentence's truth there. */
+interface RowFill {
+  row: Thing[];
+  /** "face-down card 3 is red" (lowercase start, no period). */
+  phrase: string;
+  /** Face-down cards that were left face down. */
+  rest: number[];
+  value: boolean;
+}
+
+/**
+ * Turn the face-down cards at `idx` face up as card `k`. The others stay face down. The sentence must be settled
+ * on the new row (the cards left face down can't change it); its truth comes from judge().
+ */
+function fillRow(s: Stmt, row: readonly Thing[], idx: readonly number[], k: Card): RowFill {
+  const out = row.map((t) => ({ ...t }));
+  for (const i of idx) out[i] = { id: row[i].id, shape: k.shape, color: k.color, size: k.size };
+  const v = judge(s, out);
+  if (v === 'cant') throw new Error(`fillRow: “${say(s)}” is not settled when cards ${cardNums(idx)} are filled`);
+  const rest = row.flatMap((t, i) => (t.hidden && !idx.includes(i) ? [i] : []));
+  const what = onlyFeats(k, featuresOf(s));
+  const phrase = idx.length === 1
+    ? `face-down card ${idx[0] + 1} is ${adj(what)}`
+    : `face-down cards ${cardNums(idx)} are ${idx.length > 2 ? 'all ' : ''}${adj(what, true)}`;
+  return { row: out, phrase, rest, value: v === 'true' };
+}
+
+function fillCase(s: Stmt, f: RowFill, whose: string): TeachCase {
+  let label = `${cap(f.phrase)}.`;
+  let note: string | undefined;
+  if (f.rest.length) {
+    const rest = f.rest.length === 1 ? `card ${f.rest[0] + 1}` : `cards ${cardNums(f.rest)}`;
+    label += ` ${cap(rest)} ${f.rest.length === 1 ? 'is' : 'are'} still face down.`;
+    note = `Whatever ${rest} ${f.rest.length === 1 ? 'is' : 'are'}, ${whose} is ${f.value ? 'true' : 'false'}.`;
+  } else {
+    note = rowTally(s, f.row.map(plainCard));
+  }
+  const c: TeachCase = { label, things: f.row, truths: [{ who: cap(whose), value: f.value }] };
+  if (note) c.note = note;
+  return c;
+}
+
+/** The first kind of card that fits `yes` and not `no`. */
+const kindFor = (yes: Desc, no?: Desc): Card => {
+  const k = KINDS.find((c) => fits(c, yes) && !(no && fits(c, no)));
+  if (!k) throw new Error('kindFor: no such card');
+  return k;
+};
+
+/**
+ * For a settled row: fill every face-down card the way that helps the sentence most (pro), and the way that hurts
+ * it most (con). Both come out the same, which shows the face-down cards can't change the answer.
+ */
+function proCon(s: Stmt): [Card, Card] {
+  switch (s.t) {
+    case 'some': case 'every': case 'count': case 'pos': return [kindFor(s.d), kindFor({}, s.d)];
+    case 'none': return [kindFor({}, s.d), kindFor(s.d)];
+    case 'everyIs': return [kindFor({ ...s.a, ...s.b }), kindFor(s.a, s.b)];
+    case 'more': case 'asMany': return [kindFor(s.a), kindFor(s.b)];
+    default: return [kindFor(descsOf(s)[0]), kindFor({}, descsOf(s)[0])];
+  }
+}
+
+interface RowTeach {
+  teach: Teach;
+  feedback: Record<string, ChoiceFeedback>;
+}
+
+/** Teaching for a row item, and one explanation for each wrong choice. */
+function rowTeach(
+  s: Stmt,
+  row: readonly Thing[],
+  verdict: Verdict,
+  whose: string,
+  looks: boolean | null,
+  cant: { whenTrue: string; whenFalse: string; claims: Claim[] } | null,
+  reason: string | null,
+): RowTeach {
+  const hidden = row.flatMap((t, i) => (t.hidden ? [i] : []));
+  const feedback: Record<string, ChoiceFeedback> = {};
+  let cases: TeachCase[];
+  let casesTitle: string;
+  if (verdict === 'cant' && cant) {
+    const fills = cant.claims.map((cl) => fillRow(s, row, cl.card === 'all' ? hidden : [hidden[cl.card]], kindFor(cl.p.not ? {} : cl.p.d, cl.p.not ? cl.p.d : undefined)));
+    const [yes, no] = fills;
+    if (!yes.value || no.value) throw new Error('rowTeach: the cases do not show true and false');
+    cases = fills.map((f) => fillCase(s, f, whose));
+    casesTitle = 'Can the face-down cards make it true? Can they make it false?';
+    const seen = (v: boolean) =>
+      looks === v ? [`The cards you can see make it look ${v ? 'true' : 'false'}. But the face-down cards count too.`] : [];
+    feedback.true = {
+      headline: 'Your answer says true, but the face-down cards could make it false.',
+      detail: [
+        '“True” would mean the sentence is true for every way to fill the face-down cards.',
+        `But if ${no.phrase}, ${whose} is false.`,
+        ...seen(true),
+        `${cant.whenTrue} So you can’t tell yet.`,
+      ],
+      example: cases[1],
+    };
+    feedback.false = {
+      headline: 'Your answer says false, but the face-down cards could make it true.',
+      detail: [
+        '“False” would mean the sentence is false for every way to fill the face-down cards.',
+        `But if ${yes.phrase}, ${whose} is true.`,
+        ...seen(false),
+        `${cant.whenFalse} So you can’t tell yet.`,
+      ],
+      example: cases[0],
+    };
+  } else {
+    const v = verdict === 'true';
+    const [pro, con] = proCon(s).map((k) => fillRow(s, row, hidden, k));
+    if (pro.value !== v || con.value !== v) throw new Error('rowTeach: a settled row changed when filled');
+    cases = [pro, con].map((f) => fillCase(s, f, whose));
+    casesTitle = 'Can the face-down cards change the answer?';
+    // The case that tries hardest to flip it: for "exactly k", the filling whose count is nearer k.
+    let flip = v ? 1 : 0;
+    if (s.t === 'count' && s.op === 'eq') {
+      const near = (f: RowFill) => Math.abs(f.row.filter((c) => fits(c, s.d)).length - s.k);
+      flip = near(pro) <= near(con) ? 0 : 1;
+    }
+    const tryIt = [pro, con][flip];
+    const why = reason ?? '';
+    const evenIf = /Even if/.test(why) ? [] : [`Even if ${tryIt.phrase}, ${whose} is still ${verdict}.`];
+    const tv = v ? 'true' : 'false';
+    const other = v ? 'false' : 'true';
+    feedback[other] = {
+      headline: `Your answer says ${other}, but the cards you can see already make it ${tv}.`,
+      detail: [`Your answer means the sentence is ${other}.`, `Look at the cards you can see. ${why}`, `So ${whose} is ${tv}, whatever the face-down cards are.`],
+      example: cases[flip],
+    };
+    feedback.cant = {
+      headline: `Your answer says “Can’t tell,” but the face-down cards can’t make it ${other}, whatever they are.`,
+      detail: ['“Can’t tell” would mean the face-down cards could make it true, and could also make it false.', why, ...evenIf, `So the answer is ${tv}.`],
+      example: cases[flip],
+    };
+  }
+  // No hard word in the sentence: define the card number the explanation names first ("Card 4 is yellow.").
+  const named = /\b[Cc]ard (\d)/.exec(verdict === 'cant' ? `${cant?.whenTrue ?? ''} ${cant?.whenFalse ?? ''}` : reason ?? '');
+  const terms = [FACE_DOWN_TERM, CANT_TELL_TERM, rowTerm(s) ?? cardTerm(named ? Number(named[1]) : hidden[0] + 1)];
+  return {
+    teach: {
+      rule: ROW_RULE,
+      terms,
+      meaning: rowMeaning(s),
+      casesTitle,
+      cases,
+      remember: ['If some ways make it true and some make it false, you can’t tell yet.', ROW_ASK],
+      simpler: rowSimpler(s, verdict, row),
+    },
+    feedback,
+  };
 }
 
 export interface RowItemOptions {
@@ -583,32 +973,32 @@ export function rowItem(rng: Rng, opts: RowItemOptions): Made {
     const text = say(s);
     let explain: string;
     let claims: Claim[] | undefined;
-    const whyWrong: Record<string, string> = {};
+    let cant: ReturnType<typeof cantTellCases> = null;
+    let reason: string | null = null;
     if (verdict === 'cant') {
-      const cases = cantTellCases(hidden, table, looks === null ? true : !looks);
-      if (!cases) continue;
-      explain = cases.explain;
-      claims = cases.claims;
-      whyWrong.true = `It could still be false. ${cases.whenFalse}`;
-      whyWrong.false = `It could still be true. ${cases.whenTrue}`;
+      cant = cantTellCases(hidden, table, looks === null ? true : !looks);
+      if (!cant) continue;
+      explain = cant.explain;
+      claims = cant.claims;
     } else {
-      const v = verdict === 'true';
-      const reason = settledReason(s, row, v);
+      reason = settledReason(s, row, verdict === 'true');
       if (!reason) continue;
       explain = `${reason} So it is ${verdict}, no matter what is face down.`;
-      whyWrong[v ? 'false' : 'true'] = `${reason} So the sentence is ${verdict}.`;
-      whyWrong.cant = `The face-down cards can’t change this. ${reason}`;
     }
+    const { prompt, whose } = rowPrompt(rng, opts.frame, text);
+    const { teach, feedback } = rowTeach(s, row, verdict, whose, looks, cant, reason);
     const item: ItemCore = {
       kind: 'choose',
-      prompt: rowPrompt(rng, opts.frame, text),
+      prompt,
       scene: { kind: 'things', things: row },
       choices: VERDICT_CHOICES.map((c) => ({ ...c })),
       answer: verdict,
       explain,
-      whyWrong,
+      feedback,
       hint: 'Think about each face-down card. Could it change the answer?',
+      teach,
     };
+    syncWhyWrong(item);
     if (conflict) item.conflict = true;
     return { tag: verdict === 'cant' ? 'cant-tell' : 'check-cards', item, stmt: s, ...(claims ? { claims } : {}) };
   }
@@ -616,22 +1006,39 @@ export function rowItem(rng: Rng, opts: RowItemOptions): Made {
 }
 
 // ---------- the NOT flip ----------
+//
+// NOT means the original statement is false. Its NOT is true whenever the statement is false, and false whenever
+// it is true. Every case in the bank says what its statement means, which words need defining, the rows that show
+// every way it can go, and what each wrong pick gets wrong. notItem() checks all of it on the test rows and turns
+// each wrong pick's counterexample row into a labelled example card.
 
 /** The words a feedback message can use. */
 interface Talk {
   /** The statement, no final period. */
   S: string;
-  /** The right opposite, no final period. */
+  /** The right NOT sentence, no final period. */
   R: string;
   n: Noun;
+  /** "the dragon’s statement", "Maya’s statement" or "the statement". */
+  whose: string;
 }
 
 interface WrongOpposite {
   s: Stmt;
-  /** Names the mistake. */
+  /** Names the gap in one sentence: "Your answer leaves out one possibility: a tie." */
+  head: (t: Talk) => string;
+  /** What the pick gets wrong, before the example case. */
   why: (t: Talk) => string;
   /** The example row should make the statement and this pick both true (true) or both false (false). */
   agree?: boolean;
+  /** "Explain more simply" for this pick, when the case's own smallest example is about a different mistake. */
+  simpler?: (t: Talk) => string[];
+}
+
+/** A row that shows one way the statement can go, and what it shows. */
+interface CaseRow {
+  row: Card[];
+  note: string;
 }
 
 export interface NotCase {
@@ -645,9 +1052,27 @@ export interface NotCase {
   /** wrongs[0] is the classic mistake and is always offered. */
   wrongs: WrongOpposite[];
   explain: (t: Talk) => string;
+  /** When the statement is true, in plain words. */
+  meaning: (t: Talk) => string;
+  /** Words the explanation uses, defined in place. */
+  terms: (t: Talk) => { word: string; meaning: string }[];
+  /** Rows that cover every way the statement can go. */
+  cases: (t: Talk) => CaseRow[];
+  /** The rule in a few words. */
+  remember: (t: Talk) => string;
+  /** The smallest worked example of the classic mistake. */
+  simpler: (t: Talk) => string[];
 }
 
-const sameTime = (t: Talk) => `That can be true at the same time as “${t.S}.”`;
+export const NOT_RULE = 'NOT means the original statement is false.';
+const NOT_ASK = 'Ask: “Have I covered every way the statement could be false?”';
+const AT_LEAST_ONE = { word: '“At least one”', meaning: 'one or more.' };
+
+/** n cards of one kind. Only the features the sentence names matter; the others are fixed. */
+const kind = (d: Desc): Card => ({ color: d.color ?? 'red', shape: d.shape ?? 'circle', size: d.size ?? 'big' });
+const times = (d: Desc, k: number): Card[] => Array.from({ length: k }, () => kind(d));
+const sameTime = (t: Talk) => `That can be true at the same time as ${t.whose}.`;
+const overlapHead = (t: Talk) => `Your answer can be true at the same time as ${t.whose}.`;
 
 export const NOT_BANK = {
   everyColor(rng: Rng): NotCase {
@@ -657,25 +1082,53 @@ export const NOT_BANK = {
       s: { t: 'every', d: { color: c } },
       right: { t: 'someNot', d: { color: c } },
       wrongs: [
-        { s: { t: 'none', d: { color: c } }, agree: false, why: (t) => `That goes too far. One ${t.n.one} that is not ${c} is enough to make “${t.S}” false.` },
-        { s: { t: 'some', d: { color: c }, style: 'atLeastOne' }, agree: true, why: sameTime },
-        { s: { t: 'every', d: { color: c2 } }, agree: false, why: (t) => `Changing the color does not flip it. The ${t.n.many} could be a mix of colors, and then both are false.` },
+        { s: { t: 'none', d: { color: c } }, agree: false, head: () => 'Your answer goes too far.', why: (t) => `One ${t.n.one} that is not ${c} is enough to make “${t.S}” false. Your answer says no ${t.n.one} is ${c} at all.` },
+        { s: { t: 'some', d: { color: c }, style: 'atLeastOne' }, agree: true, head: overlapHead, why: (t) => `When every ${t.n.one} is ${c}, at least one ${t.n.one} is ${c} too.` },
+        { s: { t: 'every', d: { color: c2 } }, agree: false, head: () => 'Changing the color does not flip it.', why: (t) => `The ${t.n.many} could be a mix of colors.` },
       ],
-      explain: (t) => `To make “${t.S}” false, you only need one ${t.n.one} that is not ${c}. So the opposite is “${t.R}.”`,
+      explain: (t) => `To make “${t.S}” false, you only need one ${t.n.one} that is not ${c}. So the NOT is “${t.R}.”`,
+      meaning: (t) => `“${t.S}” is true only when every ${t.n.one} is ${c}. Just one ${t.n.one} that is not ${c} makes it false.`,
+      terms: () => [AT_LEAST_ONE],
+      cases: (t) => [
+        { row: times({ color: c }, 3), note: `Every ${t.n.one} is ${c}.` },
+        { row: [...times({ color: c }, 2), kind({ color: c2 })], note: `One ${t.n.one} is not ${c}.` },
+        { row: times({ color: c2 }, 2), note: `No ${t.n.one} is ${c}.` },
+      ],
+      remember: () => 'NOT “every” means at least one is not.',
+      simpler: (t) => [
+        `Imagine 2 ${t.n.many}: 1 ${c} ${t.n.one} and 1 ${c2} ${t.n.one}.`,
+        `Is every ${t.n.one} ${c}? No. So the NOT must be true here.`,
+        `Is it true that no ${t.n.one} is ${c}? No, one is ${c}. So that sentence is not the NOT.`,
+        `“${t.R}” is true here. That is the NOT.`,
+      ],
     };
   },
   everyShape(rng: Rng): NotCase {
-    const [s, s2] = rng.shuffle(SHAPES);
+    const [s, s2, s3] = rng.shuffle(SHAPES);
     return {
       tag: 'not-every', conflict: true, shapes: true,
       s: { t: 'every', d: { shape: s } },
       right: { t: 'someNot', d: { shape: s } },
       wrongs: [
-        { s: { t: 'none', d: { shape: s } }, agree: false, why: (t) => `That goes too far. One card that is not ${withA(s)} is enough to make “${t.S}” false.` },
-        { s: { t: 'every', d: { shape: s2 } }, agree: false, why: () => 'Changing the shape does not flip it. The cards could be a mix of shapes, and then both are false.' },
-        { s: { t: 'some', d: { shape: s }, style: 'atLeastOne' }, agree: true, why: sameTime },
+        { s: { t: 'none', d: { shape: s } }, agree: false, head: () => 'Your answer goes too far.', why: (t) => `One card that is not ${withA(s)} is enough to make “${t.S}” false. Your answer says no card is ${withA(s)} at all.` },
+        { s: { t: 'every', d: { shape: s2 } }, agree: false, head: () => 'Changing the shape does not flip it.', why: () => 'The cards could be a mix of shapes.' },
+        { s: { t: 'some', d: { shape: s }, style: 'atLeastOne' }, agree: true, head: overlapHead, why: () => `When every card is ${withA(s)}, at least one card is ${withA(s)} too.` },
       ],
-      explain: (t) => `To make “${t.S}” false, you only need one card that is not ${withA(s)}. So the opposite is “${t.R}.”`,
+      explain: (t) => `To make “${t.S}” false, you only need one card that is not ${withA(s)}. So the NOT is “${t.R}.”`,
+      meaning: (t) => `“${t.S}” is true only when every card is ${withA(s)}. Just one card that is not ${withA(s)} makes it false.`,
+      terms: () => [AT_LEAST_ONE],
+      cases: () => [
+        { row: times({ shape: s }, 3), note: `Every card is ${withA(s)}.` },
+        { row: [...times({ shape: s }, 2), kind({ shape: s2 })], note: `One card is not ${withA(s)}.` },
+        { row: [kind({ shape: s2 }), kind({ shape: s3 })], note: `No card is ${withA(s)}.` },
+      ],
+      remember: () => 'NOT “every” means at least one is not.',
+      simpler: (t) => [
+        `Imagine 2 cards: ${withA(s)} and ${withA(s2)}.`,
+        `Is every card ${withA(s)}? No. So the NOT must be true here.`,
+        `Is it true that no card is ${withA(s)}? No, one card is ${withA(s)}. So that sentence is not the NOT.`,
+        `“${t.R}” is true here. That is the NOT.`,
+      ],
     };
   },
   someColor(rng: Rng): NotCase {
@@ -685,11 +1138,25 @@ export const NOT_BANK = {
       s: { t: 'some', d: { color: c } },
       right: { t: 'none', d: { color: c } },
       wrongs: [
-        { s: { t: 'someNot', d: { color: c } }, agree: true, why: (t) => `That puts the “not” in the wrong place. It can be true at the same time as “${t.S}.”` },
-        { s: { t: 'every', d: { color: c } }, agree: true, why: sameTime },
-        { s: { t: 'some', d: { color: c2 } }, agree: true, why: (t) => `That is about ${c2} ${t.n.many}. It can be true at the same time as “${t.S}.”` },
+        { s: { t: 'someNot', d: { color: c } }, agree: true, head: () => 'Your answer puts the “not” in the wrong place.', why: sameTime,
+          simpler: (t) => [`Imagine 2 ${t.n.many}: 1 ${c} ${t.n.one} and 1 ${c2} ${t.n.one}.`, `There is a ${c} ${t.n.one}. So “${t.S}” is true here.`, `One ${t.n.one} is not ${c}. So your answer is true here too.`, 'A statement and its NOT are never true at the same time. So your answer is not the NOT.'] },
+        { s: { t: 'every', d: { color: c } }, agree: true, head: overlapHead, why: (t) => `If every ${t.n.one} is ${c}, there is a ${c} ${t.n.one} too.` },
+        { s: { t: 'some', d: { color: c2 } }, agree: true, head: () => `Your answer is about ${c2} things, not ${c} things.`, why: (t) => `It says nothing about ${c} ${t.n.many}. ${sameTime(t)}` },
       ],
-      explain: (t) => `“${t.S}” is false only when no ${t.n.one} is ${c}. So the opposite is “${t.R}.”`,
+      explain: (t) => `“${t.S}” is false only when no ${t.n.one} is ${c}. So the NOT is “${t.R}.”`,
+      meaning: (t) => `“${t.S}” is true when at least one ${t.n.one} is ${c}. It is false only when no ${t.n.one} is ${c}.`,
+      terms: () => [AT_LEAST_ONE],
+      cases: (t) => [
+        { row: [kind({ color: c }), kind({ color: c2 })], note: `One ${t.n.one} is ${c}.` },
+        { row: times({ color: c }, 2), note: `Every ${t.n.one} is ${c}.` },
+        { row: times({ color: c2 }, 2), note: `No ${t.n.one} is ${c}.` },
+      ],
+      remember: () => 'NOT “there is one” means there is none.',
+      simpler: (t) => [
+        `Imagine 2 ${c2} ${t.n.many} and no ${c} ${t.n.many}.`,
+        `Is there a ${c} ${t.n.one}? No. So “${t.S}” is false, and the NOT must be true.`,
+        `“${t.R}” is true here. That is the NOT.`,
+      ],
     };
   },
   noneColor(rng: Rng): NotCase {
@@ -699,15 +1166,29 @@ export const NOT_BANK = {
       s: { t: 'none', d: { color: c } },
       right: { t: 'some', d: { color: c }, style: 'atLeastOne' },
       wrongs: [
-        { s: { t: 'every', d: { color: c } }, agree: false, why: (t) => `That goes too far. One ${c} ${t.n.one} is enough to make “${t.S}” false.` },
-        { s: { t: 'someNot', d: { color: c } }, agree: true, why: sameTime },
-        { s: { t: 'none', d: { color: c2 } }, agree: true, why: sameTime },
+        { s: { t: 'every', d: { color: c } }, agree: false, head: () => 'Your answer goes too far.', why: (t) => `One ${c} ${t.n.one} is enough to make “${t.S}” false. Your answer says every ${t.n.one} is ${c}.` },
+        { s: { t: 'someNot', d: { color: c } }, agree: true, head: overlapHead, why: (t) => `When no ${t.n.one} is ${c}, every ${t.n.one} is not ${c}.` },
+        { s: { t: 'none', d: { color: c2 } }, agree: true, head: () => `Your answer is about ${c2} things, not ${c} things.`, why: (t) => `It says nothing about ${c} ${t.n.many}. ${sameTime(t)}` },
       ],
-      explain: (t) => `“${t.S}” turns false as soon as one ${t.n.one} is ${c}. So the opposite is “${t.R}.”`,
+      explain: (t) => `“${t.S}” turns false as soon as one ${t.n.one} is ${c}. So the NOT is “${t.R}.”`,
+      meaning: (t) => `“${t.S}” is true only when no ${t.n.one} is ${c}. Just one ${c} ${t.n.one} makes it false.`,
+      terms: () => [AT_LEAST_ONE],
+      cases: (t) => [
+        { row: times({ color: c2 }, 2), note: `No ${t.n.one} is ${c}.` },
+        { row: [kind({ color: c }), kind({ color: c2 })], note: `One ${t.n.one} is ${c}.` },
+        { row: times({ color: c }, 2), note: `Every ${t.n.one} is ${c}.` },
+      ],
+      remember: () => 'NOT “none” means at least one.',
+      simpler: (t) => [
+        `Imagine 2 ${t.n.many}: 1 ${c} ${t.n.one} and 1 ${c2} ${t.n.one}.`,
+        `Is it true that no ${t.n.one} is ${c}? No, one is ${c}. So the NOT must be true here.`,
+        `Is every ${t.n.one} ${c}? No. So that sentence is not the NOT.`,
+        `“${t.R}” is true here. That is the NOT.`,
+      ],
     };
   },
   exactColor(rng: Rng): NotCase {
-    const c = rng.pick(COLORS);
+    const [c, c2] = rng.shuffle(COLORS);
     const k = rng.int(1, 3);
     const fewer: Stmt = k === 1 ? { t: 'none', d: { color: c } } : { t: 'count', d: { color: c }, op: 'lt', k };
     return {
@@ -715,26 +1196,58 @@ export const NOT_BANK = {
       s: { t: 'count', d: { color: c }, op: 'eq', k },
       right: { t: 'count', d: { color: c }, op: 'ne', k },
       wrongs: [
-        { s: { t: 'count', d: { color: c }, op: 'eq', k, not: true }, why: (t) => `That counts the ${t.n.many} that are not ${c}. That is a different count.` },
-        { s: { t: 'count', d: { color: c }, op: 'gt', k }, agree: false, why: (t) => `That is only part of it. There could also be ${k === 1 ? 'no' : `fewer than ${numWord(k)}`} ${c} ${t.n.many}.` },
-        { s: fewer, agree: false, why: (t) => `That is only part of it. There could also be more than ${numWord(k)} ${c} ${k === 1 ? t.n.one : t.n.many}.` },
+        { s: { t: 'count', d: { color: c }, op: 'eq', k, not: true }, head: () => 'Your answer counts a different group.', why: (t) => `It counts the ${t.n.many} that are not ${c}. That is a different count.` },
+        { s: { t: 'count', d: { color: c }, op: 'gt', k }, agree: false, head: () => 'Your answer is only part of it.', why: (t) => `There could also be ${k === 1 ? 'no' : `fewer than ${numWord(k)}`} ${c} ${t.n.many}.` },
+        { s: fewer, agree: false, head: () => 'Your answer is only part of it.', why: (t) => `There could also be more than ${numWord(k)} ${c} ${k === 1 ? t.n.one : t.n.many}.` },
       ],
-      explain: (t) => `“${t.S}” is false when the number of ${c} ${t.n.many} is anything but ${numWord(k)}. It could be more or fewer. So the opposite is “${t.R}.”`,
+      explain: (t) => `“${t.S}” is false when the number of ${c} ${t.n.many} is anything but ${numWord(k)}. It could be more or fewer. So the NOT is “${t.R}.”`,
+      meaning: (t) => `“${t.S}” is true only when the number of ${c} ${t.n.many} is exactly ${k}.`,
+      terms: () => [{ word: `“Exactly ${numWord(k)}”`, meaning: `${k}, no more and no fewer.` }],
+      cases: () => [
+        { row: [...times({ color: c }, k), kind({ color: c2 })], note: `Exactly ${k} ${c}.` },
+        { row: times({ color: c }, k + 1), note: `More than ${k} ${c}.` },
+        { row: [...times({ color: c }, k - 1), kind({ color: c2 }), kind({ color: c2 })], note: `Fewer than ${k} ${c}.` },
+      ],
+      remember: () => `NOT “exactly ${numWord(k)}” means more than ${numWord(k)} or fewer than ${numWord(k)}.`,
+      simpler: (t) => [
+        `Imagine ${k + 1} ${c} ${t.n.many}.`,
+        `Is that exactly ${k}? No, it is more. So “${t.S}” is false, and the NOT must be true.`,
+        `Now imagine ${k - 1} ${c} ${k - 1 === 1 ? t.n.one : t.n.many}. That is not exactly ${k} either.`,
+        `“${t.R}” is true both times. That is the NOT.`,
+      ],
     };
   },
   atLeastShape(rng: Rng): NotCase {
-    const s = rng.pick(SHAPES);
+    const [s, s2] = rng.shuffle(SHAPES);
     const k = rng.int(2, 3);
     return {
       tag: 'not-at-least', conflict: false, shapes: true,
       s: { t: 'count', d: { shape: s }, op: 'ge', k },
       right: { t: 'count', d: { shape: s }, op: 'lt', k },
       wrongs: [
-        { s: { t: 'count', d: { shape: s }, op: 'le', k }, agree: true, why: () => `That still allows exactly ${numWord(k)} ${s}s.` },
-        { s: { t: 'count', d: { shape: s }, op: 'ge', k, not: true }, why: () => `That counts the cards that are not ${s}s. That is a different count.` },
-        { s: { t: 'none', d: { shape: s } }, agree: false, why: () => `That goes too far. One ${s} is still fewer than ${numWord(k)}.` },
+        { s: { t: 'count', d: { shape: s }, op: 'le', k }, agree: true, head: () => `Your answer still allows exactly ${numWord(k)} ${s}s.`, why: () => `“At most ${numWord(k)}” includes exactly ${numWord(k)}. With exactly ${k} ${s}s, the statement is true too.`,
+          simpler: (t) => [`Imagine exactly ${k} ${s}s.`, `Are there at least ${k}? Yes. So “${t.S}” is true, and its NOT must be false.`, `Are there at most ${k}? Yes. So your answer is true here too. It is not the NOT.`] },
+        { s: { t: 'count', d: { shape: s }, op: 'ge', k, not: true }, head: () => 'Your answer counts a different group.', why: () => `It counts the cards that are not ${s}s. That is a different count.` },
+        { s: { t: 'none', d: { shape: s } }, agree: false, head: () => 'Your answer goes too far.', why: () => `One ${s} is still fewer than ${numWord(k)}.` },
       ],
-      explain: (t) => `If there are not at least ${numWord(k)} ${s}s, there are fewer than ${numWord(k)}. So the opposite is “${t.R}.”`,
+      explain: (t) => `If there are not at least ${numWord(k)} ${s}s, there are fewer than ${numWord(k)}. So the NOT is “${t.R}.”`,
+      meaning: (t) => `“${t.S}” is true when there are ${k} or more ${s}s.`,
+      terms: () => [
+        { word: `“At least ${numWord(k)}”`, meaning: `${k} or more.` },
+        { word: `“At most ${numWord(k)}”`, meaning: `${k} or fewer.` },
+        { word: `“Fewer than ${numWord(k)}”`, meaning: `${k - 1} or fewer.` },
+      ],
+      cases: () => [
+        { row: [...times({ shape: s }, k + 1)], note: `More than ${k} ${s}s.` },
+        { row: [...times({ shape: s }, k), kind({ shape: s2 })], note: `Exactly ${k} ${s}s. That is at least ${k}.` },
+        { row: [...times({ shape: s }, k - 1), kind({ shape: s2 }), kind({ shape: s2 })], note: `Only ${k - 1} ${k - 1 === 1 ? s : `${s}s`}. That is fewer than ${k}.` },
+      ],
+      remember: () => `NOT “at least ${numWord(k)}” means fewer than ${numWord(k)}.`,
+      simpler: (t) => [
+        `Count the ${s}s.`,
+        `With ${k} or more, “${t.S}” is true. With ${k - 1} or fewer, it is false.`,
+        `“${t.R}” is true just when there are ${k - 1} or fewer. That is the NOT.`,
+      ],
     };
   },
   firstShape(rng: Rng): NotCase {
@@ -744,11 +1257,24 @@ export const NOT_BANK = {
       s: { t: 'pos', at: 'first', d: { shape: s } },
       right: { t: 'pos', at: 'first', d: { shape: s }, not: true },
       wrongs: [
-        { s: { t: 'pos', at: 'first', d: { shape: s2 } }, agree: false, why: () => `That picks just one other shape. The first card could be ${withA(s3)}, and then both are false.` },
-        { s: { t: 'none', d: { shape: s } }, why: () => 'That talks about every card. The sentence is only about the first card.' },
-        { s: { t: 'pos', at: 'last', d: { shape: s }, not: true }, why: () => 'That talks about the last card, not the first card.' },
+        { s: { t: 'pos', at: 'first', d: { shape: s2 } }, agree: false, head: () => 'Your answer picks just one other shape.', why: () => `The first card could also be ${withA(s3)}.` },
+        { s: { t: 'none', d: { shape: s } }, head: () => 'Your answer talks about every card.', why: () => 'The statement is only about the first card.' },
+        { s: { t: 'pos', at: 'last', d: { shape: s }, not: true }, head: () => 'Your answer talks about the last card.', why: () => 'The statement is only about the first card.' },
       ],
-      explain: (t) => `The first card is ${withA(s)}, or it is not. So the opposite is “${t.R}.”`,
+      explain: (t) => `The first card is ${withA(s)}, or it is not. So the NOT is “${t.R}.”`,
+      meaning: (t) => `“${t.S}” is only about the first card. It is true when the first card is ${withA(s)}.`,
+      terms: () => [{ word: 'The first card', meaning: 'the card at the start of the row.' }],
+      cases: () => [
+        { row: [kind({ shape: s }), kind({ shape: s2 })], note: `The first card is ${withA(s)}.` },
+        { row: [kind({ shape: s2 }), kind({ shape: s })], note: `The first card is ${withA(s2)}.` },
+        { row: [kind({ shape: s3 }), kind({ shape: s })], note: `The first card is ${withA(s3)}.` },
+      ],
+      remember: () => 'NOT is about the same card. Only the “is” changes to “is not.”',
+      simpler: (t) => [
+        'Look only at the first card.',
+        `If it is ${withA(s)}, “${t.S}” is true. If it is any other shape, the statement is false.`,
+        `“${t.R}” is true for every other shape. That is the NOT.`,
+      ],
     };
   },
   everyBig(rng: Rng): NotCase {
@@ -758,26 +1284,55 @@ export const NOT_BANK = {
       s: { t: 'everyIs', a: { size: 'big' }, b: { color: c } },
       right: { t: 'someIsNot', a: { size: 'big' }, b: { color: c } },
       wrongs: [
-        { s: { t: 'noneIs', a: { size: 'big' }, b: { color: c } }, agree: false, why: (t) => `That goes too far. One big ${t.n.one} that is not ${c} is enough to make “${t.S}” false.` },
-        { s: { t: 'everyIs', a: { size: 'small' }, b: { color: c } }, why: (t) => `That talks about the small ${t.n.many}. The sentence is about the big ones.` },
-        { s: { t: 'everyIs', a: { size: 'big' }, b: { color: c2 } }, agree: false, why: (t) => `Changing the color does not flip it. The big ${t.n.many} could be a mix of colors, and then both are false.` },
+        { s: { t: 'noneIs', a: { size: 'big' }, b: { color: c } }, agree: false, head: () => 'Your answer goes too far.', why: (t) => `One big ${t.n.one} that is not ${c} is enough to make “${t.S}” false. Your answer says no big ${t.n.one} is ${c} at all.` },
+        { s: { t: 'everyIs', a: { size: 'small' }, b: { color: c } }, head: () => 'Your answer talks about the small ones.', why: (t) => `The statement is about the big ${t.n.many}.` },
+        { s: { t: 'everyIs', a: { size: 'big' }, b: { color: c2 } }, agree: false, head: () => 'Changing the color does not flip it.', why: (t) => `The big ${t.n.many} could be a mix of colors.` },
       ],
-      explain: (t) => `To make “${t.S}” false, you need just one big ${t.n.one} that is not ${c}. So the opposite is “${t.R}.”`,
+      explain: (t) => `To make “${t.S}” false, you need just one big ${t.n.one} that is not ${c}. So the NOT is “${t.R}.”`,
+      meaning: (t) => `“${t.S}” is about the big ${t.n.many} only. It is true when every big ${t.n.one} is ${c}.`,
+      terms: () => [AT_LEAST_ONE],
+      cases: (t) => [
+        { row: [...times({ size: 'big', color: c }, 2), kind({ size: 'small', color: c2 })], note: `Every big ${t.n.one} is ${c}.` },
+        { row: [kind({ size: 'big', color: c }), kind({ size: 'big', color: c2 })], note: `One big ${t.n.one} is not ${c}.` },
+        { row: times({ size: 'big', color: c2 }, 2), note: `No big ${t.n.one} is ${c}.` },
+      ],
+      remember: () => 'NOT “every” means at least one is not.',
+      simpler: (t) => [
+        `Imagine 2 big ${t.n.many}: 1 ${c} and 1 ${c2}.`,
+        `Is every big ${t.n.one} ${c}? No. So the NOT must be true here.`,
+        `Is it true that no big ${t.n.one} is ${c}? No, one is ${c}. So that sentence is not the NOT.`,
+        `“${t.R}” is true here. That is the NOT.`,
+      ],
     };
   },
   everyColorShape(rng: Rng): NotCase {
     const c = rng.pick(COLORS);
-    const s = rng.pick(SHAPES);
+    const [s, s2] = rng.shuffle(SHAPES);
+    const c2 = COLORS.find((x) => x !== c)!;
     return {
       tag: 'not-every', conflict: true, shapes: true,
       s: { t: 'everyIs', a: { color: c }, b: { shape: s } },
       right: { t: 'someIsNot', a: { color: c }, b: { shape: s } },
       wrongs: [
-        { s: { t: 'noneIs', a: { color: c }, b: { shape: s } }, agree: false, why: (t) => `That goes too far. One ${c} card that is not ${withA(s)} is enough to make “${t.S}” false.` },
-        { s: { t: 'everyIs', a: { shape: s }, b: { color: c } }, why: () => `That turns the sentence around. It is about the ${s}s, not the ${c} cards.` },
-        { s: { t: 'every', d: { shape: s } }, agree: true, why: (t) => `That is about every card, not just the ${c} ones. It can be true at the same time as “${t.S}.”` },
+        { s: { t: 'noneIs', a: { color: c }, b: { shape: s } }, agree: false, head: () => 'Your answer goes too far.', why: (t) => `One ${c} card that is not ${withA(s)} is enough to make “${t.S}” false. Your answer says no ${c} card is ${withA(s)} at all.` },
+        { s: { t: 'everyIs', a: { shape: s }, b: { color: c } }, head: () => 'Your answer turns the sentence around.', why: () => `It is about the ${s}s, not the ${c} cards.` },
+        { s: { t: 'every', d: { shape: s } }, agree: true, head: overlapHead, why: () => `It is about every card, not just the ${c} ones. When every card is ${withA(s)}, every ${c} card is too.` },
       ],
-      explain: (t) => `To make “${t.S}” false, you need just one ${c} card that is not ${withA(s)}. So the opposite is “${t.R}.”`,
+      explain: (t) => `To make “${t.S}” false, you need just one ${c} card that is not ${withA(s)}. So the NOT is “${t.R}.”`,
+      meaning: (t) => `“${t.S}” is about the ${c} cards only. It is true when every ${c} card is ${withA(s)}.`,
+      terms: () => [AT_LEAST_ONE],
+      cases: () => [
+        { row: [kind({ color: c, shape: s }), kind({ color: c, shape: s }), kind({ color: c2, shape: s2 })], note: `Every ${c} card is ${withA(s)}.` },
+        { row: [kind({ color: c, shape: s }), kind({ color: c, shape: s2 })], note: `One ${c} card is not ${withA(s)}.` },
+        { row: [kind({ color: c, shape: s2 }), kind({ color: c, shape: s2 })], note: `No ${c} card is ${withA(s)}.` },
+      ],
+      remember: () => 'NOT “every” means at least one is not.',
+      simpler: (t) => [
+        `Imagine 2 ${c} cards: ${withA(s)} and ${withA(s2)}.`,
+        `Is every ${c} card ${withA(s)}? No. So the NOT must be true here.`,
+        `Is it true that no ${c} card is ${withA(s)}? No, one is. So that sentence is not the NOT.`,
+        `“${t.R}” is true here. That is the NOT.`,
+      ],
     };
   },
   moreColor(rng: Rng): NotCase {
@@ -787,27 +1342,109 @@ export const NOT_BANK = {
       s: { t: 'more', a: { color: c1 }, b: { color: c2 } },
       right: { t: 'asMany', a: { color: c2 }, b: { color: c1 } },
       wrongs: [
-        { s: { t: 'more', a: { color: c2 }, b: { color: c1 } }, agree: false, why: () => 'That leaves out a tie. When the counts are the same, both are false.' },
-        { s: { t: 'asMany', a: { color: c1 }, b: { color: c2 } }, agree: true, why: sameTime },
-        { s: { t: 'none', d: { color: c1 } }, agree: false, why: (t) => `That goes too far. There can be some ${c1} ${t.n.many} and still not more ${c1} ${t.n.many} than ${c2} ${t.n.many}.` },
+        {
+          s: { t: 'more', a: { color: c2 }, b: { color: c1 } }, agree: false,
+          head: () => 'Your answer leaves out one possibility: a tie.',
+          why: (t) => `That works when there are 2 ${c1} ${t.n.many} and 3 ${c2} ${t.n.many}. But in a tie, ${c2} does not have more either.`,
+          simpler: (t) => [
+            `Imagine 1 ${c1} ${t.n.one} and 1 ${c2} ${t.n.one}.`,
+            `Does ${c1} have more? No. Does ${c2} have more? No.`,
+            `They are tied. The NOT must be true in a tie.`,
+            `“${c2.charAt(0).toUpperCase() + c2.slice(1)} has the same number or more” is true in a tie. That is what “${t.R}” says.`,
+          ],
+        },
+        { s: { t: 'asMany', a: { color: c1 }, b: { color: c2 } }, agree: true, head: () => `Your answer still allows ${c1} to have more.`, why: sameTime },
+        { s: { t: 'none', d: { color: c1 } }, agree: false, head: () => 'Your answer goes too far.', why: (t) => `There can be some ${c1} ${t.n.many} and still not more ${c1} ${t.n.many} than ${c2} ${t.n.many}.` },
       ],
-      explain: (t) => `If there are not more ${c1} ${t.n.many}, then there are as many or more ${c2} ${t.n.many}. That includes a tie. So the opposite is “${t.R}.”`,
+      explain: (t) => `“At least as many” means the same number or more. ${cap(c2)} can equal ${c1} or have more than ${c1}. That covers every case where ${c1} does not have more, including a tie. So the NOT is “${t.R}.”`,
+      meaning: (t) => `“${t.S}” is true only when the number of ${c1} ${t.n.many} is greater than the number of ${c2} ${t.n.many}.`,
+      terms: () => [
+        { word: '“More”', meaning: 'a larger number.' },
+        { word: 'A tie', meaning: 'the two groups have the same number.' },
+        { word: '“At least as many”', meaning: 'the same number or more.' },
+      ],
+      cases: () => [
+        { row: [...times({ color: c1 }, 3), ...times({ color: c2 }, 2)], note: `${cap(c1)} has more.` },
+        { row: [...times({ color: c1 }, 2), ...times({ color: c2 }, 3)], note: `${cap(c1)} has fewer.` },
+        { row: [...times({ color: c1 }, 3), ...times({ color: c2 }, 3)], note: 'The counts are equal. This is a tie.' },
+      ],
+      remember: () => 'NOT “more than” means the same number or fewer.',
+      simpler: (t) => [
+        `Imagine 1 ${c1} ${t.n.one} and 1 ${c2} ${t.n.one}.`,
+        `Does ${c1} have more? No. Does ${c2} have more? No.`,
+        'They are tied. The NOT must be true in a tie.',
+        `“${t.R}” is true in a tie. That is the NOT.`,
+      ],
+    };
+  },
+  moreCount(rng: Rng): NotCase {
+    const [c, c2] = rng.shuffle(COLORS);
+    const k = rng.int(2, 3);
+    return {
+      tag: 'not-more', conflict: false, shapes: false,
+      s: { t: 'count', d: { color: c }, op: 'gt', k },
+      right: { t: 'count', d: { color: c }, op: 'le', k },
+      wrongs: [
+        {
+          s: { t: 'count', d: { color: c }, op: 'lt', k }, agree: false,
+          head: () => `Your answer leaves out one possibility: exactly ${numWord(k)}.`,
+          why: (t) => `With exactly ${k} ${c} ${t.n.many}, there are not more than ${k}. So the NOT must include exactly ${k}.`,
+          simpler: (t) => [
+            `Imagine exactly ${k} ${c} ${t.n.many}.`,
+            `Are there more than ${k}? No. So “${t.S}” is false, and the NOT must be true.`,
+            `Are there fewer than ${k}? No. So your answer is false here too.`,
+            `“${t.R}” is true here. That is the NOT.`,
+          ],
+        },
+        { s: { t: 'count', d: { color: c }, op: 'ge', k }, agree: true, head: overlapHead, why: () => `“At least ${numWord(k)}” includes ${k + 1} and more. More than ${k} is at least ${k} too.` },
+        { s: { t: 'count', d: { color: c }, op: 'eq', k }, agree: false, head: () => 'Your answer is only part of it.', why: (t) => `There could also be fewer than ${numWord(k)} ${c} ${t.n.many}.` },
+      ],
+      explain: (t) => `If there are not more than ${numWord(k)} ${c} ${t.n.many}, there are ${numWord(k)} or fewer. That includes exactly ${numWord(k)}. So the NOT is “${t.R}.”`,
+      meaning: (t) => `“${t.S}” is true only when ${k + 1} or more ${t.n.many} are ${c}.`,
+      terms: () => [
+        { word: `“More than ${numWord(k)}”`, meaning: `${k + 1} or more.` },
+        { word: `“At most ${numWord(k)}”`, meaning: `${k} or fewer.` },
+      ],
+      cases: () => [
+        { row: times({ color: c }, k + 1), note: `More than ${k} ${c}.` },
+        { row: [...times({ color: c }, k), kind({ color: c2 })], note: `Exactly ${k} ${c}. That is not more than ${k}.` },
+        { row: [...times({ color: c }, k - 1), kind({ color: c2 }), kind({ color: c2 })], note: `Fewer than ${k} ${c}.` },
+      ],
+      remember: () => `NOT “more than ${numWord(k)}” means ${numWord(k)} or fewer.`,
+      simpler: (t) => [
+        `Imagine exactly ${k} ${c} ${t.n.many}.`,
+        `Are there more than ${k}? No. So “${t.S}” is false, and the NOT must be true.`,
+        `“${t.R}” is true here: ${k} is at most ${k}. That is the NOT.`,
+      ],
     };
   },
   someExact(rng: Rng): NotCase {
     const k = rng.pick(KINDS);
     const d: Desc = { size: k.size, color: k.color, shape: k.shape };
     const other: Desc = { ...d, size: k.size === 'big' ? 'small' : 'big' };
+    const third: Desc = { ...d, color: COLORS.find((c) => c !== k.color)! };
     return {
       tag: 'not-some', conflict: false, shapes: true,
       s: { t: 'some', d },
       right: { t: 'none', d },
       wrongs: [
-        { s: { t: 'someNot', d }, agree: true, why: (t) => `That puts the “not” in the wrong place. It can be true at the same time as “${t.S}.”` },
-        { s: { t: 'every', d }, agree: true, why: sameTime },
-        { s: { t: 'some', d: other }, agree: true, why: (t) => `That is about a different card. It can be true at the same time as “${t.S}.”` },
+        { s: { t: 'someNot', d }, agree: true, head: () => 'Your answer puts the “not” in the wrong place.', why: sameTime },
+        { s: { t: 'every', d }, agree: true, head: overlapHead, why: () => `If every card is ${withA(np(d, false))}, there is one too.` },
+        { s: { t: 'some', d: other }, agree: true, head: () => 'Your answer is about a different card.', why: sameTime },
       ],
-      explain: (t) => `“${t.S}” is false only when no card is ${withA(np(d, false))}. So the opposite is “${t.R}.”`,
+      explain: (t) => `“${t.S}” is false only when no card is ${withA(np(d, false))}. So the NOT is “${t.R}.”`,
+      meaning: (t) => `“${t.S}” is true when at least one card is ${withA(np(d, false))}. It is false only when there is none.`,
+      terms: () => [AT_LEAST_ONE],
+      cases: () => [
+        { row: [kind(d), kind(other)], note: `One card is ${withA(np(d, false))}.` },
+        { row: [kind(other), kind(third)], note: `No card is ${withA(np(d, false))}.` },
+      ],
+      remember: () => 'NOT “there is one” means there is none.',
+      simpler: (t) => [
+        `Imagine 2 cards and no ${np(d, false)}.`,
+        `Is there ${withA(np(d, false))}? No. So “${t.S}” is false, and the NOT must be true.`,
+        `“${t.R}” is true here. That is the NOT.`,
+      ],
     };
   },
 } as const;
@@ -816,11 +1453,13 @@ export type NotKey = keyof typeof NOT_BANK;
 export const NOT_KEYS = Object.keys(NOT_BANK) as NotKey[];
 /** Cases whose classic mistake is every <-> none (conflict items). */
 export const NOT_CONFLICT_KEYS: readonly NotKey[] = ['everyColor', 'everyShape', 'noneColor', 'everyBig', 'everyColorShape'];
+/** Comparison cases: a count or two counts. Their NOT must get the boundary (a tie, or exactly k) right. */
+export const NOT_COMPARE_KEYS: readonly NotKey[] = ['moreColor', 'moreCount', 'atLeastShape', 'exactColor'];
 /** The skill tag of each case ('not-every', 'not-some', ...). Cases with the same tag flip the same kind of sentence. */
 export const NOT_TAGS = Object.fromEntries(NOT_KEYS.map((k) => [k, NOT_BANK[k](createRng(1)).tag])) as Record<NotKey, string>;
 
 let testRows: Card[][] | null = null;
-/** The rows every opposite is checked on: all rows of 1-3 cards, plus 400 random rows of 3-6 cards. */
+/** The rows every NOT is checked on: all rows of 1-3 cards, plus 400 random rows of 3-6 cards. */
 export function oppositeTestRows(): Card[][] {
   if (testRows) return testRows;
   const rows: Card[][] = [];
@@ -851,7 +1490,7 @@ export function isExactOpposite(a: Stmt, b: Stmt): boolean {
 
 /**
  * The smallest row where the statement and a wrong pick agree (both true or both false). That row is
- * proof the pick is not the opposite. Only the features the two sentences use vary.
+ * proof the pick is not the NOT. Only the features the two sentences use vary.
  */
 export function agreeingRow(s: Stmt, w: Stmt, agree?: boolean): Card[] | null {
   const feats = featuresOf(s, w);
@@ -893,32 +1532,53 @@ function joinList(xs: string[]): string {
   return `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`;
 }
 
-/** "Think of a red card and a blue card." Only the features the sentences use are named. */
-export function describeRow(row: readonly Card[], feats: Set<Feature>, n: Noun, ordered: boolean): string {
-  const only = (c: Card): Desc => {
-    const d: Desc = {};
-    if (feats.has('size')) d.size = c.size;
-    if (feats.has('color')) d.color = c.color;
-    if (feats.has('shape')) d.shape = c.shape;
-    return d;
-  };
-  if (ordered) {
-    if (row.length === 1) return `Think of a row with just ${withA(np(only(row[0]), false, n))}.`;
-    return `Think of a row with ${row.map((c) => withA(np(only(c), false, n))).join(', then ')}.`;
-  }
-  if (row.length === 1) return `Think of just ${withA(np(only(row[0]), false, n))}.`;
+/** Only the features the sentences use, so a row is described the way the sentences see it. */
+const onlyFeats = (c: Card, feats: Set<Feature>): Desc => {
+  const d: Desc = {};
+  if (feats.has('size')) d.size = c.size;
+  if (feats.has('color')) d.color = c.color;
+  if (feats.has('shape')) d.shape = c.shape;
+  return d;
+};
+
+/** Cards of one kind together, in first-seen order: [{ d: { color: 'red' }, k: 3 }, …]. */
+function groupRow(row: readonly Card[], feats: Set<Feature>, n: Noun): { d: Desc; k: number }[] {
   const groups: { d: Desc; key: string; k: number }[] = [];
   for (const c of row) {
-    const d = only(c);
+    const d = onlyFeats(c, feats);
     const key = np(d, false, n);
     const g = groups.find((x) => x.key === key);
     if (g) g.k++;
     else groups.push({ d, key, k: 1 });
   }
-  return `Think of ${joinList(groups.map((g) => (g.k === 1 ? withA(g.key) : `${numWord(g.k)} ${np(g.d, true, n)}`)))}.`;
+  return groups;
 }
 
-const LETTERS = ['a', 'b', 'c', 'd', 'e'];
+/** A row in words, with numerals: "3 red dragons and 2 yellow dragons", or "A row: a circle, then a square". */
+export function rowLabel(row: readonly Card[], feats: Set<Feature>, n: Noun, ordered: boolean): string {
+  if (ordered) return `A row: ${row.map((c) => withA(np(onlyFeats(c, feats), false, n))).join(', then ')}`;
+  return cap(joinList(groupRow(row, feats, n).map((g) => `${g.k} ${np(g.d, g.k !== 1, n)}`)));
+}
+
+/** A row as a picture card: counted groups for things that are not shape cards, else the cards themselves. */
+function rowCase(row: readonly Card[], feats: Set<Feature>, n: Noun, ordered: boolean, truths: Truth[], note?: string): TeachCase {
+  const c: TeachCase = { label: `${rowLabel(row, feats, n, ordered)}.`, truths };
+  if (ordered || feats.has('shape')) c.things = row.map((k, i) => ({ id: `k${i + 1}`, shape: k.shape, color: k.color, size: k.size }));
+  else c.groups = groupRow(row, feats, n).map((g) => ({ label: cap(np(g.d, true, n)), n: g.k, ...(g.d.color ? { color: g.d.color } : {}) }));
+  if (note) c.note = note;
+  return c;
+}
+
+/** A fixed, readable id for a sentence, so feedback stays tied to its choice however the choices are shuffled. */
+export function stmtId(s: Stmt): string {
+  const parts: string[] = [s.t];
+  if (s.t === 'count') parts.push(s.op, String(s.k));
+  if (s.t === 'pos') parts.push(s.at);
+  if ('not' in s && s.not) parts.push('not');
+  for (const d of descsOf(s)) parts.push(...(['size', 'color', 'shape'] as const).flatMap((f) => (d[f] ? [d[f] as string] : [])));
+  return parts.join('-');
+}
+
 const PAIRS: readonly [string, string][] = [
   ['troll', 'elf'], ['wizard', 'knight'], ['dragon', 'fairy'], ['giant', 'wizard'], ['elf', 'dragon'],
 ];
@@ -930,56 +1590,104 @@ export interface NotItemOptions {
   conflict?: boolean;
 }
 
-/** "Which sentence is the exact opposite?" with 3-4 choices, all checked against the test rows. */
+/**
+ * "Which sentence is the NOT of this statement?" with 3-4 choices, all checked against the test rows. Every
+ * wrong choice gets its own feedback: the gap it leaves, and a labelled case where the statement and the
+ * pick are both true or both false, with the NOT's truth beside them.
+ */
 export function notItem(rng: Rng, opts: NotItemOptions): Made {
   const key = opts.key ?? rng.pick(opts.conflict ? NOT_CONFLICT_KEYS : NOT_KEYS);
   const c = NOT_BANK[key](rng);
   const n = c.shapes || opts.frame === 'abstract' ? CARD : rng.pick(opts.frame === 'everyday' ? EVERYDAY_NOUNS : FANTASY_NOUNS);
-  if (!isExactOpposite(c.s, c.right)) throw new Error(`notItem ${key}: the right choice is not the exact opposite`);
-  const talk: Talk = { S: bare(c.s, n), R: bare(c.right, n), n };
-  const ordered = c.s.t === 'pos';
-  const extra = rng.shuffle(c.wrongs.slice(1)).slice(0, rng.int(1, 2));
-  const wrongs = [c.wrongs[0], ...extra].flatMap((w) => {
-    // A wrong choice must disagree with the true opposite on at least one test row.
-    if (isExactOpposite(c.s, w.s)) return [];
-    const row = agreeingRow(c.s, w.s, w.agree);
-    if (!row) return [];
-    const both = holds(c.s, row) ? 'true' : 'false';
-    const example = `${describeRow(row, featuresOf(c.s, w.s), n, ordered)} The sentence and your pick are both ${both} for that row.`;
-    return [{ label: say(w.s, n), why: `${w.why(talk)} ${example}`, s: w.s }];
-  });
-  const options = rng.shuffle([{ label: say(c.right, n), why: '', s: c.right }, ...wrongs]);
-  const choices = options.map((o, i) => ({ id: LETTERS[i], label: o.label }));
-  const answer = choices[options.findIndex((o) => o.why === '')].id;
-  const whyWrong: Record<string, string> = {};
-  options.forEach((o, i) => {
-    if (o.why) whyWrong[LETTERS[i]] = o.why;
-  });
+  if (!isExactOpposite(c.s, c.right)) throw new Error(`notItem ${key}: the right choice is not the NOT`);
   const said = say(c.s, n);
-  let line: string, prompt: string;
+  let line: string, prompt: string, whose: string;
   if (opts.frame === 'abstract') {
     line = `“${said}”`;
-    prompt = 'Which sentence is the exact opposite of this one?';
+    whose = 'the statement';
+    prompt = 'Which sentence is the NOT of this statement? It must be true whenever the statement is false, and false whenever it is true.';
   } else if (opts.frame === 'everyday') {
     const [a, b] = rng.shuffle(NAMES);
     line = `${a} says, “${said}”`;
-    prompt = `${b} says the exact opposite. What does ${b} say?`;
+    whose = `${a}’s statement`;
+    prompt = `${b} says NOT to ${a}’s statement. Which sentence is true whenever ${a}’s statement is false, and false whenever it is true?`;
   } else {
     const [a, b] = rng.pick(PAIRS);
     line = `The ${a} says, “${said}”`;
-    prompt = `The ${b} says the exact opposite. What does the ${b} say?`;
+    whose = `the ${a}’s statement`;
+    prompt = `The ${b} says NOT to the ${a}’s statement. Which sentence is true whenever the ${a}’s statement is false, and false whenever it is true?`;
   }
+  const t: Talk = { S: bare(c.s, n), R: bare(c.right, n), n, whose };
+  const Whose = cap(whose);
+  const ordered = c.s.t === 'pos';
+  const caseRows = c.cases(t);
+  const extra = rng.shuffle(c.wrongs.slice(1)).slice(0, rng.int(1, 2));
+
+  const feedback: Record<string, ChoiceFeedback> = {};
+  const examples: Card[][] = [];
+  const kept: WrongOpposite[] = [];
+  for (const w of [c.wrongs[0], ...extra]) {
+    // A wrong choice must disagree with the true NOT on at least one test row.
+    if (isExactOpposite(c.s, w.s)) continue;
+    const feats = featuresOf(c.s, w.s, c.right);
+    // The example: one of the item's own cases when one shows the gap, else the smallest row that does.
+    const shown = caseRows.find((cr) => holds(c.s, cr.row) === holds(w.s, cr.row) && (w.agree === undefined || holds(c.s, cr.row) === w.agree));
+    const row = shown?.row ?? agreeingRow(c.s, w.s, w.agree);
+    if (!row) continue;
+    const both = holds(c.s, row);
+    const where = `Think of ${rowLabel(row, feats, n, ordered).replace(/^A /, 'a ').replace(/^(\d)/, '$1')}.`;
+    const gap = both
+      ? `${Whose} is true there. Your answer is true there too. But the NOT must be false whenever ${whose} is true.`
+      : `${Whose} is false there, so the NOT must be true. But your answer is false there too.`;
+    const close = both
+      ? 'A statement and its NOT never agree. When one is true, the other is false. So your answer is not the NOT.'
+      : 'A statement and its NOT never agree. Your answer misses this case, so it is not the complete NOT.';
+    const fb: ChoiceFeedback = {
+      headline: w.head(t),
+      detail: [w.why(t), `${where} ${gap}`, close],
+      example: rowCase(row, feats, n, ordered, [
+        { who: Whose, value: both },
+        { who: 'Your answer', value: holds(w.s, row) },
+        { who: 'The NOT answer', value: holds(c.right, row) },
+      ], shown?.note),
+    };
+    if (w.simpler) fb.simpler = w.simpler(t);
+    feedback[stmtId(w.s)] = fb;
+    examples.push(row);
+    kept.push(w);
+  }
+
+  const options = rng.shuffle([c.right, ...kept.map((w) => w.s)]);
+  const ids = options.map(stmtId);
+  if (new Set(ids).size !== ids.length) throw new Error(`notItem ${key}: two choices share an id`);
+  const choices = options.map((s) => ({ id: stmtId(s), label: say(s, n) }));
+  const caseFeats = featuresOf(c.s, c.right);
   const item: ItemCore = {
     kind: 'choose',
     prompt,
     scene: { kind: 'text', lines: [line] },
     choices,
-    answer,
-    explain: c.explain(talk),
-    whyWrong,
-    hint: `The opposite must be true every time “${talk.S}” is false.`,
+    answer: stmtId(c.right),
+    explain: c.explain(t),
+    feedback,
+    hint: `The NOT must be true every time “${t.S}” is false, and false every time it is true.`,
+    teach: {
+      rule: NOT_RULE,
+      terms: c.terms(t),
+      meaning: c.meaning(t),
+      casesTitle: `When is ${whose} true, and when is it false?`,
+      cases: caseRows.map((cr) =>
+        rowCase(cr.row, caseFeats, n, ordered, [
+          { who: Whose, value: holds(c.s, cr.row) },
+          { who: 'The NOT answer', value: holds(c.right, cr.row) },
+        ], cr.note),
+      ),
+      remember: [c.remember(t), NOT_ASK],
+      simpler: c.simpler(t),
+    },
   };
+  syncWhyWrong(item);
   if (c.conflict) item.conflict = true;
-  return { tag: c.tag, item, flip: { s: c.s, right: c.right, wrongs: options.filter((o) => o.why).map((o) => o.s), noun: n } };
+  const wrongs = options.filter((s) => stmtId(s) !== item.answer);
+  return { tag: c.tag, item, flip: { s: c.s, right: c.right, wrongs, noun: n, examples: wrongs.map((s) => examples[kept.findIndex((w) => w.s === s)]), cases: caseRows.map((cr) => cr.row) } };
 }
-

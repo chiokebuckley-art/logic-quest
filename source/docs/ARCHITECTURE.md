@@ -7,6 +7,8 @@ unit-tested. Screens are React. Content is data plus the generators that make it
 src/
   engine/                pure TypeScript, tested with vitest
     types.ts             the Item model (choose, tapall, order, assign, multi), Scene, LessonDef, StopDef
+    teach.ts             helpers for the teaching after a wrong answer (Item.teach, ChoiceFeedback)
+    fresh.ts             new examples on the same skill after a miss
     grade.ts             grade(item, answer); clueHolds() for line-ups, gridClueHolds() for logic grids,
                          claimTrue() / speakerFits() for knights and knaves
     rng.ts               seeded random numbers: the same seed always gives the same items
@@ -42,6 +44,22 @@ not-yet. Items carry their own explanation and the reasons a wrong pick is wrong
 the contract test (`src/engine/__tests__/stops.test.ts`) proves each item is well formed. For line-ups, grids and
 islands, it brute-forces every possible answer and checks that exactly one fits. An item can set `seconds` for a
 longer check timer: grids and three-islander puzzles get 150–180 seconds instead of 90.
+
+## Wrong answers
+
+A wrong answer is a teaching moment (see "Wrong answers: teach first" in `CONTENT_GUIDE.md`):
+
+- `game/explanation.ts` turns an item and the chosen answer into one model. The screen (`ExplanationPanel`), the
+  read-aloud and the check result all use it, so the words always match.
+- `ItemView` (learn mode) shows the explanation at once. "Try this question again" clears only the chosen answer
+  and keeps "Review the explanation".
+- `LearnItem` then brings new examples on the same skill (`engine/fresh.ts`): one, or a set from `StopDef.fresh`.
+  A miss there shows its explanation and its simpler example, then another new set. "Move on for now" appears
+  from the second miss.
+- One `AnswerRecord` per item. It is right only on the first try, or when a new set is passed with no hint.
+  Otherwise the skill goes to the notebook. `help` keeps the explanation, the retry and the new examples apart.
+  The save tallies them per skill and day in `SaveData.help` (also in the CSV). Choices with no explanation of
+  their own are listed in `SaveData.gaps` for repair.
 
 ## The Journey
 
@@ -81,4 +99,3 @@ Every save carries `game: "logic-quest"`, so saves from other family games are r
 this version does not know (added by a newer version) are carried through untouched. So an older tab that saves
 does not wipe them. Sync across devices will
 use the shared Cloudflare worker with `LQ` codes (planned for v0.5.0).
-

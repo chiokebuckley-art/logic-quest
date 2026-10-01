@@ -3,7 +3,8 @@
  * and a rule says which signs tell the truth. The engine tries the treasure in each box, keeps only
  * puzzles where exactly one box fits the rule, and writes the explanation from that case check.
  */
-import type { Rng, SignBox } from '../types';
+import { syncWhyWrong } from '../teach';
+import type { ChoiceFeedback, Rng, SignBox, Teach, TeachCase, Truth } from '../types';
 import type { ItemCore, Made } from './statements';
 
 export type SignRule = 'one' | 'two' | 'none' | 'owner';
@@ -206,13 +207,136 @@ export interface SignItemOptions {
   rule?: SignRule;
 }
 
-/** "Which chest has the treasure?" Choices are the three boxes, in order. */
+// ---------- teaching after a wrong answer ----------
+//
+// The cases are the three places the treasure could be. For each one, every sign's truth comes from signHolds()
+// and the rule's from fitsRule(), so the cards show exactly what the engine checked.
+
+const cap = (x: string) => x.charAt(0).toUpperCase() + x.slice(1);
+const tv = (v: boolean) => (v ? 'true' : 'false');
+const signCount = (n: number) => `${n} true sign${n === 1 ? '' : 's'}`;
+
+/** What the rule says about the right box, in plain words. */
+function ruleMeaning(rule: SignRule, w: ReturnType<typeof signWords>): string {
+  switch (rule) {
+    case 'one': return `The rule says exactly one sign is true. So with the ${w.item} ${w.prep} the right ${w.noun}, 1 sign is true and 2 signs are false.`;
+    case 'two': return `The rule says exactly two signs are true. So with the ${w.item} ${w.prep} the right ${w.noun}, 2 signs are true and 1 sign is false.`;
+    case 'none': return `The rule says every sign is false. So with the ${w.item} ${w.prep} the right ${w.noun}, no sign is true.`;
+    case 'owner': return `The rule says the sign on the ${w.noun} with the ${w.item} is true. The signs on the other two ${w.noun}s are false.`;
+  }
+}
+
+function ruleTerm(rule: SignRule, w: ReturnType<typeof signWords>): { word: string; meaning: string } {
+  switch (rule) {
+    case 'one': return { word: '“Exactly one”', meaning: '1, no more and no fewer.' };
+    case 'two': return { word: '“Exactly two”', meaning: '2, no more and no fewer.' };
+    case 'none': return { word: '“Every sign is false”', meaning: 'no sign is true. The number of true signs is 0.' };
+    case 'owner': return { word: '“The other signs”', meaning: `the signs on the two ${w.noun}s without the ${w.item}.` };
+  }
+}
+
+/** Why the rule fits, or does not fit, with the treasure in box b. Numbers are counted from signHolds(). */
+export function signCaseNote(p: SignPuzzle, skin: SignSkin, b: number): string {
+  const w = signWords(skin);
+  const ts = trueSigns(p.signs, b);
+  const fit = fitsRule(p.signs, p.rule, b);
+  if (p.rule === 'owner') {
+    const own = ts.includes(b);
+    const others = ts.filter((i) => i !== b);
+    if (fit) return `${cap(w.signOf(b))} is true, and the other two signs are false. This fits the rule.`;
+    if (!own) return `${cap(w.signOf(b))} is false. The rule needs it to be true.`;
+    return `${cap(w.signList(others))} ${others.length === 1 ? 'is' : 'are'} true too. The rule needs the other signs to be false.`;
+  }
+  const need = p.rule === 'none' ? 'every sign to be false' : `exactly ${signCount(needCount[p.rule])}`;
+  return `That makes ${signCount(ts.length)}. ${fit ? 'This fits the rule.' : `The rule needs ${need}.`}`;
+}
+
+/** One case: the treasure in box b, each sign true or false, and whether that fits the rule. */
+export function signCase(p: SignPuzzle, skin: SignSkin, b: number): TeachCase {
+  const w = signWords(skin);
+  const truths: Truth[] = p.signs.map((s, i) => ({ who: cap(w.signOf(i)), value: signHolds(s, i, b) }));
+  truths.push({ who: 'Fits the rule', value: fitsRule(p.signs, p.rule, b) });
+  return { label: `Pretend the ${w.item} is ${w.prep} ${w.the(b)}.`, truths, note: signCaseNote(p, skin, b) };
+}
+
+/** The headline for picking box b: the gap it leaves against the rule. */
+export function signHeadline(p: SignPuzzle, skin: SignSkin, b: number): string {
+  const w = signWords(skin);
+  const ts = trueSigns(p.signs, b);
+  if (p.rule === 'owner') {
+    if (!ts.includes(b)) return `Your answer makes ${w.signOf(b)} false, but the rule needs it to be true.`;
+    const others = ts.filter((i) => i !== b);
+    return `Your answer makes ${w.signList(others)} true too, but the rule needs ${others.length === 1 ? 'it' : 'them'} to be false.`;
+  }
+  if (p.rule === 'none') return `Your answer makes ${w.signList(ts)} true, but the rule says every sign is false.`;
+  const many = ts.length === 0 ? 'no sign' : ts.length === 3 ? 'all three signs' : `${NUM[ts.length]} sign${ts.length === 1 ? '' : 's'}`;
+  return `Your answer makes ${many} true, but the rule needs exactly ${NUM[needCount[p.rule]]}.`;
+}
+
+/** Every wrong box's explanation: what the pick means, each sign's truth there, and where the rule breaks. */
+function signFeedback(p: SignPuzzle, skin: SignSkin, b: number): ChoiceFeedback {
+  const w = signWords(skin);
+  const each = p.signs.map((s, i) => `${w.signOf(i)} is ${tv(signHolds(s, i, b))}`);
+  const detail = [
+    `Your answer means the ${w.item} is ${w.prep} ${w.the(b)}.`,
+    `Then ${each[0]}, ${each[1]}, and ${each[2]}.`,
+    `${signCaseNote(p, skin, b)} So the ${w.item} can’t be ${w.prep} ${w.the(b)}.`,
+  ];
+  // A sign that points to this box can make it look right. Only the rule says which signs to trust.
+  const pointer = p.signs.findIndex((s, i) => (s.t === 'here' && i === b) || (s.t === 'in' && s.x === b));
+  if (pointer >= 0) detail.push(`${cap(w.signOf(pointer))} says the ${w.item} is ${w.prep} ${w.the(b)}. But signs can be false. Only the rule tells you which signs to trust.`);
+  // The example card shows each sign's truth; the detail above already gives the count, so the card has no note.
+  const { note: _note, ...example } = signCase(p, skin, b);
+  return { headline: signHeadline(p, skin, b), detail, example };
+}
+
+/** "Explain more simply": how to check one sign, for two places the treasure could be. */
+function signSimpler(p: SignPuzzle, skin: SignSkin): string[] {
+  const w = signWords(skin);
+  // Start with a "this chest" sign when there is one: it is the one to read with care.
+  const own = p.signs.findIndex((s) => s.t === 'here' || s.t === 'notHere');
+  const i = own >= 0 ? own : 0;
+  const s = p.signs[i];
+  const x = s.t === 'in' || s.t === 'notIn' ? s.x : i;
+  const y = [0, 1, 2].find((k) => k !== x)!;
+  return [
+    `Look at one sign. ${cap(w.signOf(i))} says, “${w.signText(s)}”`,
+    `If the ${w.item} is ${w.prep} ${w.the(x)}, this sign is ${tv(signHolds(s, i, x))}.`,
+    `If the ${w.item} is ${w.prep} ${w.the(y)}, this sign is ${tv(signHolds(s, i, y))}.`,
+    `Check every sign this way for each ${w.noun}. Then see which ${w.noun} fits the rule.`,
+  ];
+}
+
+export function signTeach(p: SignPuzzle, skin: SignSkin): Teach {
+  const w = signWords(skin);
+  const terms = [
+    { word: 'A true sign', meaning: `a sign that says the right thing about where the ${w.item} is.` },
+    ruleTerm(p.rule, w),
+  ];
+  if (p.signs.some((s) => s.t === 'here' || s.t === 'notHere')) terms.push({ word: `“This ${w.noun}”`, meaning: `the ${w.noun} the sign is on.` });
+  return {
+    rule: `Pretend the ${w.item} is ${w.prep} each ${w.noun}, one at a time. Check which signs are true. Keep the ${w.noun} that fits the rule.`,
+    terms,
+    meaning: ruleMeaning(p.rule, w),
+    casesTitle: `If the ${w.item} were ${w.prep} each ${w.noun}, which signs would be true?`,
+    cases: [0, 1, 2].map((b) => signCase(p, skin, b)),
+    remember: [
+      p.rule === 'owner'
+        ? `The sign on the ${w.noun} with the ${w.item} must be true. Every other sign must be false.`
+        : `Try each ${w.noun}. Count the true signs. Keep the ${w.noun} that matches the rule.`,
+      `Ask: “If the ${w.item} were here, which signs would be true?”`,
+    ],
+    simpler: signSimpler(p, skin),
+  };
+}
+
+/** "Which chest has the treasure?" Choices are the three boxes, in order; a choice's id is its box's id. */
 export function signItem(rng: Rng, opts: SignItemOptions): SignMade {
   const p = makeSignPuzzle(rng, opts.rule);
   const w = signWords(opts.skin);
   const boxes = signBoxes(p, opts.skin);
-  const whyWrong: Record<string, string> = {};
-  for (const b of [0, 1, 2]) if (b !== p.answer) whyWrong[boxes[b].id] = whyNotBox(p, opts.skin, b);
+  const feedback: Record<string, ChoiceFeedback> = {};
+  for (const b of [0, 1, 2]) if (b !== p.answer) feedback[boxes[b].id] = signFeedback(p, opts.skin, b);
   const hint =
     p.rule === 'owner'
       ? `Pretend the ${w.item} is ${w.prep} one ${w.noun}. Is its sign true? Are the other signs false?`
@@ -224,10 +348,11 @@ export function signItem(rng: Rng, opts: SignItemOptions): SignMade {
     choices: boxes.map((b) => ({ id: b.id, label: b.name })),
     answer: boxes[p.answer].id,
     explain: explainSigns(p, opts.skin),
-    whyWrong,
+    feedback,
     hint,
+    teach: signTeach(p, opts.skin),
   };
+  syncWhyWrong(item);
   if (signDeniesAnswer(p)) item.conflict = true;
   return { tag: p.rule === 'owner' ? 'signs-owner' : 'signs-count', item, puzzle: p, skin: opts.skin };
 }
-

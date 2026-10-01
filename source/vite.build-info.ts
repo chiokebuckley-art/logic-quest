@@ -13,4 +13,3 @@ export function buildInfo(): { define: Record<string, string>; plugin: Plugin } 
     },
   };
 }
-

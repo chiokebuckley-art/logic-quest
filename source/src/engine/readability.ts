@@ -45,4 +45,3 @@ export function longestSentence(text: string): { words: number; sentence: string
 }
 
 export const READING = { maxGrade: 7.0, maxSentenceWords: 25 } as const;
-

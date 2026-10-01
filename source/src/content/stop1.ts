@@ -4,12 +4,14 @@
  *
  *  l1 What is a statement?   sentence bank (true, false, unknown, question, command, opinion, feeling)
  *  l2 True, false or can't tell   rows of shape cards with some face down (engine: statements.ts)
- *  l3 The NOT flip           pick the exact opposite (engine: statements.ts, checked row by row)
+ *  l3 The NOT flip           pick the NOT: true whenever the statement is false (engine: statements.ts, checked row by row)
  *  l4 Treasure signs         three boxes, signs and a rule (engine: signs.ts)
  */
-import type { Choice, ChooseItem, Item, LessonDef, Rng, StopDef, Thing } from '../engine/types';
+import { syncWhyWrong } from '../engine/teach';
+import type { Choice, ChoiceFeedback, ChooseItem, Item, LessonDef, Rng, StopDef, TeachCase, Thing, Truth } from '../engine/types';
 import {
   FRAMES,
+  NOT_COMPARE_KEYS,
   NOT_CONFLICT_KEYS,
   NOT_KEYS,
   NOT_TAGS,
@@ -29,6 +31,7 @@ import {
   signItem,
   signWords,
   trueSigns,
+  type Sign,
   type SignPuzzle,
   type SignRule,
 } from '../engine/puzzles/signs';
@@ -139,19 +142,150 @@ function whatItIs(s: Sentence): string {
   }
 }
 
-/** The mistake in calling a statement "not a statement", or the other way round. */
-function mistake(s: Sentence): string {
+// ---------- lesson 1: teaching after a wrong answer ----------
+
+/** Worked examples for the explanations. None is in the bank, so an explanation never answers a later question. */
+export const TEACH_SENTENCES: Record<SentenceKind, Sentence> = {
+  true: { text: 'Two plus three is five.', kind: 'true', skin: 'abstract' },
+  false: { text: 'Snow is purple.', kind: 'false', skin: 'everyday' },
+  unknown: { text: 'The giant has a pet goat.', kind: 'unknown', skin: 'fantasy' },
+  question: { text: 'Is the door open?', kind: 'question', skin: 'everyday' },
+  command: { text: 'Sit down.', kind: 'command', skin: 'everyday' },
+  opinion: { text: 'Red is the best color.', kind: 'opinion', skin: 'everyday' },
+  feeling: { text: 'Hooray!', kind: 'feeling', skin: 'everyday' },
+};
+
+/** A short, fixed id made from the sentence's words, so feedback stays tied to its choice however the choices are shuffled. */
+export const sentenceId = (text: string) =>
+  text.toLowerCase().replace(/[’']/g, '').split(/[^a-z0-9]+/).filter(Boolean).slice(0, 6).join('-');
+
+export const L1_RULE = 'A statement is a sentence that must be true or false. It does not have to be true.';
+const L1_ASK = 'Ask: “Could this sentence be true or false?”';
+const STATEMENT_TERM = { word: 'A statement', meaning: 'a sentence that is either true or false.' };
+const KIND_TERM: Partial<Record<SentenceKind, { word: string; meaning: string }>> = {
+  opinion: { word: 'An opinion', meaning: 'what someone thinks or likes. People can disagree about it, and nobody is wrong.' },
+  feeling: { word: 'An exclamation', meaning: 'a short cry that shows a strong feeling, like “Wow!”' },
+  false: { word: 'False', meaning: 'not true. A false sentence says something about the world, but it is wrong.' },
+  command: { word: 'A command', meaning: 'a sentence that tells someone what to do.' },
+  question: { word: 'A question', meaning: 'a sentence that asks something.' },
+};
+/** The harder words first. Statement is always defined; at most two more. */
+const TERM_ORDER: readonly SentenceKind[] = ['opinion', 'feeling', 'false', 'command', 'question'];
+/**
+ * Statement, then the word for the asked sentence's own kind (its headline uses it), then the hardest of the others.
+ * At most three words.
+ */
+const l1Terms = (kinds: readonly SentenceKind[], own?: SentenceKind) => {
+  const order = own && KIND_TERM[own] ? [own, ...TERM_ORDER.filter((k) => k !== own)] : TERM_ORDER;
+  return [STATEMENT_TERM, ...order.filter((k) => k === own || kinds.includes(k)).slice(0, 2).map((k) => KIND_TERM[k]!)];
+};
+
+/**
+ * What the sentence does. A statement says something about the world (rightly or wrongly); the other kinds do not.
+ * ("Says how things are, but it is wrong" read as a contradiction, so the words are "something about the world".)
+ */
+function says(s: Sentence): string {
+  const Q = q(s);
   switch (s.kind) {
-    case 'true': return `${q(s)} is true. Anything true or false is a statement.`;
-    case 'false': return `A false sentence is still a statement. ${q(s)} is false, so it is a statement.`;
-    case 'unknown': return `You don’t need to know the answer. ${q(s)} must be true or false, so it is a statement.`;
-    case 'question': return `${q(s)} is a question. A question can’t be true or false.`;
-    case 'command': return `${q(s)} is a command. A command can’t be true or false.`;
-    case 'opinion': return `${q(s)} is an opinion. People can disagree, and nobody is wrong. So it is not a statement.`;
-    case 'feeling': return `${q(s)} shows a feeling. It can’t be true or false.`;
+    case 'true': return `${Q} says something about the world, and it is right. So it is true.`;
+    case 'false': return `${Q} says something about the world, but it is wrong. So it is false.`;
+    case 'unknown': return `${Q} says something about the world. Nobody here can check it, but it is right or wrong.`;
+    case 'question': return `${Q} asks something. It does not say how things are.`;
+    case 'command': return `${Q} tells someone what to do. It does not say how things are.`;
+    case 'opinion': return `${Q} tells what someone thinks or likes. People can disagree, and nobody is wrong.`;
+    case 'feeling': return `${Q} shows a feeling. It does not say how things are.`;
   }
 }
 
+const KIND_NOTE: Record<SentenceKind, string> = {
+  true: 'It is true, so it is a statement.',
+  false: 'It is false, but it is still a statement.',
+  unknown: 'Nobody here can check it. But it must be true or false.',
+  question: 'It asks something. It can’t be true or false.',
+  command: 'It tells someone what to do. It can’t be true or false.',
+  opinion: 'People can disagree about it, and nobody is wrong. It is not a statement.',
+  feeling: 'It shows a feeling. It can’t be true or false.',
+};
+
+/**
+ * A sentence as a worked case: whether it is true (for a statement you can check) and whether it is a statement.
+ * Both come from the sentence's label in the bank, the same label that sets the item's answer.
+ */
+export function sentenceCase(s: Sentence): TeachCase {
+  const truths: Truth[] = [];
+  if (s.kind === 'true' || s.kind === 'false') truths.push({ who: 'The sentence', value: s.kind === 'true' });
+  truths.push({ who: 'It is a statement', value: isStatement(s.kind) });
+  return { label: `“${s.text}”`, truths, note: KIND_NOTE[s.kind] };
+}
+
+/** Why the answer's call on this sentence is wrong (the line after says()). */
+const WHY_IS: Record<SentenceKind, string> = {
+  true: 'A statement is any sentence that is true or false. This one is true, so it is a statement.',
+  false: 'A statement does not have to be true. It only has to be true or false. So a false sentence is still a statement.',
+  unknown: 'You do not need to know the answer. It must be true or false, so it is a statement.',
+  question: 'A question can’t be true or false, so it is not a statement.',
+  command: 'Doing it or not doing it does not make the sentence true or false. So it is not a statement.',
+  opinion: 'In logic, we do not count an opinion as a statement.',
+  feeling: 'An exclamation can’t be true or false, so it is not a statement.',
+};
+
+/** "Is this sentence a statement?": the headline for the wrong answer, by the sentence's kind. */
+const HEAD_IS: Record<SentenceKind, string> = {
+  true: 'Your answer says a true sentence is not a statement.',
+  false: 'Your answer says a false sentence is not a statement.',
+  unknown: 'Your answer says a sentence nobody can check is not a statement.',
+  question: 'Your answer calls a question a statement.',
+  command: 'Your answer calls a command a statement.',
+  opinion: 'Your answer calls an opinion a statement.',
+  feeling: 'Your answer calls an exclamation a statement.',
+};
+
+/** "Which of these is (not) a statement?": the headline for picking a sentence of this kind. */
+const HEAD_WHICH: Record<SentenceKind, string> = {
+  true: 'Your answer is a true sentence, so it is a statement.',
+  // Not "Your answer is false": that reads as "you are wrong". The answer is a sentence that is false.
+  false: 'Your answer is a false sentence, and a false sentence is still a statement.',
+  unknown: 'Your answer is a statement, even though nobody here can check it.',
+  question: 'Your answer is a question, not a statement.',
+  command: 'Your answer is a command, not a statement.',
+  opinion: 'Your answer is an opinion, not a statement.',
+  feeling: 'Your answer is an exclamation, not a statement.',
+};
+
+const KIND_REMEMBER: Record<SentenceKind, string> = {
+  true: 'Any sentence that is true or false is a statement.',
+  false: 'A false sentence is still a statement.',
+  unknown: 'You do not need to know the answer. It just has to be true or false.',
+  // Only words this item defines: its own kind's word is always among its terms.
+  question: 'A question asks something. It can’t be true or false, so it is not a statement.',
+  command: 'A command tells someone what to do. It can’t be true or false, so it is not a statement.',
+  opinion: 'An opinion is not a statement. People can disagree, and nobody is wrong.',
+  feeling: 'An exclamation shows a feeling. It can’t be true or false, so it is not a statement.',
+};
+
+/** The smallest worked example for each kind, on a sentence from TEACH_SENTENCES. */
+const KIND_SIMPLER: Record<SentenceKind, string[]> = {
+  true: ['Think of “Two plus three is five.”', 'Can you say “That is true” or “That is false” about it? Yes: it is true.', 'So it is a statement.'],
+  false: ['Think of “Snow is purple.”', 'Can you say “That is true” or “That is false” about it? Yes: it is false. Snow is white.', 'False is fine. So it is a statement.'],
+  unknown: ['Think of “The giant has a pet goat.”', 'You can’t check it. But the giant has a goat, or the giant does not.', 'So it is true or false, even if you don’t know which. It is a statement.'],
+  question: ['Think of “Is the door open?”', 'Can you say “That is true” about it? No. It asks something.', 'So it is not a statement.'],
+  command: ['Think of “Sit down.”', 'Can you say “That is true” about it? No. It tells you to do something.', 'So it is not a statement.'],
+  opinion: ['Think of “Red is the best color.”', 'Ann says, “That is true.” Ben says, “That is false.”', 'Nobody is wrong. Each one says what they like. So it is an opinion, not a statement.'],
+  feeling: ['Think of “Hooray!”', 'Can you say “That is true” about it? No. It only shows a feeling.', 'So it is not a statement.'],
+};
+
+/** For "Is this a statement?": two sentences on the other side of the line, so the cases show every way it can go. */
+const CONTRAST: Record<SentenceKind, [SentenceKind, SentenceKind]> = {
+  true: ['false', 'question'],
+  false: ['true', 'opinion'],
+  unknown: ['false', 'opinion'],
+  question: ['false', 'command'],
+  command: ['false', 'question'],
+  opinion: ['false', 'unknown'],
+  feeling: ['false', 'question'],
+};
+
+const L1_CASES_TITLE = 'Can each sentence be true or false?';
 const L1_HINT = 'Ask yourself: can this sentence be true or false?';
 
 /** "Is this sentence a statement?" */
@@ -159,6 +293,7 @@ function isThisItem(rng: Rng, skin: Skin, used: Used, kinds?: readonly SentenceK
   const kind = rng.pick(kinds ?? [...STATEMENT_KINDS, ...NOT_STATEMENT_KINDS]);
   const s = draw(rng, skin, [kind], used);
   const yes = isStatement(s.kind);
+  const others = CONTRAST[s.kind];
   const item: ItemCore = {
     kind: 'choose',
     prompt: 'Is this sentence a statement?',
@@ -169,15 +304,25 @@ function isThisItem(rng: Rng, skin: Skin, used: Used, kinds?: readonly SentenceK
     ],
     answer: yes ? 'yes' : 'no',
     explain: whatItIs(s),
-    whyWrong: { [yes ? 'no' : 'yes']: mistake(s) },
+    feedback: {
+      [yes ? 'no' : 'yes']: { headline: HEAD_IS[s.kind], detail: [says(s), WHY_IS[s.kind]], example: sentenceCase(s) },
+    },
     hint: L1_HINT,
+    teach: {
+      rule: L1_RULE,
+      terms: l1Terms([s.kind, ...others], s.kind),
+      meaning: says(s),
+      casesTitle: L1_CASES_TITLE,
+      cases: [s, ...others.map((k) => TEACH_SENTENCES[k])].map(sentenceCase),
+      remember: [KIND_REMEMBER[s.kind], L1_ASK],
+      simpler: KIND_SIMPLER[s.kind],
+    },
   };
+  syncWhyWrong(item);
   if (s.kind === 'false') item.conflict = true;
   const tag = s.kind === 'false' ? 'false-is-statement' : s.kind === 'opinion' ? 'opinion' : yes ? 'statement' : 'not-statement';
   return { tag, item };
 }
-
-const LETTERS = ['a', 'b', 'c', 'd'];
 
 /** "Which of these is a statement?" (one statement) or "... is not a statement?" (one non-statement). */
 function whichItem(rng: Rng, skin: Skin, used: Used, findStatement: boolean): Made {
@@ -185,24 +330,42 @@ function whichItem(rng: Rng, skin: Skin, used: Used, findStatement: boolean): Ma
   const target = draw(rng, skin, findStatement ? STATEMENT_KINDS : NOT_STATEMENT_KINDS, used);
   const rest = pickDistinct(rng, skin, findStatement ? NOT_STATEMENT_KINDS : STATEMENT_KINDS, others, findStatement, used);
   const all = rng.shuffle([target, ...rest]);
-  const choices: Choice[] = all.map((s, i) => ({ id: LETTERS[i], label: s.text }));
-  const answer = choices[all.indexOf(target)].id;
-  const whyWrong: Record<string, string> = {};
-  all.forEach((s, i) => {
-    if (s !== target) whyWrong[LETTERS[i]] = mistake(s);
-  });
+  const choices: Choice[] = all.map((s) => ({ id: sentenceId(s.text), label: s.text }));
+  const feedback: Record<string, ChoiceFeedback> = {};
+  const which = findStatement ? 'The statement here is' : 'The sentence that is not a statement is';
+  for (const s of all) {
+    if (s === target) continue;
+    feedback[sentenceId(s.text)] = {
+      headline: HEAD_WHICH[s.kind],
+      detail: [says(s), WHY_IS[s.kind], `${which} “${target.text}” ${KIND_NOTE[target.kind]}`],
+      example: sentenceCase(s),
+      simpler: KIND_SIMPLER[s.kind],
+    };
+  }
   const explain = findStatement
-    ? `${whatItIs(target)} The others are not true or false.`
-    : `${whatItIs(target)} The others are all statements.`;
+    ? `${whatItIs(target)} The other sentences can’t be true or false.`
+    : `${whatItIs(target)} The other sentences are all statements.`;
   const item: ItemCore = {
     kind: 'choose',
     prompt: findStatement ? 'Which of these is a statement?' : 'Which of these is not a statement?',
     choices,
-    answer,
+    answer: sentenceId(target.text),
     explain,
-    whyWrong,
+    feedback,
     hint: findStatement ? 'Find the one that must be true or false, even if you can’t check it.' : 'Find the one that can’t be true or false.',
+    teach: {
+      rule: L1_RULE,
+      terms: l1Terms(all.map((s) => s.kind)),
+      meaning: findStatement
+        ? 'Only one of these sentences can be true or false. That one is the statement.'
+        : 'Only one of these sentences can’t be true or false. That one is not a statement.',
+      casesTitle: L1_CASES_TITLE,
+      cases: all.map(sentenceCase),
+      remember: [findStatement ? 'Only a statement can be true or false.' : 'True sentences, false sentences and sentences you can’t check are all statements.', L1_ASK],
+      simpler: KIND_SIMPLER[target.kind],
+    },
   };
+  syncWhyWrong(item);
   if (all.some((s) => s.kind === 'false')) item.conflict = true;
   return { tag: findStatement ? 'which-statement' : 'which-not-statement', item };
 }
@@ -249,14 +412,21 @@ function lesson2Practice(rng: Rng): Made[] {
 // ---------- lesson 3: the NOT flip ----------
 
 export const L3_EXAMPLE = [card('c1', 'circle', 'red', 'big'), card('c2', 'square', 'red', 'small'), card('c3', 'triangle', 'blue', 'big')];
+/** 3 red cards and 3 yellow cards: a tie. */
+export const L3_TIE = [
+  card('t1', 'circle', 'red', 'big'), card('t2', 'circle', 'red', 'big'), card('t3', 'circle', 'red', 'big'),
+  card('t4', 'circle', 'yellow', 'big'), card('t5', 'circle', 'yellow', 'big'), card('t6', 'circle', 'yellow', 'big'),
+];
 
+/** Five tries: every, some/none, a comparison with a tie or an exact count, another comparison, and a card case. */
 function lesson3Practice(rng: Rng): Made[] {
   const frames = rng.shuffle(FRAMES);
   const one = distinctItems();
   return [
     one(() => notItem(rng, { frame: frames[0], key: 'everyColor' })),
     one(() => notItem(rng, { frame: frames[1], key: rng.pick(['someColor', 'noneColor'] as const) })),
-    one(() => notItem(rng, { frame: frames[2], key: rng.pick(['exactColor', 'moreColor', 'atLeastShape'] as const) })),
+    one(() => notItem(rng, { frame: frames[2], key: rng.pick(['moreColor', 'moreCount'] as const) })),
+    one(() => notItem(rng, { frame: rng.pick(FRAMES), key: rng.pick(['exactColor', 'atLeastShape'] as const) })),
     one(() => notItem(rng, { frame: rng.pick(FRAMES), key: rng.pick(['everyShape', 'everyBig', 'everyColorShape', 'firstShape', 'someExact'] as const) })),
   ];
 }
@@ -352,7 +522,7 @@ const lessons: LessonDef[] = [
         title: 'Can’t tell yet',
         body: [
           '“There is a yellow card.” You can’t see a yellow card. But card 3 is face down, and it could be yellow.',
-          'So the honest answer is “can’t tell.” That does not mean false. It means you need more clues.',
+          'So the honest answer is “Can’t tell.” That does not mean false. It means you need more clues.',
         ],
         scene: { kind: 'things', things: L2_EXAMPLES.cant },
       },
@@ -368,7 +538,7 @@ const lessons: LessonDef[] = [
         title: 'Try every way',
         body: [
           'Ask two questions. Could the face-down cards make it true? Could they make it false?',
-          'If they can only make it true, it is true. If they can only make it false, it is false. If they could do both, you can’t tell yet.',
+          'If they can only make it true, it is true. If they can only make it false, it is false. If they could make it true and could also make it false, you can’t tell yet.',
         ],
       },
     ],
@@ -379,11 +549,12 @@ const lessons: LessonDef[] = [
     title: 'The NOT flip',
     ideas: [
       {
-        title: 'The opposite',
+        title: 'What NOT means',
         body: [
-          'The opposite of a statement is true when the statement is false. It is false when the statement is true.',
-          'They never agree. One is always true, and the other is false.',
-          'Another name for the opposite is the negation.',
+          'NOT means the original statement is false.',
+          'The NOT of a statement is true whenever the statement is false. It is false whenever the statement is true.',
+          'A statement and its NOT never agree. When one is true, the other is false.',
+          'People sometimes call it the opposite. But the NOT must cover every way the statement can be false.',
         ],
       },
       {
@@ -403,18 +574,28 @@ const lessons: LessonDef[] = [
         scene: { kind: 'things', things: L3_EXAMPLE },
       },
       {
-        title: 'Exactly and more',
+        title: 'More, a tie, and at least as many',
         body: [
-          'The opposite of “Exactly two cards are red” is “The number of red cards is not two.” It could be more, or it could be fewer.',
-          'The opposite of “There are more red cards than blue cards” must include a tie. It is “There are at least as many blue cards as red cards.”',
-          'The opposite of “At least two cards are red” is “Fewer than two cards are red.” “At most two” is not it: it still allows exactly two.',
+          '“More” means a larger number. With 3 red cards and 2 yellow cards, red has more.',
+          'A tie means the two groups have the same number. Here there are 3 red cards and 3 yellow cards. That is a tie. Neither color has more.',
+          '“At least as many” means the same number or more. In this tie, yellow has at least as many as red.',
+        ],
+        scene: { kind: 'things', things: L3_TIE },
+      },
+      {
+        title: 'NOT and counting',
+        body: [
+          'The NOT of “There are more red cards than yellow cards” must include a tie. It is “There are at least as many yellow cards as red cards.”',
+          'The NOT of “Exactly two cards are red” is “The number of red cards is not two.” It could be more, or it could be fewer.',
+          'The NOT of “At least two cards are red” is “Fewer than two cards are red.” “At most two” is not it: it still allows exactly two.',
         ],
       },
       {
-        title: 'Check your flip',
+        title: 'Check your NOT',
         body: [
-          'Think of a few rows of cards. Check the statement and your opposite in each row. One must be true and the other false.',
-          'If both can be true at once, or both can be false at once, it is not the opposite.',
+          'Think of a few rows of cards. Check the statement and your NOT in each row. One must be true and the other false.',
+          'Try the edge cases too, like a tie or exactly two.',
+          'If the statement and your NOT can be true at once, or false at once, it is not the NOT.',
         ],
       },
     ],
@@ -429,6 +610,7 @@ const lessons: LessonDef[] = [
         body: [
           'There are three chests. The treasure is in just one of them.',
           'Each chest has a sign. A sign might tell the truth, or it might not.',
+          'A sign that says “this chest” means the chest it is on.',
         ],
       },
       {
@@ -491,9 +673,9 @@ function check(rng: Rng): Item[] {
   const [k1, k2] = rng.shuffle(SIGN_SKINS);
   const settled = rng.pick(['true', 'false'] as const);
   const findStatement = rng.chance(0.5);
-  // First an every/none trap, then an opposite that is not a trap.
+  // First an every/none trap, then a comparison (a tie or an exact count decides it).
   const nots: NotKey[] = [rng.pick(NOT_CONFLICT_KEYS)];
-  nots.push(rng.pick(unlike(NOT_KEYS.filter((k) => !NOT_CONFLICT_KEYS.includes(k)), nots)));
+  nots.push(rng.pick(unlike(NOT_COMPARE_KEYS, nots)));
   const planned: [string, Made][] = [
     ['s1.l1', one(() => isThisItem(rng, s1, used))],
     ['s1.l1', one(() => whichItem(rng, s2, used, findStatement))],
@@ -522,14 +704,114 @@ function arcade(rng: Rng): Item {
   return finish(ANY[lesson](rng), 's1-arcade', lesson);
 }
 
+/**
+ * For "Is this a statement?": after a miss, a new sentence of the same kind, then one from the other side of the
+ * line, so saying "A statement" (or "Not a statement") every time can't pass both.
+ */
+export const FRESH_CONTRAST: Record<SentenceKind, readonly SentenceKind[]> = {
+  true: ['question', 'command'],
+  false: ['opinion'],
+  unknown: ['opinion'],
+  question: ['false', 'unknown'],
+  command: ['false', 'unknown'],
+  opinion: ['false'],
+  feeling: ['true', 'false'],
+};
+
+/** Lesson 1: the same kind of sentence again, plus a contrast; or a new "Which of these" asked the same way. */
+function freshL1(missed: Item, rng: Rng): Item[] {
+  if (missed.kind !== 'choose') return [];
+  const make = (m: Made) => finish(m, 'new', 's1.l1');
+  if (missed.scene?.kind === 'text') {
+    const text = missed.scene.lines[0];
+    const s = SENTENCES.find((x) => x.text === text);
+    if (!s) return [];
+    const used: Used = new Set([text]);
+    return [make(isThisItem(rng, rng.pick(SKINS), used, [s.kind])), make(isThisItem(rng, rng.pick(SKINS), used, FRESH_CONTRAST[s.kind]))];
+  }
+  const used: Used = new Set(missed.choices.map((c) => c.label));
+  return [make(whichItem(rng, rng.pick(SKINS), used, missed.prompt === 'Which of these is a statement?'))];
+}
+
+/** The sentence a row item asks about (the words inside its quotes). */
+export const rowSentence = (it: { prompt: string }) => /“(.+?)”/.exec(it.prompt)?.[1] ?? '';
+const rowCards = (it: { scene?: Item['scene'] }) => JSON.stringify(it.scene?.kind === 'things' ? it.scene.things : null);
+
+/**
+ * Lesson 2: a "can't tell" row and a settled row, so both edges are checked. The first is like the missed item:
+ * a can't-tell row after a missed can't-tell row, or a row with the same settled answer. A new example never repeats
+ * the missed sentence or the missed cards, so the answer just shown can't be copied.
+ */
+function freshL2(missed: Item, rng: Rng): Item[] {
+  const [f1, f2] = rng.shuffle(FRAMES);
+  const make = (opts: Parameters<typeof rowItem>[1]) => {
+    let m = rowItem(rng, opts);
+    for (let i = 0; i < 40 && (rowSentence(m.item) === rowSentence(missed) || rowCards(m.item) === rowCards(missed)); i++) m = rowItem(rng, opts);
+    return finish(m, 'new', 's1.l2');
+  };
+  if (missed.skill === 's1.cant-tell') {
+    return [make({ frame: f1, target: 'cant', conflict: !!missed.conflict }), make({ frame: f2, target: rng.pick(['true', 'false'] as const) })];
+  }
+  const v: Verdict = missed.kind === 'choose' && missed.answer === 'false' ? 'false' : 'true';
+  return [make({ frame: f1, target: v }), make({ frame: f2, target: 'cant', conflict: true })];
+}
+
+/** Every sign a box can carry, so a sign's words can be read back into the sign (for the new examples). */
+const SIGN_FORMS = (box: number): Sign[] => [
+  { t: 'here' },
+  { t: 'notHere' },
+  ...[0, 1, 2].filter((x) => x !== box).flatMap((x): Sign[] => [{ t: 'in', x }, { t: 'notIn', x }]),
+];
+
+/** The signs of a sign puzzle on the page, read back from their words. */
+export function signsOnPage(boxes: readonly { name: string; sign: string }[]): Sign[] | null {
+  const skin = SIGN_SKINS.find((k) => signWords(k).name(0) === boxes[0]?.name);
+  if (!skin) return null;
+  const w = signWords(skin);
+  const signs = boxes.map((b, i) => SIGN_FORMS(i).find((s) => w.signText(s) === b.sign));
+  return signs.every((s): s is Sign => !!s) ? signs : null;
+}
+
+/**
+ * Lesson 4: a new puzzle with the same rule, on a different kind of box. Its signs differ from the missed puzzle's,
+ * so the new example is not the same puzzle with new names (where the same position would win again).
+ */
+function freshL4(missed: Item, rng: Rng): Item[] {
+  if (missed.scene?.kind !== 'boxes') return [];
+  const { rule: ruleText, boxes } = missed.scene;
+  const rule = SIGN_RULES.find((r) => SIGN_SKINS.some((k) => signWords(k).ruleText(r) === ruleText));
+  if (!rule) return [];
+  const skin = rng.pick(SIGN_SKINS.filter((k) => signWords(k).name(0) !== boxes[0].name));
+  const old = JSON.stringify(signsOnPage(boxes));
+  let m = signItem(rng, { skin, rule });
+  for (let i = 0; i < 40 && JSON.stringify(m.puzzle.signs) === old; i++) m = signItem(rng, { skin, rule });
+  return [finish(m, 'new', 's1.l4')];
+}
+
+/**
+ * New examples after a missed NOT flip. A comparison gets two: one whose NOT keeps the boundary (a tie, or
+ * exactly k) and one whose NOT does not, so both kinds of edge are checked. Other items use the default.
+ */
+const COMPARE_TAGS = ['not-more', 'not-at-least', 'not-exactly'];
+function fresh(missed: Item, rng: Rng): Item[] {
+  if (missed.lesson === 's1.l1') return freshL1(missed, rng);
+  if (missed.lesson === 's1.l2') return freshL2(missed, rng);
+  if (missed.lesson === 's1.l4') return freshL4(missed, rng);
+  if (missed.lesson !== 's1.l3') return [];
+  const tag = missed.skill.replace(/^s1\./, '');
+  const make = (t: string) => finish(notItem(rng, { frame: rng.pick(FRAMES), key: rng.pick(NOT_KEYS.filter((k) => NOT_TAGS[k] === t)) }), 'new', 's1.l3');
+  if (!COMPARE_TAGS.includes(tag)) return NOT_KEYS.some((k) => NOT_TAGS[k] === tag) ? [make(tag)] : [];
+  return [make(tag), make(tag === 'not-more' ? 'not-at-least' : 'not-more')];
+}
+
 export const stop1: StopDef = {
   n: STOP,
   id: 's1',
   title: 'True or False?',
-  idea: 'A statement is true or false. Without enough clues, the honest answer is “can’t tell yet.”',
+  idea: 'A statement is true or false. Without enough clues, the honest answer is “Can’t tell yet.”',
   ready: true,
   lessons,
   check,
   practice: arcade,
+  fresh,
 };
-

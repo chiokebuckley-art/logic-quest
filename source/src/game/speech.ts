@@ -218,4 +218,3 @@ export function itemSpeech(item: Item): string[] {
   }
   return lines;
 }
-

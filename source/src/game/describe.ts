@@ -78,4 +78,3 @@ export function describeAnswer(item: Item, answer: Answer | null | undefined): s
 export function describeRight(item: Item): string {
   return describeAnswer(item, rightAnswer(item));
 }
-

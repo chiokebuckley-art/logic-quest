@@ -5,7 +5,7 @@ import { viewAll } from '../../engine/journey/mastery';
 import { statsCsv } from '../../engine/save/save';
 import { STOPS, stopById } from '../../content/stops';
 import {
-  DAILY_GOAL_MINUTES, firstTryWinsThisWeek, fileSlug, minutesByDay, minutesOn, needsPractice, pathDot, percent,
+  DAILY_GOAL_MINUTES, firstTryWinsThisWeek, fileSlug, helpTotals, minutesByDay, minutesOn, needsPractice, pathDot, percent,
   shortDay, skillLabel, skillRows, stopCounts, strongSkills, totalMinutes, totals, type DayMinutes, type PathDot, type SkillRow,
 } from '../progressStats';
 import { downloadText, useStore } from '../store';
@@ -127,6 +127,7 @@ function GrownUps() {
   const weak = needsPractice(rows);
   const strong = strongSkills(rows);
   const counts = stopCounts(save.stops);
+  const help = helpTotals(save.help, today, range);
 
   const practiceRoute = (skill: string) => {
     const stop = stopById(skill.split('.')[0]);
@@ -170,6 +171,27 @@ function GrownUps() {
         <p className="small muted">
           Each missed question becomes a card. A card is cleared after three first-try answers on new questions, a few days apart.
         </p>
+      </section>
+
+      <section className="panel soft" aria-labelledby="miss-title" style={{ gap: 6 }}>
+        <h3 id="miss-title" className="section-title">AFTER A MISS</h3>
+        {help.explained === 0 ? (
+          <p className="muted small">Nothing yet. When an answer is wrong in a lesson or practice, the game explains it, then asks a new example.</p>
+        ) : (
+          <>
+            <p>
+              <strong>
+                {help.explained} explained · {help.freshPassed} learned on a new example
+              </strong>
+            </p>
+            <p className="small muted">
+              After each miss the game showed why. Then the question was tried again with help ({help.retried} right), and new
+              examples were tried on their own ({help.fresh} tried). “Explain more simply” was used {help.simpler} {help.simpler === 1 ? 'time' : 'times'}.
+              Help never counts as a first-try win.
+            </p>
+          </>
+        )}
+        {(save.gaps?.length ?? 0) > 0 && <p className="small muted">Questions with no explanation of their own yet: {save.gaps.length}. They are in the CSV export for repair.</p>}
       </section>
 
       <section className="panel soft" aria-labelledby="minutes-title" style={{ gap: 8 }}>
@@ -289,4 +311,3 @@ function MinutesChart({ days, range }: { days: DayMinutes[]; range: Range }) {
     </>
   );
 }
-

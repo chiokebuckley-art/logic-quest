@@ -1,11 +1,12 @@
 /**
- * Arcade practice: endless items from one stop in learn mode (feedback, hints, "Show me"),
+ * Arcade practice: endless items from one stop in learn mode (a miss is taught, retried and checked with a new example),
  * item i drawn with createRng(seed + i), and a running count of first-try wins.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createRng } from '../../engine/rng';
 import type { PracticeRunnerProps } from './contracts';
-import { ItemView, PlayHeader } from './ItemView';
+import { PlayHeader } from './ItemView';
+import { LearnItem } from './LearnItem';
 
 export function PracticeRunner({ stop, seed, readAloud, onAnswer, onExit }: PracticeRunnerProps) {
   const [i, setI] = useState(0);
@@ -45,10 +46,11 @@ export function PracticeRunner({ stop, seed, readAloud, onAnswer, onExit }: Prac
       )}
 
       {item && (
-        <ItemView
+        <LearnItem
           key={i}
+          stop={stop}
           item={item}
-          mode="learn"
+          seed={seed + i * 31 + 17}
           readAloud={readAloud}
           kicker={`Puzzle ${i + 1}`}
           onDone={(r) => {
@@ -61,4 +63,3 @@ export function PracticeRunner({ stop, seed, readAloud, onAnswer, onExit }: Prac
     </div>
   );
 }
-

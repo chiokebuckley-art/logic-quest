@@ -1,7 +1,8 @@
 /**
  * Fixing Wrong-Answer Notebook cards ("repair quests"): for each card, a fresh question on its skill in learn
- * mode (feedback, hints, "Show me"). After each one, onFix(card, record) reports the try and says whether the
- * card is now cleared, and a short note says what happens next. Ends with a summary.
+ * mode (after a miss: the explanation, a retry with help, then new examples on its own). After each one,
+ * onFix(card, record) reports the try and says whether the card is now cleared, and a short note says what
+ * happens next. Ends with a summary.
  * Like the other play components, it never touches the store: the screen passes data in and gets results back.
  */
 import { useEffect, useRef, useState } from 'react';
@@ -10,7 +11,8 @@ import { FIX_GAPS, FIXES_TO_CLEAR, freshItem, type NoteCard } from '../../engine
 import type { Item, StopDef } from '../../engine/types';
 import { skillName } from '../progressStats';
 import type { AnswerRecord } from './contracts';
-import { ItemView, PlayHeader, type DotState } from './ItemView';
+import { PlayHeader, type DotState } from './ItemView';
+import { LearnItem } from './LearnItem';
 import { PlayIcon } from './ThingCard';
 
 export interface NotebookRunnerProps {
@@ -44,11 +46,11 @@ export function NotebookRunner({ cards, stops, seed, readAloud, onFix, onExit }:
   // One fresh question per card, fixed when the run starts (fixing a card moves its day, but not this list).
   // A card whose stop has no questions is left out.
   const [tries] = useState(() => {
-    const out: { card: NoteCard; item: Item }[] = [];
+    const out: { card: NoteCard; item: Item; stop: StopDef }[] = [];
     for (const card of cards) {
       const stop = stops.find((s) => s.n === card.stop);
       const item = stop ? freshItem(stop, card, seedFor(seed, card.skill)) : null;
-      if (item) out.push({ card, item });
+      if (stop && item) out.push({ card, item, stop });
     }
     return out;
   });
@@ -92,10 +94,11 @@ export function NotebookRunner({ cards, stops, seed, readAloud, onFix, onExit }:
       />
 
       {step.at === 'try' && tries[step.i] && (
-        <ItemView
+        <LearnItem
           key={step.i}
+          stop={tries[step.i].stop}
           item={tries[step.i].item}
-          mode="learn"
+          seed={seed + step.i * 13 + 5}
           readAloud={readAloud}
           kicker={`Repair ${step.i + 1} of ${n}`}
           onDone={(r) => answered(step.i, r)}
@@ -158,4 +161,3 @@ export function NotebookRunner({ cards, stops, seed, readAloud, onFix, onExit }:
     </div>
   );
 }
-

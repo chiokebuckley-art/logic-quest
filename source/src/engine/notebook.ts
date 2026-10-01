@@ -1,8 +1,9 @@
 /**
  * The Wrong-Answer Notebook (Engineering Quest's model, WORDRAIDERS' "repair quests"). A miss (a wrong check
- * answer, a timeout, or "Show me" in a lesson or practice) adds a card for that skill. The card comes back as a
- * FRESH question on the same skill: right away, then three days after the first fix, then a week after the
- * second. Three clean fixes clear it; a miss while fixing starts it over from tomorrow.
+ * answer, a timeout, or a lesson or practice item not passed on its own after the explanation) adds a card for
+ * that skill. The card comes back as a FRESH question on the same skill: right away, then three days after the
+ * first fix, then a week after the second. Three clean fixes clear it; a miss while fixing starts it over from
+ * tomorrow.
  */
 import { addDays } from './journey/mastery';
 import { createRng } from './rng';
@@ -88,4 +89,3 @@ export function freshItem(stop: StopDef, card: NoteCard, seed: number): Item | n
   }
   return fallback;
 }
-

@@ -51,6 +51,12 @@ export const sameCard = (a: Card, b: Card): boolean => a.shape === b.shape && a.
 /** 'big red circle' */
 export const cardName = (c: Card): string => `${c.size} ${c.color} ${c.shape}`;
 
+/**
+ * A fixed id for a card, made from its features: 'big-red-circle'. A choice keeps this id however the choices
+ * are shuffled, so its feedback, the answer key and the read-aloud always match.
+ */
+export const cardId = (c: Card): string => `${c.size}-${c.color}-${c.shape}`;
+
 /** Read a card name ('big red circle', any case, optional 'the') back into a card. */
 export function parseCard(text: string): Card | null {
   const m = /^(?:the |a )?(big|small) (red|blue|yellow) (circle|square|triangle)$/.exec(text.trim().toLowerCase());
@@ -183,6 +189,14 @@ function words(f: Formula): string {
     }
   }
 }
+
+/**
+ * A fixed id for a rule, made from its words: 'NOT (red AND big)' -> 'not-[red-and-big]', 'a circle OR blue' ->
+ * 'circle-or-blue'. Two rules get the same id only when render() writes them the same way. Like cardId, it never
+ * depends on where the choice sits after shuffling.
+ */
+export const ruleId = (f: Formula): string =>
+  render(f).toLowerCase().replace(/\ba (?=circle|square|triangle)/g, '').replace(/\(/g, '[').replace(/\)/g, ']').replace(/\s+/g, '-');
 
 const TOKEN = /\s*(\(|\)|NOT\b|AND\b|OR\b|a circle\b|a square\b|a triangle\b|red\b|blue\b|yellow\b|big\b|small\b)/y;
 
@@ -368,4 +382,3 @@ export function makeRuleGuess(rng: Rng, targets: readonly Formula[], opts: RuleG
   }
   throw new Error('could not build a rule guess');
 }
-

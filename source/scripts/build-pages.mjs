@@ -10,4 +10,3 @@ execSync('npx tsc --noEmit && npx vite build --outDir dist-pages --emptyOutDir',
 await writeFile('dist-pages/.nojekyll', '');
 await copyFile('dist-pages/index.html', 'dist-pages/404.html');
 console.log(`dist-pages/ ready for GitHub Pages (base ${base})`);
-

@@ -57,4 +57,3 @@ export function MultiView({ item, chosen, locked, revealed, onToggle }: MultiVie
     </div>
   );
 }
-

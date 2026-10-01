@@ -1318,4 +1318,3 @@ describe('reading level of the play screens', () => {
     expect(long.words, long.sentence).toBeLessThanOrEqual(READING.maxSentenceWords);
   });
 });
-

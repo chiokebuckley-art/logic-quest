@@ -8,6 +8,7 @@
  * robot parade, broom race) and abstract (letters in a row).
  */
 import {
+  CANT,
   ORDERLY,
   SKIN_IDS,
   buildPuzzle,
@@ -197,7 +198,7 @@ const lessons: LessonDef[] = [
         scene: { kind: 'clues', clues: ['Eli did not finish first.', 'Eli did not finish last.'] },
         body: [
           'Eli, Fay and Gus ran a race. Where did Eli finish?',
-          'Try Eli first. That breaks the first clue. Try Eli last. That breaks the second clue.',
+          'Try Eli first. That makes the first clue false. We say it breaks the clue. Try Eli last. That breaks the second clue.',
           'Only the middle spot is left. If more than one spot were left, you could not tell.',
         ],
       },
@@ -244,7 +245,7 @@ const lessons: LessonDef[] = [
         title: 'Test and fix',
         body: [
           'Check your line against each clue, one at a time.',
-          'If a clue breaks, move someone and check again.',
+          'A clue breaks when it is false for your line. Then move someone and check again.',
           'Good clues leave just one order that works.',
         ],
       },
@@ -329,6 +330,65 @@ function arcade(rng: Rng): Item {
   }
 }
 
+/**
+ * New examples after a miss (engine/fresh.ts). Lessons 1 to 3 give a pair, in random order: one built the same
+ * way as the missed item (same skill, same kind of answer), and its partner with the other kind of answer. A
+ * missed “Can’t tell” is paired with a chain or spot that does decide, and a missed “must” or “can’t” with a
+ * “might”, so repeating one answer never passes. Lessons 4 and 5 give one item of the same shape.
+ * Returns [] when no match turns up, and the default (same skill from the lesson's practice) takes over.
+ */
+function fresh(missed: Item, rng: Rng): Item[] {
+  const id = 'new';
+  /** Draw until the skill matches the missed item's skill. */
+  const same = (make: () => Item): Item | null => {
+    for (let i = 0; i < 30; i++) {
+      const item = make();
+      if (item.skill === missed.skill) return item;
+    }
+    return null;
+  };
+  const pair = (a: Item | null, b: Item): Item[] => (a ? rng.shuffle([a, b]) : []);
+  switch (missed.lesson) {
+    case L1: {
+      if (missed.kind !== 'choose') return [];
+      const cant = missed.answer === CANT;
+      return pair(
+        same(() => chainPuzzle(rng, { id, skin: rng.pick(SKIN_IDS), cantTell: cant }).item),
+        chainPuzzle(rng, { id: `${id}b`, skin: rng.pick(SKIN_IDS), cantTell: !cant }).item,
+      );
+    }
+    case L2: {
+      if (missed.kind !== 'choose') return [];
+      const was = missed.answer as Status;
+      const opts: { conflict?: boolean; target?: Status } = missed.conflict ? { conflict: true } : { target: was };
+      // The partner: a “might” for a missed “must” or “can’t”, and a “must” or “can’t” for a missed “might”.
+      const other: Status = was === 'might' ? rng.pick(['must', 'cant'] as const) : 'might';
+      return pair(
+        same(() => statusPuzzle(rng, { id, skin: rng.pick(ORDERLY), ...opts }).item),
+        statusPuzzle(rng, { id: `${id}b`, skin: rng.pick(ORDERLY), target: other }).item,
+      );
+    }
+    case L3: {
+      if (missed.kind !== 'choose') return [];
+      const q: 'where' | 'who' = missed.choices.some((c) => c.id === 'p1') ? 'where' : 'who';
+      const cant = missed.answer === CANT;
+      const opts: { conflict?: 'ends' | 'between'; cantTell?: boolean; q?: 'where' | 'who' } = missed.conflict
+        ? { conflict: missed.skill === 's3.between' ? 'between' : 'ends' }
+        : { cantTell: cant, q };
+      return pair(
+        same(() => spotPuzzle(rng, { id, skin: rng.pick(ORDERLY), ...opts }).item),
+        spotPuzzle(rng, { id: `${id}b`, skin: rng.pick(ORDERLY), cantTell: !cant, q }).item,
+      );
+    }
+    case L4:
+      return missed.kind === 'order' ? [buildPuzzle(rng, { id, skin: rng.pick(SKIN_IDS), n: missed.names.length }).item] : [];
+    case L5:
+      return [extraCluePuzzle(rng, { id, skin: rng.pick(SKIN_IDS) }).item];
+    default:
+      return [];
+  }
+}
+
 export const stop3: StopDef = {
   n: 3,
   id: 's3',
@@ -338,5 +398,5 @@ export const stop3: StopDef = {
   lessons,
   check,
   practice: arcade,
+  fresh,
 };
-

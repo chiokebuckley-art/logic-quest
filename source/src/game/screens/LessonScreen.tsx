@@ -11,9 +11,11 @@ export function LessonScreen({ route }: { route: LessonRoute }) {
   const { state, player, save, actions } = useStore();
   const stop = stopById(route.stopId);
   const lesson = stop?.lessons.find((l) => l.id === route.lessonId);
-  // A new seed on every visit, so a repeated lesson brings new tries.
+  // A lesson left partway (a refresh, a closed app) picks up at the same try with the same questions.
+  // Otherwise a new seed on every visit, so a repeated lesson brings new tries.
+  const [run] = useState(() => (save?.lessonRun && save.lessonRun.lessonId === route.lessonId && save.lessonRun.stopId === route.stopId ? save.lessonRun : null));
   const [seed] = useState(() =>
-    seedFor(player?.id ?? 'guest', route.lessonId, save?.stops[route.stopId]?.lessonsDone.length ?? 0, Date.now()),
+    run ? run.seed : seedFor(player?.id ?? 'guest', route.lessonId, save?.stops[route.stopId]?.lessonsDone.length ?? 0, Date.now()),
   );
 
   const last = state.lastCheck && state.lastCheck.stopId === route.stopId ? state.lastCheck : null;
@@ -51,6 +53,8 @@ export function LessonScreen({ route }: { route: LessonRoute }) {
         seed={seed}
         readAloud={save.settings.readAloud}
         onAnswer={(r) => actions.recordAnswer(r)}
+        start={run ? { next: run.next, firstTry: run.firstTry } : undefined}
+        onProgress={(next, firstTry) => actions.setLessonRun({ stopId: stop.id, lessonId: lesson.id, seed, next, firstTry })}
         onComplete={() => {
           actions.completeLesson(stop.id, lesson.id);
           actions.navigate(afterDone(lesson.id));
@@ -60,4 +64,3 @@ export function LessonScreen({ route }: { route: LessonRoute }) {
     </div>
   );
 }
-

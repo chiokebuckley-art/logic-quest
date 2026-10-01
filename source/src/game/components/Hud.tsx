@@ -46,4 +46,3 @@ export function Hud() {
 export function initial(name: string): string {
   return (name.trim()[0] ?? '?').toUpperCase();
 }
-

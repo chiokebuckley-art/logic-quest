@@ -206,4 +206,3 @@ function NextUp({ next, views, anyPractice, onGo }: {
     </>
   );
 }
-

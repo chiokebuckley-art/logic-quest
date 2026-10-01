@@ -156,4 +156,3 @@ export function ThingCard({ thing, onToggle, pressed = false, locked = false, fi
     </button>
   );
 }
-

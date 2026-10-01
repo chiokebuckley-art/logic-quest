@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addPlayer, checkPin, exportSave, hashPin, importSave, loadRegistry, loadSave, newSave, parseSave, recordAnswer, saveRegistry, statsCsv, writeSave, type KV } from '../save/save';
+import { addPlayer, checkPin, exportSave, hashPin, importSave, loadRegistry, loadSave, newSave, parseSave, recordAnswer, recordGap, recordHelp, saveRegistry, statsCsv, writeSave, type KV } from '../save/save';
 
 const memory = (): KV & { map: Map<string, string> } => {
   const map = new Map<string, string>();
@@ -36,7 +36,24 @@ describe('saves', () => {
     let d = newSave(0);
     d = recordAnswer(d, '2026-09-30', 's2.or', false);
     d = recordAnswer(d, '2026-09-30', 's2.or', true);
-    expect(statsCsv(d)).toBe('date,skill,answered,first_try_right\n2026-09-30,s2.or,2,1\n');
+    expect(statsCsv(d)).toBe('date,skill,answered,first_try_right,explanations_shown,right_retry_with_help,new_examples_tried,new_example_sets_passed,simpler_used\n2026-09-30,s2.or,2,1,0,0,0,0,0\n');
+  });
+
+  it('keeps help after a miss apart from first tries, in the save and the CSV', () => {
+    let d = newSave(0);
+    d = recordAnswer(d, '2026-09-30', 's1.not-more', false);
+    d = recordHelp(d, '2026-09-30', 's1.not-more', { explained: true, retried: true, fresh: 2, freshPassed: true, simpler: true });
+    d = recordHelp(d, '2026-09-30', 's1.not-more', { explained: false, retried: false, fresh: 0, freshPassed: false, simpler: false });
+    expect(d.help['2026-09-30']['s1.not-more']).toEqual([1, 1, 2, 1, 1]);
+    expect(statsCsv(d)).toBe('date,skill,answered,first_try_right,explanations_shown,right_retry_with_help,new_examples_tried,new_example_sets_passed,simpler_used\n2026-09-30,s1.not-more,1,0,1,1,2,1,1\n');
+    d = recordGap(recordGap(d, 's1.not-more:none-red'), 's1.not-more:none-red');
+    expect(d.gaps).toEqual(['s1.not-more:none-red']);
+    const back = parseSave(JSON.parse(JSON.stringify(d)))!;
+    expect(back.help).toEqual(d.help);
+    expect(back.gaps).toEqual(d.gaps);
+    const bad = parseSave({ game: 'logic-quest', help: { '2026-09-30': { 's1.ok': [1, 0, 0, 0, 0], 'x=bad': [1, 1, 1, 1, 1], 's1.short': [1] } }, gaps: ['s1.ok:a', 7, '=HYPERLINK("x")'] })!;
+    expect(bad.help).toEqual({ '2026-09-30': { 's1.ok': [1, 0, 0, 0, 0] } });
+    expect(bad.gaps).toEqual(['s1.ok:a']);
   });
 });
 
@@ -44,7 +61,7 @@ describe('review fixes', () => {
   it('drops imported skill keys that are not skill tags, so the CSV stays safe', () => {
     const s = parseSave({ game: 'logic-quest', stats: { '2026-09-30': { 's1.ok': [2, 1], 's1.x,=HYPERLINK("http://e.x")\nfake,row': [1, 1] } } })!;
     expect(Object.keys(s.stats['2026-09-30'])).toEqual(['s1.ok']);
-    expect(statsCsv(s)).toBe('date,skill,answered,first_try_right\n2026-09-30,s1.ok,2,1\n');
+    expect(statsCsv(s)).toBe('date,skill,answered,first_try_right,explanations_shown,right_retry_with_help,new_examples_tried,new_example_sets_passed,simpler_used\n2026-09-30,s1.ok,2,1,0,0,0,0,0\n');
   });
 });
 
@@ -84,3 +101,13 @@ describe('fields from a newer version', () => {
   });
 });
 
+describe('the lesson in progress', () => {
+  it('is kept through a reload, and a damaged one is dropped', () => {
+    const d = { ...newSave(0), lessonRun: { stopId: 's1', lessonId: 's1.l3', seed: 12345, next: 2, firstTry: 1 } };
+    expect(parseSave(JSON.parse(JSON.stringify(d)))!.lessonRun).toEqual(d.lessonRun);
+    for (const bad of [{ stopId: 's1', lessonId: 's2.l1', seed: 1, next: 1, firstTry: 0 }, { stopId: 's1', lessonId: 's1.l3', seed: 'x' }, 'nope']) {
+      expect(parseSave({ ...newSave(0), lessonRun: bad })!.lessonRun).toBeNull();
+    }
+    expect(newSave(0).lessonRun).toBeNull();
+  });
+});

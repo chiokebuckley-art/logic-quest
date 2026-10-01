@@ -31,4 +31,3 @@ export function useActiveTime(enabled: boolean, onActive: (seconds: number) => v
     };
   }, [enabled]);
 }
-

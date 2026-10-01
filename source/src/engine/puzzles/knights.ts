@@ -13,15 +13,20 @@
  *
  * Item makers:
  *  - wordsItem()     lesson 1: what a knight's or a knave's words tell you (Yes / No / Can't tell)
- *  - whoCanSayItem() lesson 2: who could say this (Only a knight / Only a knave / Both / Neither)
- *  - supposeItem()   lesson 3: "Suppose Ava is a knight. What must Ben be?"
+ *  - whoCanSayItem() lesson 2: who could say this (Only a knight / Only a knave / Either kind / No one)
+ *  - supposeItem()   lesson 3: "Suppose Ava is a knight. What must Ben be? Or does that guess crash?"
  *  - puzzleItem()    lessons 3-5: mark each islander (AssignItem, layout 'toggles')
  *  - andOrItem()     lesson 5: what a knave's (or knight's) "and" / "or" tells you
+ *
+ * Every item also carries the teaching shown after a wrong answer (Item.teach), and every wrong choice of a choose
+ * item its own ChoiceFeedback, all built from the same case lists: see "teaching after a wrong answer" below and
+ * docs/audit/stop5.md. Choice ids say what the choice means ('knave', 'cant', 'oneKnave'), never where it sits.
  *
  * Only the rng passed in is used, so the same seed always gives the same items. No he/she: names repeat.
  */
 import { claimTrue, speakerFits } from '../grade';
-import type { AssignItem, Choice, ChooseItem, Claim, Rng, Speaker } from '../types';
+import { syncWhyWrong } from '../teach';
+import type { AssignItem, Choice, ChoiceFeedback, ChooseItem, Claim, Rng, Scene, Speaker, Teach, TeachCase, Truth } from '../types';
 
 const STOP = 5;
 
@@ -170,6 +175,144 @@ const withText = (ids: readonly string[], kinds: Partial<KindMap>, nm: Namer) =>
 /** "Ben would be a knight saying something false" (no period): why a case breaks the rule. */
 export const breakText = (who: string, kinds: KindMap, nm: Namer) =>
   `${nm(who)} would be ${a(kinds[who])} saying something ${tf(kinds[who] === 'knave')}`;
+
+// ---------- teaching after a wrong answer ----------
+//
+// The words the lesson cards use: a "case" is one full way things could be ("Ava is a knight and Ben is a
+// knave"), and a "guess" is what you suppose about one islander. Every case card is computed: each speaker's
+// words are true or false by claimTrue, and the note says who fits the rule (speakerFits). A wrong choice's
+// feedback names that choice's gap, says where it fails, and shows the case that proves it.
+
+/** A word or phrase an explanation uses, defined in place. */
+export type Term = { word: string; meaning: string };
+
+/** Words the explanations use, defined in place (Teach.terms). Shown as "<word> means <meaning>". */
+export const TERMS = {
+  fits: { word: 'Fits the rule', meaning: 'a knight says something true, or a knave says something false.' },
+  cant: { word: '“Can’t tell”', meaning: 'more than one case works, and they give different answers.' },
+  we: { word: '“We”', meaning: 'all the islanders in the puzzle. The speaker counts too.' },
+  same: { word: '“The same kind”', meaning: 'two knights, or two knaves.' },
+  diff: { word: '“Different kinds”', meaning: 'one knight and one knave.' },
+  and: { word: '“And”', meaning: 'every part must be true. One false part makes the whole sentence false.' },
+  or: { word: '“Or”', meaning: 'at least one part is true. It can be one part or every part.' },
+  atLeastOne: { word: '“At least one”', meaning: 'one or more.' },
+  couldSay: { word: '“Could say it”', meaning: 'that kind of islander can say it and still fit the rule.' },
+  either: { word: '“Either kind”', meaning: 'a knight could say it, and a knave could say it too.' },
+  noOne: { word: '“No one”', meaning: 'a knight could not say it, and a knave could not say it either.' },
+} as const;
+
+/** "A case means one full way things could be, like “Ava is a knight and Ben is a knave.”" */
+export const caseTerm = (example: string): Term => ({ word: 'A case', meaning: `one full way things could be, like “${unstop(example)}.”` });
+
+/**
+ * "A guess means what you suppose about one islander, just to test it. Here it is “Ava is a knight.” If every case
+ * with the guess breaks the rule, the guess crashes." It comes after the case term, since it uses "case".
+ */
+export const guessTerm = (name: string, kind: Kind): Term => ({
+  word: 'A guess',
+  meaning: `what you suppose about one islander, just to test it. Here it is “${name} is ${a(kind)}.” If every case with the guess breaks the rule, the guess crashes.`,
+});
+
+/**
+ * A counting claim's own words as a term, so the amount and "us" are defined together: “At least one of us”,
+ * “Exactly one of us”, “We”. `n` is the number of islanders in the puzzle.
+ */
+export function countTerm(c: Extract<Claim, { t: 'count' }>, n: number): Term {
+  if (c.op === 'exactly' && c.k === n) return TERMS.we;
+  if (c.op === 'exactly' && c.k === 0) return { word: '“None of us”', meaning: 'not one islander in the puzzle. The speaker counts too.' };
+  const k = NUM[c.k];
+  if (c.op === 'atLeast') return { word: `“At least ${k} of us”`, meaning: `${k} or more of the islanders in the puzzle. The speaker counts too.` };
+  if (c.op === 'atMost') return { word: `“At most ${k} of us”`, meaning: `${k} or fewer of the islanders in the puzzle. The speaker counts too.` };
+  return { word: `“Exactly ${k} of us”`, meaning: `${k} of the islanders in the puzzle, no more and no fewer. The speaker counts too.` };
+}
+
+/** One speaker whose words have this truth: fits the rule or not, as a case note. */
+export function fitNote(k: Kind, wordsTrue: boolean): string {
+  return (k === 'knight') === wordsTrue
+    ? `${cap(a(k))} with ${tf(wordsTrue)} words fits the rule. This case works.`
+    : `${cap(a(k))} never says ${tf(wordsTrue)} words. This case does not work.`;
+}
+
+/** "Ben is a knave with true words" (no period), for a speaker who breaks the rule in this case. */
+export const withWords = (who: string, claims: Readonly<Claims>, kinds: KindMap, nm: Namer) =>
+  `${nm(who)} is ${a(kinds[who])} with ${tf(claimTrue(claims[who], kinds))} words`;
+
+/**
+ * One case as a card: "Ava is a knight and Ben is a knave." Each speaker's words are true or false (claimTrue),
+ * and the note says who breaks the rule (speakerFits), or that everyone fits.
+ */
+export function kindsCase(ids: readonly string[], claims: Readonly<Claims>, kinds: KindMap, nm: Namer, extra: readonly Truth[] = []): TeachCase {
+  const truths: Truth[] = ids.filter((id) => claims[id]).map((id) => ({ who: `${nm(id)}’s words`, value: claimTrue(claims[id], kinds) }));
+  const b = breakers(ids, claims, kinds);
+  const note = b.length
+    ? `${b.map((id) => `${withWords(id, claims, kinds, nm)}.`).join(' ')} That breaks the rule, so this case does not work.`
+    : 'Everyone fits the rule. This case works.';
+  return { label: `${cap(kindsText(ids, kinds, nm))}.`, truths: [...truths, ...extra], note };
+}
+
+/** When a claim is true, with names only (never "I"), no final period: "Ava and Ben are the same kind". */
+export function whenTrue(c: Claim, nm: Namer, ids: readonly string[]): string {
+  const list = joinAnd(ids.map(nm));
+  switch (c.t) {
+    case 'is': return `${nm(c.who)} is ${a(c.kind)}`;
+    case 'same': return `${nm(c.a)} and ${nm(c.b)} are the same kind`;
+    case 'diff': return `${nm(c.a)} and ${nm(c.b)} are different kinds`;
+    case 'count': {
+      if (c.op === 'exactly' && c.k === ids.length) return `${list} are ${ids.length === 2 ? 'both' : 'all'} ${c.kind}s`;
+      if (c.op === 'exactly' && c.k === 0) return `none of ${list} is ${a(c.kind)}`;
+      const lead = c.op === 'atLeast' ? 'at least' : c.op === 'atMost' ? 'at most' : 'exactly';
+      return c.k === 1 ? `${lead} one of ${list} is ${a(c.kind)}` : `${lead} ${NUM[c.k]} of ${list} are ${c.kind}s`;
+    }
+    case 'not': return `it is not true that ${whenTrue(c.c, nm, ids)}`;
+    case 'and': return c.cs.map((x) => whenTrue(x, nm, ids)).join(', and ');
+    case 'or': return c.cs.map((x) => whenTrue(x, nm, ids)).join(', or ');
+    case 'if': return `${whenTrue(c.b, nm, ids)}, or it is not true that ${whenTrue(c.a, nm, ids)}`;
+  }
+}
+
+/** "Ava’s words are true only when Ava and Ben are the same kind." One sentence per speaker. */
+export function wordsMeaning(c: Claim, speaker: string, nm: Namer, ids: readonly string[]): string {
+  const whose = `${nm(speaker)}’s words are true`;
+  if (c.t === 'or') return `${whose} when at least one part is true: ${whenTrue(c, nm, ids)}.`;
+  if (c.t === 'and') return `${whose} only when every part is true: ${whenTrue(c, nm, ids)}.`;
+  return `${whose} only when ${whenTrue(c, nm, ids)}.`;
+}
+
+/** Does a claim use this kind of words anywhere inside it? */
+function uses(c: Claim, t: Claim['t']): boolean {
+  if (c.t === t) return true;
+  if (c.t === 'not') return uses(c.c, t);
+  if (c.t === 'and' || c.t === 'or') return c.cs.some((x) => uses(x, t));
+  if (c.t === 'if') return uses(c.a, t) || uses(c.b, t);
+  return false;
+}
+
+/** Every counting claim inside a claim: "At least one of us is a knave", "We are both knaves". */
+function counts(c: Claim): Extract<Claim, { t: 'count' }>[] {
+  switch (c.t) {
+    case 'count': return [c];
+    case 'not': return counts(c.c);
+    case 'and': case 'or': return c.cs.flatMap(counts);
+    case 'if': return [...counts(c.a), ...counts(c.b)];
+    default: return [];
+  }
+}
+
+/**
+ * Every special word the islanders' words use, each defined once, in order of need: each counting phrase
+ * (“At least one of us”, “Exactly one of us”, “We”), "and", "or", "the same kind", "different kinds". None is
+ * left out: a puzzle has at most three speakers, and each one's words need at most one of these.
+ */
+export function claimTerms(claims: readonly Claim[], n: number): Term[] {
+  const out: Term[] = [];
+  const add = (t: Term) => { if (!out.some((x) => x.word === t.word)) out.push(t); };
+  for (const c of claims) for (const x of counts(c)) add(countTerm(x, n));
+  if (claims.some((c) => uses(c, 'and'))) add(TERMS.and);
+  if (claims.some((c) => uses(c, 'or'))) add(TERMS.or);
+  if (claims.some((c) => uses(c, 'same'))) add(TERMS.same);
+  if (claims.some((c) => uses(c, 'diff'))) add(TERMS.diff);
+  return out;
+}
 
 // ---------- explaining a solve ----------
 
@@ -459,7 +602,7 @@ function weighted<T>(rng: Rng, xs: readonly { c: T; w: number }[]): T {
 // ---------- puzzles (AssignItem) ----------
 
 /** Sentences in explanation lines (each line holds one or two). */
-export const sentenceCount = (lines: readonly string[]) => lines.join(' ').split(/(?<=[.!?])\s+/).filter(Boolean).length;
+export const sentenceCount = (lines: readonly string[]) => lines.join(' ').split(/[.!?]\s+/).filter(Boolean).length;
 
 export interface KnightPuzzle {
   ids: string[];
@@ -525,6 +668,45 @@ export interface PuzzleItemOpts {
 
 export const PUZZLE_HINT = 'Pick one islander. Suppose that one is a knave, and follow what that means. Does anyone break the rule?';
 
+/** The rule every case is checked against, as the teaching states it. */
+export const PUZZLE_RULE = 'A knight’s words must be true. A knave’s words must be false.';
+
+/**
+ * Teaching for a puzzle. Two islanders: all four cases. Three islanders: the answer, then each case with one
+ * islander changed (each of those breaks the rule, since only one case works). The smaller example checks the
+ * answer one islander at a time.
+ */
+export function puzzleTeach(ids: readonly string[], claims: Readonly<Claims>, answer: KindMap, nm: Namer): Teach {
+  const changed = ids.map((id) => ({ ...answer, [id]: flip(answer[id]) }));
+  const shown = ids.length === 2 ? allKinds(ids) : [answer, ...changed];
+  const speaking = ids.filter((id) => claims[id]);
+  const quiet = ids.filter((id) => !claims[id]);
+  // Every special word in the bubbles is defined: at most three, one per speaker.
+  const terms = [caseTerm(kindsText(ids, changed[0], nm)), ...claimTerms(speaking.map((id) => claims[id]), ids.length)];
+  if (terms.length === 1) terms.push(TERMS.fits);
+  const meaning = [
+    ...speaking.map((id) => wordsMeaning(claims[id], id, nm, ids)),
+    ...quiet.map((id) => `${nm(id)} says nothing, so ${nm(id)} fits the rule as a knight or as a knave.`),
+  ].join(' ');
+  return {
+    rule: `${PUZZLE_RULE} The answer is the one case where every islander fits this rule.`,
+    terms,
+    meaning,
+    casesTitle: ids.length === 2 ? 'Every case, checked against the rule' : 'The answer, and each case with one islander changed',
+    cases: shown.map((k) => kindsCase(ids, claims, k, nm)),
+    remember: ['Check each islander. A knight’s words must be true. A knave’s words must be false.', 'Ask: “In my answer, does each islander fit the rule?”'],
+    simpler: [
+      'Check the answer one islander at a time.',
+      ...ids.map((id) => {
+        if (!claims[id]) return `${nm(id)} is ${a(answer[id])} and says nothing. That fits.`;
+        const v = claimTrue(claims[id], answer);
+        return `${nm(id)} is ${a(answer[id])}, and ${nm(id)}’s words are ${tf(v)}. ${speakerFits(id, claims[id], answer) ? 'That fits.' : 'That breaks the rule.'}`;
+      }),
+      fitsAll(ids, claims, answer) ? 'Every islander fits the rule, so this case is the answer.' : 'Someone breaks the rule, so this case is not the answer.',
+    ],
+  };
+}
+
 /** Mark each islander as a knight or a knave. */
 export function puzzleItem(rng: Rng, o: PuzzleItemOpts): Built<AssignItem> & { puzzle: KnightPuzzle } {
   const cast = makeCast(rng, o.skin, o.n);
@@ -546,6 +728,7 @@ export function puzzleItem(rng: Rng, o: PuzzleItemOpts): Built<AssignItem> & { p
     claims: p.claims,
     explain: [...p.solve.lines, `That leaves one answer: ${kindsText(ids, p.answer, nm)}.`].join(' '),
     hint: PUZZLE_HINT,
+    teach: puzzleTeach(ids, p.claims, p.answer, nm),
   };
   if (o.n === 3) item.seconds = 150;
   return { item, cast, puzzle: p };
@@ -568,6 +751,27 @@ export interface SupposeOpts {
   conflict?: boolean;
 }
 
+/**
+ * The smallest example with the same outcome: only X speaks, and the words are as short as they can be. One case
+ * works ("Ben is a knave."), two work ("I am a knight."), or none ("I am a knave."). Every truth is computed.
+ */
+export function supposeSimpler(x: string, y: string, kind: Kind, ans: SupposeAnswer, nm: Namer): string[] {
+  const ids = [x, y];
+  const c: Claim = ans === 'crash' ? is(x, 'knave') : ans === 'cant' ? is(x, 'knight') : is(y, kind === 'knight' ? ans : flip(ans));
+  const claims: Claims = { [x]: c };
+  const X = nm(x), Y = nm(y);
+  const lines = [`Here is a smaller one. Only ${X} speaks: “${unstop(claimText(c, x, nm, 2))}.” Suppose ${X} is ${a(kind)}.`];
+  const works: Kind[] = [];
+  for (const v of KINDS) {
+    const k: KindMap = { [x]: kind, [y]: v };
+    const ok = fitsAll(ids, claims, k);
+    if (ok) works.push(v);
+    lines.push(`Try ${Y} as ${a(v)}. ${X}’s words are ${tf(claimTrue(c, k))}. ${ok ? 'That case works.' : `${X} breaks the rule.`}`);
+  }
+  lines.push(works.length === 1 ? `Only one case works, so ${Y} must be ${a(works[0])}.` : works.length === 2 ? `The two cases both work, so you can’t tell what ${Y} is.` : 'No case works, so the guess crashes.');
+  return lines;
+}
+
 /** "Suppose Ava is a knight. What must Ben be?" Two islanders; both speak; at least one way fits overall. */
 export function supposeItem(rng: Rng, o: SupposeOpts): Built<ChooseItem> & { ids: string[]; claims: Claims; who: string; other: string; kind: Kind; fits: Kind[] } {
   for (let attempt = 0; attempt < 5000; attempt++) {
@@ -586,28 +790,64 @@ export function supposeItem(rng: Rng, o: SupposeOpts): Built<ChooseItem> & { ids
     if (o.target && ans !== o.target) continue;
 
     const X = nm(who), Y = nm(other);
+    const caseOf = (v: Kind): KindMap => ({ [who]: kind, [other]: v });
+    const breaker = (v: Kind) => breakers(ids, claims, caseOf(v))[0];
     const caseLine = (v: Kind) => {
-      const kinds: KindMap = { [who]: kind, [other]: v };
-      const b = breakers(ids, claims, kinds);
-      return b.length ? `If ${Y} is ${a(v)}, ${breakText(b[0], kinds, nm)}.` : `If ${Y} is ${a(v)}, everyone fits the rule.`;
+      const b = breaker(v);
+      return b ? `If ${Y} is ${a(v)}, ${breakText(b, caseOf(v), nm)}.` : `If ${Y} is ${a(v)}, everyone fits the rule.`;
     };
+    /** "Wes is a knight with false words" in the case where Y is v. */
+    const broken = (v: Kind) => withWords(breaker(v), claims, caseOf(v), nm);
+    const card = (v: Kind) => kindsCase(ids, claims, caseOf(v), nm);
     const end = ans === 'cant'
-      ? `Both cases fit, so you can’t tell what ${Y} is.`
+      ? `The two cases both work, so you can’t tell what ${Y} is.`
       : ans === 'crash'
-        ? `Both cases break the rule, so the guess crashes. ${X} can’t be ${a(kind)}.`
+        ? `The two cases both break the rule, so the guess crashes. ${X} can’t be ${a(kind)}.`
         : `So ${Y} must be ${a(ans)}.`;
     const explain = `Suppose ${X} is ${a(kind)}. ${caseLine('knight')} ${caseLine('knave')} ${end}`;
-    const whyWrong: Record<string, string> = {};
+
+    // One explanation per wrong choice, by what that choice gets wrong.
+    const feedback: Record<string, ChoiceFeedback> = {};
     for (const c of SUPPOSE_CHOICES) {
       if (c.id === ans) continue;
       if (c.id === 'cant') {
-        whyWrong.cant = ans === 'crash'
-          ? `Can’t tell would mean both cases fit. Here both cases break the rule, so the guess crashes. ${X} can’t be ${a(kind)}.`
-          : `You can tell. Only one case works. ${caseLine(ans === 'knight' ? 'knave' : 'knight')}`;
+        feedback.cant = ans === 'crash'
+          ? {
+            headline: 'Your answer needs two cases that work, but no case works.',
+            detail: [`With ${Y} as a knight, ${broken('knight')}. With ${Y} as a knave, ${broken('knave')}.`, `So the guess crashes: ${X} can’t be ${a(kind)}.`],
+            example: card('knight'),
+          }
+          : {
+            headline: 'You can tell, because only one case works.',
+            detail: [`“Can’t tell” would mean ${Y} could be a knight or a knave.`, `But with ${Y} as ${a(flip(ans as Kind))}, ${broken(flip(ans as Kind))}. So ${Y} must be ${a(ans as Kind)}.`],
+            example: card(flip(ans as Kind)),
+          };
+      } else if (c.id === 'crash') {
+        feedback.crash = {
+          headline: fits.length === 1 ? 'The guess does not crash, because one case works.' : 'The guess does not crash, because two cases work.',
+          detail: ['A guess crashes only when no case works.', fits.length === 1 ? `With ${Y} as ${a(fits[0])}, everyone fits the rule.` : `With ${X} as ${a(kind)}, ${Y} could be a knight or a knave. Everyone fits the rule each time.`],
+          example: card(fits[0]),
+        };
+      } else {
+        const v = c.id as Kind;
+        if (fits.includes(v)) {
+          // Two cases work: the pick is one of them.
+          feedback[v] = {
+            headline: `Your answer leaves out a case: ${Y} could also be ${a(flip(v))}.`,
+            detail: [`With ${X} as ${a(kind)}, ${Y} as ${a(v)} works.`, `But ${Y} as ${a(flip(v))} works too. Two cases work, so you can’t tell what ${Y} is.`],
+            example: card(flip(v)),
+          };
+        } else {
+          feedback[v] = {
+            headline: `With ${Y} as ${a(v)}, ${nm(breaker(v))} breaks the rule.`,
+            detail: [
+              `“${cap(v)}” means this case: ${kindsText(ids, caseOf(v), nm)}.`,
+              `There, ${broken(v)}. ${ans === 'crash' ? `${Y} as ${a(flip(v))} breaks the rule too, so the guess crashes.` : `Only ${Y} as ${a(ans as Kind)} works.`}`,
+            ],
+            example: card(v),
+          };
+        }
       }
-      else if (c.id === 'crash') whyWrong.crash = `The guess does not crash. ${caseLine(fits[0])}`;
-      else if (ans === 'cant') whyWrong[c.id] = `${Y} could be ${a(c.id as Kind)}, but ${Y} could also be ${a(flip(c.id as Kind))}. Both cases fit.`;
-      else whyWrong[c.id] = caseLine(c.id as Kind);
     }
     const item: ChooseItem = {
       kind: 'choose',
@@ -615,14 +855,26 @@ export function supposeItem(rng: Rng, o: SupposeOpts): Built<ChooseItem> & { ids
       stop: STOP,
       lesson: 's5.l3',
       skill: 's5.suppose',
-      prompt: `${cast.setting} Suppose ${X} is ${a(kind)}. What must ${Y} be?`,
+      prompt: `${cast.setting} Suppose ${X} is ${a(kind)}. What must ${Y} be? Or does that guess crash?`,
       scene: speakersScene(ids, claims, nm),
       choices: SUPPOSE_CHOICES,
       answer: ans,
       explain,
-      whyWrong,
+      feedback,
       hint: `Keep ${X} as ${a(kind)}. Try ${Y} as a knight, then as a knave. Does anyone break the rule?`,
+      teach: {
+        // The knight / knave rule first: "fits the rule" and "breaks the rule" below lean on it.
+        rule: `${PUZZLE_RULE} A case works only when everyone fits this rule. Keep the guess, and try the other islander as a knight, then as a knave.`,
+        // The case term comes first: the guess term uses "case". Then every special word in the bubbles.
+        terms: [caseTerm(kindsText(ids, caseOf('knave'), nm)), guessTerm(X, kind), ...claimTerms(ids.map((id) => claims[id]), 2)],
+        meaning: `${ids.map((id) => wordsMeaning(claims[id], id, nm, ids)).join(' ')} In the guess, ${X} is ${a(kind)}, so ${X}’s words must be ${tf(kind === 'knight')}.`,
+        casesTitle: `Keep ${X} as ${a(kind)}. Try each case for ${Y}.`,
+        cases: [card('knight'), card('knave')],
+        remember: ['One case works: that is the answer. Two cases work: you can’t tell. No case works: the guess crashes.', `Ask: “Did I try ${Y} as a knight and as a knave?”`],
+        simpler: supposeSimpler(who, other, kind, ans, nm),
+      },
     };
+    syncWhyWrong(item);
     if (o.conflict) item.conflict = true;
     return { item, cast, ids, claims, who, other, kind, fits };
   }
@@ -648,8 +900,37 @@ export interface WordsOpts {
 const YES_NO: Choice[] = [{ id: 'yes', label: 'Yes' }, { id: 'no', label: 'No' }, { id: 'cant', label: 'Can’t tell' }];
 const KIND_CHOICES: Choice[] = [{ id: 'knight', label: 'Knight' }, { id: 'knave', label: 'Knave' }, { id: 'cant', label: 'Can’t tell' }];
 
-/** Lesson 1. Cases are listed for the unknowns (the fact, or the other islander, and the speaker). */
-export function wordsItem(rng: Rng, o: WordsOpts): Built<ChooseItem> & { answerSet: string[] } {
+/** One way things could be in a lesson 1 question (the speaker's kind, and the fact or the other islander's kind). */
+export interface WordsCase {
+  /** The speaker's kind. */
+  k: Kind;
+  /** Fact questions: is the fact true? */
+  p: boolean;
+  /** Questions about the other islander: that islander's kind. */
+  o: Kind;
+  /** "Uma is a knight, and Uma can swim." */
+  label: string;
+  /** Are the speaker's words true in this case? */
+  wordsTrue: boolean;
+  /** Does the speaker fit the rule in this case? */
+  fits: boolean;
+  /** The question's answer in this case: 'yes' / 'no', or a kind. */
+  q: string;
+}
+
+/** A lesson 1 case as a card: the speaker's words true or false, and whether the speaker fits the rule. */
+const wordsCard = (c: WordsCase, S: string, extra: readonly Truth[] = []): TeachCase => ({
+  label: c.label,
+  truths: [{ who: `${S}’s words`, value: c.wordsTrue }, ...extra],
+  note: fitNote(c.k, c.wordsTrue),
+});
+
+/**
+ * Lesson 1. Every case is listed (the speaker's kind, and the fact or the other islander's kind), each is checked
+ * against the rule, and the answer is what the cases that work agree on ("Can’t tell" when they disagree). The
+ * teaching and each wrong choice's explanation come from the same cases.
+ */
+export function wordsItem(rng: Rng, o: WordsOpts): Built<ChooseItem> & { answerSet: string[]; cases: WordsCase[] } {
   const skin = SKINS[o.skin];
   const cast = makeCast(rng, o.skin, 2);
   const [sp, ot] = cast.ids;
@@ -658,137 +939,251 @@ export function wordsItem(rng: Rng, o: WordsOpts): Built<ChooseItem> & { answerS
   const who = rng.pick(['knight', 'knave'] as const);
   const spk = o.speaker ?? rng.pick(KINDS);
   const base = { kind: 'choose' as const, id: o.id, stop: STOP, lesson: 's5.l1', skill: 's5.words' };
-  let item: ChooseItem;
-  let answerSet: string[];
+
+  let said: string;
+  let scene: Scene;
+  let prompt: string;
+  let hint: string;
+  let cases: WordsCase[];
+  /** What the question asks about: the fact, the other islander, or the speaker. */
+  let ask: 'fact' | 'other' | 'speaker';
+  /** What the question tells you before the words. */
+  let known: 'speaker' | 'fact' | 'other' | 'none';
+  /** When the words are true: "Uma can swim". */
+  let truthText: string;
+  /** What you know, after "you know": "Uma is a knight". Empty when nothing is known. */
+  let knowText = '';
+  /** What you don't know: "no one knows if Uma is a knight or a knave". */
+  let doubt = '';
+  /** A case's answer in words: "Uma can swim", "Jin is a knight". */
+  let qText: (c: WordsCase) => string;
+  /** The part of a case that is not known, after "if": "Uma is a knave", "the dragon is asleep". */
+  let ifPart: (c: WordsCase) => string;
+  let conflict = false;
 
   if (o.type === 'fact' || o.type === 'kindFromFact') {
     const fact = rng.pick(skin.facts);
     const fill = (t: string) => t.replace('{n}', S);
     const neg = !!o.negative;
-    const said = neg ? fact.sayNot : fact.say;
-    const scene = { kind: 'speakers' as const, speakers: [{ id: sp, name: S, says: said }], rule: RULE };
-    // Cases: p = is the fact true; k = the speaker's kind. The words are true when p !== neg.
-    const cases = [true, false].flatMap((p) => KINDS.map((k) => ({ p, k }))).filter(({ p, k }) => (k === 'knight') === (p !== neg));
+    said = neg ? fact.sayNot : fact.say;
+    scene = { kind: 'speakers', speakers: [{ id: sp, name: S, says: said }], rule: RULE };
     const factText = (p: boolean) => fill(p ? fact.yes : fact.no);
-    if (o.type === 'fact') {
-      const known = spk === 'unknown' ? cases : cases.filter((c) => c.k === spk);
-      const ps = [...new Set(known.map((c) => c.p))];
-      const ans = ps.length === 2 ? 'cant' : ps[0] ? 'yes' : 'no';
-      answerSet = ps.map((p) => (p ? 'yes' : 'no'));
+    truthText = factText(!neg);
+    const askFact = o.type === 'fact';
+    const mk = (k: Kind, p: boolean): WordsCase => {
+      const wordsTrue = p !== neg;
+      return { k, p, o: 'knight', label: `${S} is ${a(k)}, and ${factText(p)}.`, wordsTrue, fits: (k === 'knight') === wordsTrue, q: askFact ? (p ? 'yes' : 'no') : k };
+    };
+    if (askFact) {
+      ask = 'fact';
+      known = spk === 'unknown' ? 'none' : 'speaker';
+      cases = (spk === 'unknown' ? KINDS : [spk]).flatMap((k) => [true, false].map((p) => mk(k, p)));
+      qText = (c) => factText(c.p);
+      ifPart = spk === 'unknown' ? (c) => `${S} is ${a(c.k)}` : (c) => factText(c.p);
       const opening = spk === 'unknown' ? `No one knows if ${skin.intro(S)} is a knight or a knave.` : `${skin.intro(S)} is ${a(spk)}.`;
-      const prompt = `${opening} ${S} says, “${unstop(said)}.” ${fill(fact.ask)}`;
-      const pOf = (k: Kind) => cases.find((c) => c.k === k)!.p;
-      let explain: string;
-      const whyWrong: Record<string, string> = {};
-      if (spk === 'unknown') {
-        explain = `If ${S} is a knight, ${factText(pOf('knight'))}. If ${S} is a knave, ${factText(pOf('knave'))}. You don’t know which one ${S} is, so you can’t tell.`;
-        for (const id of ['yes', 'no']) {
-          const other = cases.find((c) => (c.p ? 'yes' : 'no') !== id)!;
-          whyWrong[id] = `You don’t know if ${S} is a knight or a knave. If ${S} is ${a(other.k)}, ${factText(other.p)}.`;
-        }
-      } else {
-        const p = ps[0];
-        const wordsTrue = spk === 'knight';
-        explain = `${S} is ${a(spk)}, so “${unstop(said)}” is ${tf(wordsTrue)}. So ${factText(p)}.`;
-        const wrong = p ? 'no' : 'yes';
-        whyWrong[wrong] = wordsTrue
-          ? `${S} is a knight, and a knight’s words are true. So ${factText(p)}.`
-          : `That is what ${S}’s words say. But ${S} is a knave, so the words are false.`;
-        whyWrong.cant = `You can tell. ${S} is ${a(spk)}, so you know ${S}’s words are ${tf(wordsTrue)}.`;
-      }
-      item = { ...base, prompt: cap(prompt), scene, choices: YES_NO, answer: ans, explain: cap(explain), whyWrong: capAll(whyWrong), hint: spk === 'unknown' ? `Do you know if ${S} tells the truth?` : `Does ${a(spk)} tell the truth or lie?` };
-      if (spk === 'knave' && neg) item.conflict = true;
+      prompt = cap(`${opening} ${S} says, “${unstop(said)}.” ${fill(fact.ask)}`);
+      hint = spk === 'unknown' ? `Do you know if ${S} tells the truth?` : `Does ${a(spk)} tell the truth or lie?`;
+      if (spk === 'knave' && neg) conflict = true;
     } else {
       const truth = o.truth ?? rng.pick([true, false] as const);
-      const known = truth === 'unknown' ? cases : cases.filter((c) => c.p === truth);
-      const ks = [...new Set(known.map((c) => c.k))];
-      const ans = ks.length === 2 ? 'cant' : ks[0];
-      answerSet = ks;
+      ask = 'speaker';
+      known = truth === 'unknown' ? 'none' : 'fact';
+      cases = KINDS.flatMap((k) => (truth === 'unknown' ? [true, false] : [truth]).map((p) => mk(k, p)));
+      qText = (c) => `${S} is ${a(c.k)}`;
+      ifPart = truth === 'unknown' ? (c) => factText(c.p) : (c) => `${S} is ${a(c.k)}`;
+      if (truth !== 'unknown') knowText = factText(truth);
+      else doubt = `you don’t know if ${factText(true)}`;
       // The first mention of the speaker gets the skin's intro ('Kip the wizard did not find a dragon egg.').
       const aboutSpeaker = fact.yes.includes('{n}');
       const opening = truth === 'unknown' ? '' : `${cap((truth ? fact.yes : fact.no).replace('{n}', skin.intro(S)))}. `;
-      const prompt = `${opening}${opening && aboutSpeaker ? S : skin.intro(S)} says, “${unstop(said)}.” Is ${S} a knight or a knave?`;
-      let explain: string;
-      const whyWrong: Record<string, string> = {};
-      if (truth === 'unknown') {
-        const kOf = (p: boolean) => cases.find((c) => c.p === p)!.k;
-        explain = `If ${factText(true)}, ${S} is ${a(kOf(true))}. If ${factText(false)}, ${S} is ${a(kOf(false))}. You don’t know which, so you can’t tell.`;
-        for (const k of KINDS) {
-          const other = cases.find((c) => c.k !== k)!;
-          whyWrong[k] = `You don’t know if ${factText(true)}. If ${factText(other.p)}, ${S} is ${a(other.k)}.`;
-        }
-      } else {
-        const wordsTrue = truth !== neg;
-        explain = `${cap(factText(truth))}, so “${unstop(said)}” is ${tf(wordsTrue)}. ${wordsTrue ? 'Only a knight says true things' : 'Only a knave says false things'}, so ${S} is ${a(ans as Kind)}.`;
-        whyWrong[flip(ans as Kind)] = `${cap(factText(truth))}. So ${S}’s words are ${tf(wordsTrue)}, and ${wordsTrue ? 'knights tell the truth' : 'knaves lie'}.`;
-        whyWrong.cant = `You can tell. You know ${factText(truth)}, so you know if ${S}’s words are true.`;
-      }
-      item = { ...base, prompt: cap(prompt), scene, choices: KIND_CHOICES, answer: ans, explain: cap(explain), whyWrong: capAll(whyWrong), hint: `Are ${S}’s words true or false?` };
+      prompt = cap(`${opening}${opening && aboutSpeaker ? S : skin.intro(S)} says, “${unstop(said)}.” Is ${S} a knight or a knave?`);
+      hint = `Are ${S}’s words true or false?`;
     }
-    return { item, cast, answerSet };
-  }
-
-  // other / speakerFromOther: the speaker says what kind the other islander is.
-  const claim = is(ot, who);
-  const said = claimText(claim, sp, nm, 2);
-  const scene = speakersScene([sp], { [sp]: claim }, nm);
-  const cases = allKinds([sp, ot]).filter((k) => speakerFits(sp, claim, k));
-  if (o.type === 'other') {
-    const known = spk === 'unknown' ? cases : cases.filter((k) => k[sp] === spk);
-    const ks = [...new Set(known.map((k) => k[ot]))];
-    const ans = ks.length === 2 ? 'cant' : ks[0];
-    answerSet = ks;
-    const opening = spk === 'unknown' ? `No one knows if ${skin.intro(S)} is a knight or a knave.` : `${skin.intro(S)} is ${a(spk)}.`;
-    const prompt = `${opening} ${S} says, “${unstop(said)}.” Is ${O} a knight or a knave?`;
-    let explain: string;
-    const whyWrong: Record<string, string> = {};
-    if (spk === 'unknown') {
-      const oOf = (k: Kind) => cases.find((c) => c[sp] === k)![ot];
-      explain = `If ${S} is a knight, ${O} is ${a(oOf('knight'))}. If ${S} is a knave, ${O} is ${a(oOf('knave'))}. You don’t know which one ${S} is, so you can’t tell.`;
-      for (const k of KINDS) {
-        const other = cases.find((c) => c[ot] !== k)!;
-        whyWrong[k] = `You don’t know if ${S} is a knight or a knave. If ${S} is ${a(other[sp])}, ${O} is ${a(other[ot])}.`;
-      }
+  } else {
+    // other / speakerFromOther: the speaker says what kind the other islander is.
+    const claim = is(ot, who);
+    said = claimText(claim, sp, nm, 2);
+    scene = speakersScene([sp], { [sp]: claim }, nm);
+    truthText = `${O} is ${a(who)}`;
+    const askOther = o.type === 'other';
+    const mk = (k: Kind, ok: Kind): WordsCase => {
+      const wordsTrue = claimTrue(claim, { [sp]: k, [ot]: ok });
+      return { k, p: true, o: ok, label: `${S} is ${a(k)}, and ${O} is ${a(ok)}.`, wordsTrue, fits: (k === 'knight') === wordsTrue, q: askOther ? ok : k };
+    };
+    if (askOther) {
+      ask = 'other';
+      known = spk === 'unknown' ? 'none' : 'speaker';
+      cases = (spk === 'unknown' ? KINDS : [spk]).flatMap((k) => KINDS.map((ok) => mk(k, ok)));
+      qText = (c) => `${O} is ${a(c.o)}`;
+      ifPart = spk === 'unknown' ? (c) => `${S} is ${a(c.k)}` : (c) => `${O} is ${a(c.o)}`;
+      const opening = spk === 'unknown' ? `No one knows if ${skin.intro(S)} is a knight or a knave.` : `${skin.intro(S)} is ${a(spk)}.`;
+      prompt = `${opening} ${S} says, “${unstop(said)}.” Is ${O} a knight or a knave?`;
+      hint = spk === 'unknown' ? `Do you know if ${S} tells the truth?` : `Does ${a(spk)} tell the truth or lie?`;
+      if (spk === 'knave') conflict = true;
     } else {
-      const wordsTrue = spk === 'knight';
-      explain = `${S} is ${a(spk)}, so “${unstop(said)}” is ${tf(wordsTrue)}. So ${O} is ${a(ans as Kind)}.`;
-      whyWrong[flip(ans as Kind)] = wordsTrue
-        ? `${S} is a knight, and a knight’s words are true. So ${O} is ${a(ans as Kind)}.`
-        : `That is what ${S}’s words say. But ${S} is a knave, so the words are false.`;
-      whyWrong.cant = `You can tell. ${S} is ${a(spk)}, so you know ${S}’s words are ${tf(wordsTrue)}.`;
+      // speakerFromOther: the other islander's kind is known; what is the speaker?
+      const otk = rng.pick(KINDS);
+      ask = 'speaker';
+      known = 'other';
+      cases = KINDS.map((k) => mk(k, otk));
+      qText = (c) => `${S} is ${a(c.k)}`;
+      ifPart = (c) => `${S} is ${a(c.k)}`;
+      knowText = `${O} is ${a(otk)}`;
+      prompt = `${skin.intro(O)} is ${a(otk)}. ${skin.intro(S)} says, “${unstop(said)}.” Is ${S} a knight or a knave?`;
+      hint = `Are ${S}’s words true or false?`;
     }
-    item = { ...base, prompt, scene, choices: KIND_CHOICES, answer: ans, explain, whyWrong, hint: spk === 'unknown' ? `Do you know if ${S} tells the truth?` : `Does ${a(spk)} tell the truth or lie?` };
-    if (spk === 'knave') item.conflict = true;
-    return { item, cast, answerSet };
   }
-  // speakerFromOther: the other islander's kind is known; what is the speaker?
-  const otk = rng.pick(KINDS);
-  const known = cases.filter((k) => k[ot] === otk);
-  const ks = [...new Set(known.map((k) => k[sp]))];
-  const ans = ks[0];
-  answerSet = ks;
-  const wordsTrue = claimTrue(claim, { [sp]: 'knight', [ot]: otk });
-  const prompt = `${skin.intro(O)} is ${a(otk)}. ${skin.intro(S)} says, “${unstop(said)}.” Is ${S} a knight or a knave?`;
-  const explain = `${O} is ${a(otk)}, so “${unstop(said)}” is ${tf(wordsTrue)}. ${wordsTrue ? 'Only a knight says true things' : 'Only a knave says false things'}, so ${S} is ${a(ans)}.`;
-  const whyWrong: Record<string, string> = {
-    [flip(ans)]: `${O} is ${a(otk)}. So ${S}’s words are ${tf(wordsTrue)}, and ${wordsTrue ? 'knights tell the truth' : 'knaves lie'}.`,
-    cant: `You can tell. You know ${O} is ${a(otk)}, so you know if ${S}’s words are true.`,
-  };
-  item = { ...base, prompt, scene, choices: KIND_CHOICES, answer: ans, explain, whyWrong, hint: `Are ${S}’s words true or false?` };
-  return { item, cast, answerSet };
-}
+  if (known === 'speaker') knowText = `${S} is ${a(spk as Kind)}`;
+  if (known === 'none' && !doubt) doubt = `no one knows if ${S} is a knight or a knave`;
 
-const capAll = (r: Record<string, string>) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, cap(v)]));
+  const fitting = cases.filter((c) => c.fits);
+  const answerSet = [...new Set(fitting.map((c) => c.q))];
+  const ans = answerSet.length === 2 ? 'cant' : answerSet[0];
+  const choices = ask === 'fact' ? YES_NO : KIND_CHOICES;
+  const quoted = `“${unstop(said)}”`;
+  const subject = ask === 'other' ? O : S;
+  /** "“Yes” means Uma can swim." / "“Knight” means Jin is a knight." */
+  const choiceMeaning = (id: string) =>
+    ask === 'fact' ? `“${cap(id)}” means ${qText(cases.find((c) => c.q === id)!)}.` : `“${cap(id)}” means ${subject} is ${a(id as Kind)}.`;
+
+  // The right answer, from the cases that work.
+  let explain: string;
+  if (ans === 'cant') {
+    const [c1, c2] = fitting;
+    // Say what is not known ("You don’t know if the dragon is asleep"), never a bare "which".
+    explain = `If ${ifPart(c1)}, ${qText(c1)}. If ${ifPart(c2)}, ${qText(c2)}. ${cap(doubt)}, so you can’t tell.`;
+  } else if (known === 'speaker') {
+    explain = `${S} is ${a(spk as Kind)}, so ${quoted} is ${tf(fitting[0].wordsTrue)}. So ${qText(fitting[0])}.`;
+  } else {
+    const wt = fitting[0].wordsTrue;
+    explain = `${knowText}, so ${quoted} is ${tf(wt)}. ${wt ? 'Only a knight says true things' : 'Only a knave says false things'}, so ${S} is ${a(ans as Kind)}.`;
+  }
+
+  // One explanation per wrong choice, by what that choice gets wrong.
+  const feedback: Record<string, ChoiceFeedback> = {};
+  for (const ch of choices) {
+    if (ch.id === ans) continue;
+    if (ch.id === 'cant') {
+      // You can tell: only one case works.
+      const good = fitting[0];
+      const bad = cases.find((c) => !c.fits)!;
+      feedback.cant = {
+        headline: `You can tell, because you know ${knowText}.`,
+        detail: [
+          '“Can’t tell” would mean more than one case works. Here just one case works.',
+          `${known === 'speaker' ? `If ${ifPart(bad)}, ${S}’s words are ${tf(bad.wordsTrue)}.` : `${S}’s words are ${tf(bad.wordsTrue)}.`} ${cap(a(bad.k))} never says ${tf(bad.wordsTrue)} words.`,
+          `So ${qText(good)}.`,
+        ],
+        example: wordsCard(bad, S),
+      };
+    } else if (ans === 'cant') {
+      // Two cases work and disagree: the pick keeps only one of them.
+      const mine = fitting.find((c) => c.q === ch.id)!;
+      const other = fitting.find((c) => c.q !== ch.id)!;
+      feedback[ch.id] = {
+        // The whole case, as the card shows it: "Vic is a knight" alone would cover a case that does not work too.
+        headline: `Your answer leaves out a case that works: ${other.label}`,
+        detail: [
+          `${choiceMeaning(ch.id)} That is right if ${ifPart(mine)}.`,
+          `But ${doubt}. If ${ifPart(other)}, ${S}’s words are ${tf(other.wordsTrue)}, so ${qText(other)}.`,
+          'That case works too. The two cases give different answers, so you can’t tell.',
+        ],
+        example: wordsCard(other, S, [{ who: 'Your answer', value: other.q === ch.id }]),
+      };
+    } else {
+      // The pick needs a case where the speaker breaks the rule.
+      const bad = cases.find((c) => c.q === ch.id)!;
+      const wt = bad.wordsTrue;
+      let headline: string;
+      let detail: string[];
+      if (ask === 'speaker') {
+        headline = bad.k === 'knight' ? 'Your answer gives a knight false words.' : 'Your answer gives a knave true words.';
+        detail = [`You know ${knowText}. So ${S}’s words, ${quoted.replace(/”$/, ',”')} are ${tf(wt)}.`, `${cap(a(bad.k))} never says ${tf(wt)} words. ${wt ? 'True words come from a knight.' : 'False words come from a knave.'}`];
+      } else if (bad.k === 'knave') {
+        headline = 'Your answer takes a knave’s words as true.';
+        detail = [`${choiceMeaning(ch.id)} That is just what ${S}’s words say, so it would make them ${tf(wt)}.`, `But ${S} is a knave. A knave never says ${tf(wt)} words.`];
+      } else {
+        headline = 'Your answer makes a knight’s words false.';
+        detail = [`${choiceMeaning(ch.id)} That would make ${S}’s words, ${quoted.replace(/”$/, ',”')} ${tf(wt)}.`, `But ${S} is a knight. A knight never says ${tf(wt)} words.`];
+      }
+      const fb: ChoiceFeedback = { headline, detail, example: wordsCard(bad, S, [{ who: 'Your answer', value: bad.q === ch.id }]) };
+      if (conflict && ask === 'fact') {
+        // A knave's "not": the trap of this item.
+        fb.simpler = [`${S} says, ${quoted.replace(/”$/, '.”')}`, `${S} is a knave, so that sentence is false.`, `It has “not” in it. It is false that ${qText(bad)}. So ${qText(fitting[0])}.`];
+      }
+      feedback[ch.id] = fb;
+    }
+  }
+
+  // The teaching: what the words mean, every case, and the smallest worked example.
+  const wt0 = cases[0].wordsTrue;
+  const knowLine = known === 'speaker'
+    ? `${S} is ${a(spk as Kind)}, so the words must be ${tf(spk === 'knight')}.`
+    : known === 'none' ? `${cap(doubt)}, so the words could be true or false.` : `You know ${knowText}, so the words are ${tf(wt0)}.`;
+  let simpler: string[];
+  let remember: string[];
+  if (ans === 'cant') {
+    simpler = [...fitting.map((c) => `If ${ifPart(c)}, ${S}’s words are ${tf(c.wordsTrue)}. So ${qText(c)}.`), 'The two cases give different answers. So you can’t tell.'];
+    remember = ask === 'speaker'
+      ? ['If you don’t know if the words are true, try each case.', 'Ask: “Does more than one case work?”']
+      : ['If you don’t know the speaker’s kind, try a knight and then a knave.', 'Ask: “Does more than one case work?”'];
+  } else if (known === 'speaker') {
+    const good = fitting[0];
+    const bad = cases.find((c) => !c.fits)!;
+    simpler = [
+      `${S} is ${a(spk as Kind)}. ${spk === 'knight' ? 'A knight’s words are true.' : 'A knave’s words are false.'}`,
+      `${S} says, ${quoted.replace(/”$/, '.”')} That is ${tf(good.wordsTrue)}.`,
+      ...(good.wordsTrue ? [] : [`It is false that ${qText(bad)}.`]),
+      `So ${qText(good)}.`,
+    ];
+    remember = ['A knight’s words are true. A knave’s words are false.', 'Ask: “Is the speaker a knight or a knave? So are the words true or false?”'];
+  } else {
+    simpler = [`You know ${knowText}.`, `So ${quoted} is ${tf(wt0)}.`, `${wt0 ? 'True words come from a knight' : 'False words come from a knave'}. So ${S} is ${a(ans as Kind)}.`];
+    remember = ['True words come from a knight. False words come from a knave.', 'Ask: “Are the words true or false?”'];
+  }
+
+  const item: ChooseItem = {
+    ...base,
+    prompt,
+    scene,
+    choices,
+    answer: ans,
+    explain: cap(explain),
+    feedback,
+    hint,
+    teach: {
+      rule: RULE,
+      terms: [caseTerm(cases[0].label), TERMS.fits, TERMS.cant],
+      meaning: `${S}’s words, ${quoted.replace(/”$/, ',”')} are true only when ${truthText}. ${knowLine}`,
+      casesTitle: 'Which cases fit the rule?',
+      cases: cases.map((c) => wordsCard(c, S)),
+      remember,
+      simpler: simpler.map(cap),
+    },
+  };
+  syncWhyWrong(item);
+  if (conflict) item.conflict = true;
+  return { item, cast, answerSet, cases };
+}
 
 // ---------- lesson 2: who could say it? ----------
 
+/** Ids stay fixed: 'both' is "Either kind" (a knight or a knave could say it), 'neither' is "No one". */
 export type SayAnswer = 'knight' | 'knave' | 'both' | 'neither';
 export const SAY_CHOICES: Choice[] = [
   { id: 'knight', label: 'Only a knight' },
   { id: 'knave', label: 'Only a knave' },
-  { id: 'both', label: 'Both' },
-  { id: 'neither', label: 'Neither' },
+  { id: 'both', label: 'Either kind' },
+  { id: 'neither', label: 'No one' },
 ];
+/** Who each choice says could say it: [a knight, a knave]. */
+export const SAY_SETS: Record<SayAnswer, [boolean, boolean]> = { knight: [true, false], knave: [false, true], both: [true, true], neither: [false, false] };
+const SAY_MEANS: Record<SayAnswer, string> = {
+  knight: '“Only a knight” means a knight could say it, and a knave could not.',
+  knave: '“Only a knave” means a knave could say it, and a knight could not.',
+  both: '“Either kind” means a knight could say it, and so could a knave.',
+  neither: '“No one” means a knight could not say it, and a knave could not either.',
+};
 
 /** A known true or false sentence (like Stop 1's sentence bank). */
 export const KNOWN_FACTS: readonly { text: string; truth: boolean }[] = [
@@ -872,21 +1267,61 @@ export function whoCanSayItem(rng: Rng, o: SayOpts): Built<ChooseItem> & { claim
     const endFor: Record<SayAnswer, string> = {
       knight: 'So only a knight could say it.',
       knave: 'So only a knave could say it.',
-      both: 'So both could say it.',
+      both: 'So either kind could say it.',
       neither: 'So no one on the island could say it.',
     };
     const explain = `${lineFor('knight')} ${lineFor('knave')} ${endFor[ans]}`;
-    const whyWrong: Record<string, string> = {};
+    const can: Record<Kind, boolean> = { knight: canKnight, knave: canKnave };
+
+    // Each kind of speaker is a case. The words' truth is computed; the note says if that kind fits the rule.
+    const sayCase = (k: Kind): TeachCase => {
+      const v = truthAs[k];
+      return {
+        label: o.type === 'partner' ? `The speaker is ${a(k)}, and ${P} is ${a(partnerKind!)}.` : `The speaker is ${a(k)}.`,
+        truths: [{ who: 'The words', value: v }],
+        note: (k === 'knight') === v ? `${cap(a(k))} with ${tf(v)} words fits the rule. So ${a(k)} could say it.` : `${cap(a(k))} never says ${tf(v)} words. So ${a(k)} can’t say it.`,
+      };
+    };
+    const kindLine = (k: Kind) => can[k]
+      ? `If ${a(k)} said it, the words would be ${tf(truthAs[k])}. That fits ${a(k)}.`
+      : `If ${a(k)} said it, the words would be ${tf(truthAs[k])}. ${cap(a(k))} never says ${tf(truthAs[k])} words.`;
+
+    // One explanation per wrong choice: which kind it lets in that can't say it, or leaves out that could.
+    const feedback: Record<string, ChoiceFeedback> = {};
     for (const c of SAY_CHOICES) {
       if (c.id === ans) continue;
       const pick = c.id as SayAnswer;
-      const pk = pick === 'knight' || pick === 'both';
-      const pv = pick === 'knave' || pick === 'both';
-      const parts: string[] = [];
-      if (pk !== canKnight) parts.push(canKnight ? `A knight could say it: the words would be true.` : `A knight can’t say it: the words would be false.`);
-      if (pv !== canKnave) parts.push(canKnave ? `A knave could say it: the words would be false.` : `A knave can’t say it: the words would be true.`);
-      whyWrong[pick] = parts.join(' ');
+      const [pk, pv] = SAY_SETS[pick];
+      const offK = pk !== canKnight, offV = pv !== canKnave;
+      let headline: string;
+      if (offK && offV) {
+        headline = pk && pv
+          ? 'Your answer lets a knight say something false and a knave say something true.'
+          : !pk && !pv ? 'Your answer leaves out knights and knaves, but each kind could say it.' : 'Your answer swaps knights and knaves.';
+      } else if (offK) {
+        headline = pk ? 'Your answer lets a knight say something false.' : 'Your answer leaves out knights, but a knight could say it.';
+      } else {
+        headline = pv ? 'Your answer lets a knave say something true.' : 'Your answer leaves out knaves, but a knave could say it.';
+      }
+      feedback[pick] = {
+        headline,
+        detail: [SAY_MEANS[pick], ...(offK ? [kindLine('knight')] : []), ...(offV ? [kindLine('knave')] : [])],
+        example: sayCase(offK ? 'knight' : 'knave'),
+      };
     }
+
+    // What the words say, and when they are true.
+    const nmSay: Namer = (id) => (id === ME ? 'the speaker' : cast.nm(id));
+    const quoted = `“${unstop(words)}”`;
+    const meaning = o.type === 'fact'
+      ? `${quoted} is ${tf(truthAs.knight)}, no matter who says it.`
+      : `${o.type === 'partner' ? `${P} is ${a(partnerKind!)}. ` : ''}${quoted} is true only when ${whenTrue(claim!, nmSay, o.type === 'partner' ? [ME, partner] : [ME])}.`;
+    const third = claim?.t === 'same' ? TERMS.same : claim?.t === 'diff' ? TERMS.diff : TERMS.noOne;
+    const step = (k: Kind, n: number) => [
+      `Step ${n}: pretend ${a(k)} says it. The words would be ${tf(truthAs[k])}.`,
+      can[k] ? `That fits ${a(k)}, so ${a(k)} could say it.` : `${cap(a(k))} never says ${tf(truthAs[k])} words, so ${a(k)} can’t say it.`,
+    ];
+
     const conflict = o.type === 'self' || (o.type === 'partner' && (ans === 'both' || ans === 'neither'));
     const item: ChooseItem = {
       kind: 'choose',
@@ -899,9 +1334,19 @@ export function whoCanSayItem(rng: Rng, o: SayOpts): Built<ChooseItem> & { claim
       choices: SAY_CHOICES,
       answer: ans,
       explain,
-      whyWrong,
+      feedback,
       hint: 'Pretend a knight says it. Would the words be true? Then pretend a knave says it. Would they be false?',
+      teach: {
+        rule: 'A knight can say only true words. A knave can say only false words.',
+        terms: [TERMS.couldSay, TERMS.either, third],
+        meaning,
+        casesTitle: 'Try each kind of speaker',
+        cases: [sayCase('knight'), sayCase('knave')],
+        remember: ['Test the words twice: once from a knight, and once from a knave.', 'Ask: “Would a knight’s words be true? Would a knave’s words be false?”'],
+        simpler: [...step('knight', 1), ...step('knave', 2), endFor[ans]],
+      },
     };
+    syncWhyWrong(item);
     if (conflict) item.conflict = true;
     return { item, cast, claim, partner: o.type === 'partner' ? partner : undefined, partnerKind, truthAs };
   }
@@ -912,13 +1357,31 @@ export function whoCanSayItem(rng: Rng, o: SayOpts): Built<ChooseItem> & { claim
 
 export type AndOrAnswer = 'bothKnight' | 'bothKnave' | 'oneKnave' | 'oneKnight';
 /** Which (x, y) cases each answer allows: [both knights, x knight only, y knight only, both knaves]. */
-const ANDOR_SETS: Record<AndOrAnswer, [boolean, boolean, boolean, boolean]> = {
+export const ANDOR_SETS: Record<AndOrAnswer, [boolean, boolean, boolean, boolean]> = {
   bothKnight: [true, false, false, false],
   oneKnight: [true, true, true, false],
   oneKnave: [false, true, true, true],
   bothKnave: [false, false, false, true],
 };
 export const ANDOR_ORDER: readonly AndOrAnswer[] = ['bothKnave', 'oneKnave', 'bothKnight', 'oneKnight'];
+
+/**
+ * What a wrong and/or choice gets wrong, from the cases it allows:
+ *  - reverse: it allows just the cases where the words have the wrong truth (a knave's words taken as true,
+ *    or a knight's taken as false)
+ *  - swap: it is about the other kind, so it allows a case that can't happen and leaves out one that can
+ *  - extra: it allows a case that can't happen
+ *  - missing: it leaves out a case that can happen
+ */
+export type AndOrMistake = 'reverse' | 'swap' | 'extra' | 'missing';
+
+export function andOrMistake(pick: AndOrAnswer, keep: readonly boolean[]): AndOrMistake {
+  const set = ANDOR_SETS[pick];
+  if (set.every((v, i) => v === !keep[i])) return 'reverse';
+  const extra = set.some((v, i) => v && !keep[i]);
+  const missing = set.some((v, i) => !v && keep[i]);
+  return extra && missing ? 'swap' : extra ? 'extra' : 'missing';
+}
 
 export interface AndOrOpts {
   id: string;
@@ -930,9 +1393,9 @@ export interface AndOrOpts {
 }
 
 /**
- * "Cal is a knave. Cal says, “Ava and Ben are both knights.” What do you know about Ava and Ben?"
- * The four cases for Ava and Ben are listed; the ones where Cal's words fit Cal's kind are kept, and
- * the one choice that allows exactly those cases is right.
+ * "Cal is a knave. Cal says, “Ava and Ben are both knights.” Which choice says exactly what you know about Ava and
+ * Ben?" The four cases for Ava and Ben are listed; the ones where Cal's words fit Cal's kind are kept, and the one
+ * choice that allows exactly those cases is right. Each wrong choice is explained by a case it gets wrong.
  */
 export function andOrItem(rng: Rng, o: AndOrOpts): Built<ChooseItem> & { claim: Claim; speaker: Kind; left: KindMap[] } {
   const skin = SKINS[o.skin];
@@ -946,6 +1409,7 @@ export function andOrItem(rng: Rng, o: AndOrOpts): Built<ChooseItem> & { claim: 
   const part = o.part ?? rng.pick(KINDS);
   const claim: Claim = { t: op, cs: [is(x, part), is(y, part)] };
   const words = claimText(claim, s, nm, 3);
+  const quoted = `“${unstop(words)}”`;
   const need = speaker === 'knight';
   const all = allKinds([x, y]);
   const keep = all.map((k) => claimTrue(claim, k) === need);
@@ -956,46 +1420,152 @@ export function andOrItem(rng: Rng, o: AndOrOpts): Built<ChooseItem> & { claim: 
   const labels: Record<AndOrAnswer, string> = {
     bothKnight: `${X} and ${Y} are both knights.`,
     bothKnave: `${X} and ${Y} are both knaves.`,
-    oneKnave: 'At least one of them is a knave, but maybe not both.',
-    oneKnight: 'At least one of them is a knight, but maybe not both.',
+    oneKnave: `At least one of ${X} and ${Y} is a knave. It could be just one.`,
+    oneKnight: `At least one of ${X} and ${Y} is a knight. It could be just one.`,
   };
   const meaning: Record<AndOrAnswer, string> = {
     bothKnight: `So ${X} and ${Y} are both knights.`,
     bothKnave: `So ${X} and ${Y} are both knaves.`,
-    oneKnave: `So at least one of them is a knave. It could be ${X}, ${Y} or both.`,
-    oneKnight: `So at least one of them is a knight. It could be ${X}, ${Y} or both.`,
+    oneKnave: `So at least one of ${X} and ${Y} is a knave. It could be ${X}, ${Y}, or both of them.`,
+    oneKnight: `So at least one of ${X} and ${Y} is a knight. It could be ${X}, ${Y}, or both of them.`,
   };
   const ruleLine = op === 'and'
     ? need ? 'An “and” sentence is true only when both parts are true.' : 'An “and” sentence is false when at least one part is false.'
-    : need ? 'An “or” sentence is true when one part is true, or both are.' : 'An “or” sentence is false only when both parts are false.';
+    : need ? 'An “or” sentence is true when one part is true, or both parts are.' : 'An “or” sentence is false only when both parts are false.';
   const explain = `${S} is ${a(speaker)}, so ${S}’s words are ${tf(need)}. ${ruleLine} ${meaning[ans]}`;
   const caseText = (k: KindMap) => (k[x] === k[y] ? `${X} and ${Y} are both ${k[x]}s` : `${X} is ${a(k[x])} and ${Y} is ${a(k[y])}`);
-  const whyWrong: Record<string, string> = {};
+  /**
+   * One case for X and Y as a card: the speaker's words (computed). For a wrong pick's example, also whether the pick
+   * and the right answer are true in that case, like the NOT flip's example rows.
+   */
+  const card = (k: KindMap, pick?: AndOrAnswer): TeachCase => {
+    const wt = claimTrue(claim, k);
+    const truths: Truth[] = [{ who: `${S}’s words`, value: wt }];
+    if (pick) truths.push({ who: 'Your answer', value: ANDOR_SETS[pick][all.indexOf(k)] }, { who: 'The right answer', value: ANDOR_SETS[ans][all.indexOf(k)] });
+    return {
+      label: `${cap(caseText(k))}.`,
+      truths,
+      note: wt === need ? `${S} is ${a(speaker)} with ${tf(wt)} words. This case works.` : `${cap(a(speaker))} never says ${tf(wt)} words. This case does not work.`,
+    };
+  };
+  /** The parts of the sentence in one case, worked through: the smaller example after a miss. */
+  const parts = claim.t === 'and' || claim.t === 'or' ? claim.cs : [];
+  const walk = (k: KindMap): string[] => {
+    const wt = claimTrue(claim, k);
+    const [p1, p2] = parts.map((p) => `“${cap(whenTrue(p, nm, [x, y]))}” is ${tf(claimTrue(p, k))}`);
+    return [
+      `Take the case where ${caseText(k)}.`,
+      `The parts of ${S}’s words: ${p1}, and ${p2}. So ${S}’s words are ${tf(wt)}.`,
+      wt === need ? `${S} is ${a(speaker)}, and ${a(speaker)} can say ${tf(wt)} words. So this case can happen.` : `${S} is ${a(speaker)}, and ${a(speaker)} never says ${tf(wt)} words. So this case can’t happen.`,
+    ];
+  };
+
+  // One explanation per wrong choice, by what that choice gets wrong.
+  const feedback: Record<string, ChoiceFeedback> = {};
   for (const c of ANDOR_ORDER) {
     if (c === ans) continue;
+    const kind = andOrMistake(c, keep);
     const extra = all.find((_, i) => ANDOR_SETS[c][i] && !keep[i]);
-    if (extra) {
-      whyWrong[c] = `Suppose ${caseText(extra)}. Then ${S}’s words would be ${tf(!need)}. But ${S} is ${a(speaker)}, so they must be ${tf(need)}.`;
-    } else {
-      const missed = all.find((_, i) => !ANDOR_SETS[c][i] && keep[i])!;
-      whyWrong[c] = `It could also be that ${caseText(missed)}. ${S}’s words are still ${tf(need)} then.`;
-    }
+    const missed = all.find((_, i) => !ANDOR_SETS[c][i] && keep[i]);
+    const extraLine = extra ? `Your answer allows the case where ${caseText(extra)}. There, ${S}’s words are ${tf(!need)}, but ${S} is ${a(speaker)}.` : '';
+    const missLine = missed ? `Your answer leaves out the case where ${caseText(missed)}. There, ${S}’s words are ${tf(need)}, so that case works.` : '';
+    const headline = kind === 'reverse'
+      ? speaker === 'knave' ? 'Your answer takes a knave’s words as true.' : 'Your answer takes a knight’s words as false.'
+      : kind === 'swap' ? 'Your answer mixes up knights and knaves.'
+        : kind === 'extra' ? 'Your answer allows a case that can’t happen.' : 'Your answer leaves out a case that can still happen.';
+    const detail = kind === 'reverse'
+      ? [`Your answer is what you would know if ${S}’s words were ${tf(!need)}.`, extraLine, ruleLine]
+      : kind === 'swap' ? [extraLine, missLine]
+        : kind === 'extra' ? [extraLine, ruleLine] : [missLine, ruleLine];
+    const shown = kind === 'missing' ? missed! : extra!;
+    feedback[c] = { headline, detail, example: card(shown, c), simpler: walk(shown) };
   }
+
   const item: ChooseItem = {
     kind: 'choose',
     id: o.id,
     stop: STOP,
     lesson: 's5.l5',
     skill: 's5.and-or',
-    prompt: `${skin.intro(S)} is ${a(speaker)}. ${S} says, “${unstop(words)}.” What do you know about ${X} and ${Y}?`,
+    prompt: `${skin.intro(S)} is ${a(speaker)}. ${S} says, ${quoted.replace(/”$/, '.”')} Which choice says exactly what you know about ${X} and ${Y}?`,
     scene: speakersScene([s], { [s]: claim }, nm),
     choices: ANDOR_ORDER.map((id) => ({ id, label: labels[id] })),
     answer: ans,
     explain,
-    whyWrong,
+    feedback,
     hint: `List the four cases for ${X} and ${Y}. Keep only the ones where ${S}’s words are ${tf(need)}.`,
+    teach: {
+      rule: op === 'and'
+        ? 'An “and” sentence is true only when every part is true. One false part makes it false.'
+        : 'An “or” sentence is true when at least one part is true. It is false only when every part is false.',
+      terms: [op === 'and' ? TERMS.and : TERMS.or, TERMS.atLeastOne, caseTerm(caseText(all[1]))],
+      meaning: `${S} is ${a(speaker)}, so ${S}’s words must be ${tf(need)}. ${wordsMeaning(claim, s, nm, [x, y])}`,
+      casesTitle: `The four cases for ${X} and ${Y}`,
+      cases: all.map((k) => card(k)),
+      // The rule for the words this speaker must say: false ones from a knave, true ones from a knight.
+      remember: [
+        need ? 'A true “and” needs every part to be true. A true “or” needs just one true part.' : 'A false “and” needs just one false part. A false “or” needs every part to be false.',
+        'Ask: “Which of the four cases still work?”',
+      ],
+      simpler: [
+        `List the four cases for ${X} and ${Y}. Keep the ones where ${S}’s words are ${tf(need)}.`,
+        ...all.map((k) => `${cap(caseText(k))}: the words are ${tf(claimTrue(claim, k))}. ${claimTrue(claim, k) === need ? 'Keep it.' : 'Cross it out.'}`),
+        `${left.length === 1 ? 'One case is' : `${cap(NUM[left.length])} cases are`} left. ${meaning[ans]}`,
+      ],
+    },
   };
+  syncWhyWrong(item);
   if (speaker === 'knave') item.conflict = true;
   return { item, cast, claim, speaker, left };
 }
 
+// ---------- reading an item's plan back (for new examples after a miss) ----------
+//
+// Items are plain data, so a new example that matches a missed item is planned from what the item shows: its
+// choices, its answer, the words in the bubble and the first sentence of the question.
+
+const firstKind = (prompt: string): Kind | null => {
+  const m = /^[^“]*? is a (knight|knave)\. /.exec(prompt);
+  return m ? (m[1] as Kind) : null;
+};
+const isNegative = (said: string) => SKIN_IDS.some((s) => SKINS[s].facts.some((x) => x.sayNot === said));
+const bubble = (item: ChooseItem) => (item.scene?.kind === 'speakers' ? item.scene.speakers[0] : null);
+
+/** A lesson 1 item's plan (type, speaker, "not", what is known), or null when it is not a lesson 1 item. */
+export function wordsPlanOf(item: ChooseItem): Omit<WordsOpts, 'id' | 'skin'> | null {
+  const sp = bubble(item);
+  if (item.lesson !== 's5.l1' || !sp) return null;
+  const negative = isNegative(sp.says);
+  const unknown = item.prompt.startsWith('No one knows');
+  if (item.choices[0].id === 'yes') return { type: 'fact', speaker: unknown ? 'unknown' : firstKind(item.prompt) ?? 'unknown', negative };
+  if (/^\S+ is a (knight|knave)\.$/.test(sp.says)) {
+    if (item.prompt.endsWith(`Is ${sp.name} a knight or a knave?`)) return { type: 'speakerFromOther' };
+    return { type: 'other', speaker: unknown ? 'unknown' : firstKind(item.prompt) ?? 'unknown' };
+  }
+  const before = item.prompt.slice(0, item.prompt.indexOf(' says, “'));
+  // A known fact makes the words true or false, and the answer says which: knight for true words.
+  const truth = /\. /.test(before) ? (item.answer === 'knight') !== negative : 'unknown';
+  return { type: 'kindFromFact', negative, truth };
+}
+
+/** A lesson 2 item's plan: what kind of words, and the answer. */
+export function sayPlanOf(item: ChooseItem): { type: SayType; selfKind?: Kind; target: SayAnswer } | null {
+  const sp = bubble(item);
+  if (item.lesson !== 's5.l2' || !sp) return null;
+  const target = item.answer as SayAnswer;
+  const self = /^I am a (knight|knave)\.$/.exec(sp.says);
+  if (self) return { type: 'self', selfKind: self[1] as Kind, target };
+  if (KNOWN_FACTS.some((x) => x.text === sp.says)) return { type: 'fact', target };
+  return { type: 'partner', target };
+}
+
+/** Which answers each lesson 2 type can have. */
+export const SAY_TARGETS: Record<SayType, readonly SayAnswer[]> = { self: ['both', 'neither'], fact: ['knight', 'knave'], partner: ['knight', 'knave', 'both', 'neither'] };
+
+/** A lesson 5 item's plan: the speaker's kind, "and" or "or", and the kind the sentence names. */
+export function andOrPlanOf(item: ChooseItem): { speaker: Kind; op: 'and' | 'or'; part: Kind } | null {
+  const sp = bubble(item);
+  const speaker = firstKind(item.prompt);
+  if (item.lesson !== 's5.l5' || !sp || !speaker) return null;
+  return { speaker, op: / or /.test(sp.says) ? 'or' : 'and', part: /knave/.test(sp.says) ? 'knave' : 'knight' };
+}

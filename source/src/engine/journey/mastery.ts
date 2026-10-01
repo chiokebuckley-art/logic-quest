@@ -265,4 +265,3 @@ export function viewAll(stops: readonly StopDef[], progress: Readonly<Record<str
     return { stop, view: viewStop(stop, progress[stop.id], prevPassed, today) };
   });
 }
-

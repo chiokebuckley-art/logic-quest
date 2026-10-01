@@ -10,6 +10,8 @@
  *
  * Every answer, explanation and tip comes from ../engine/puzzles/conditionals.ts, which works each one out
  * from the four-row truth table. Skins: everyday, fantasy and abstract (letters and numbers, P and Q).
+ * After a wrong answer, each item teaches with the rows of that table in the story's words, and `fresh` gives the
+ * same situation in a new story plus its boundary partner (see "new examples after a miss" below).
  */
 import {
   CARD_SKINS,
@@ -17,19 +19,27 @@ import {
   CONVERSE,
   INVERSE,
   L1_SKINS,
+  LITS,
   MOVES,
   MOVE_FACT,
+  MOVE_TAGS,
+  REWRITES,
   ROWS,
+  SENTENCE_WHO,
   SKINS,
   SKIN_IDS,
   cardItem,
   checkerItem,
   condText,
   didBreakItem,
-  follows,
+  litHolds,
   meaningGrid,
   moveItem,
+  moveRule,
+  rowAt,
+  rowOfCase,
   ruleGrid,
+  ruleHolds,
   ruleScene,
   ruleText,
   sameYesNoItem,
@@ -40,6 +50,8 @@ import {
   type CondMade,
   type Lit,
   type Move,
+  type Rewrite,
+  type Row,
   type SkinId,
 } from '../engine/puzzles/conditionals';
 import type { Item, LessonDef, Rng, Scene, StopDef } from '../engine/types';
@@ -94,19 +106,10 @@ function practiceSkins(rng: Rng, count: number, from: readonly SkinId[]): SkinId
 const face = (skin: SkinId, l: Lit) => SKINS[skin].cards!.face(l, { vowel: 'E', consonant: 'K', even: '4', odd: '7' });
 const part = (skin: SkinId, l: Lit) => SKINS[skin].parts[l].if;
 
-/** The four moves as a summary card, worked out from the truth table. */
+/** The four moves as a summary card, worked out from the truth table (the same words the teaching uses). */
 function movesScene(): Scene {
-  const said: Record<Lit, string> = { P: 'The IF part happened', notP: 'The IF part did not happen', Q: 'The THEN part happened', notQ: 'The THEN part did not happen' };
-  const then: Record<Lit, string> = { P: 'so the IF part happened too.', notP: 'so the IF part did not happen.', Q: 'so the THEN part happened too.', notQ: 'so the THEN part did not happen.' };
   const order: Move[] = ['mp', 'mt', 'ac', 'da'];
-  return {
-    kind: 'text',
-    lines: order.map((m) => {
-      const f = MOVE_FACT[m];
-      const got = follows(f);
-      return `${said[f]}, ${got ? then[got] : 'but nothing follows for sure.'}`;
-    }),
-  };
+  return { kind: 'text', lines: order.map((m) => moveRule(MOVE_FACT[m])) };
 }
 
 // ---------- lessons ----------
@@ -210,7 +213,7 @@ const lessons: LessonDef[] = [
         title: 'Going forward works',
         body: [
           'Going forward is safe. When you know the IF part happened, the THEN part must be true.',
-          'Max is a dog, so Max has four legs.',
+          'Max is a dog, so “Max has four legs” is true for sure. “Max does not have four legs” is false for sure.',
           '“Can’t tell” is a real answer. Use it when the facts do not decide.',
         ],
       },
@@ -431,6 +434,98 @@ function arcade(rng: Rng): Item {
   return finish(ARCADE[lesson](rng), 's6-arcade', lesson);
 }
 
+// ---------- new examples after a miss ----------
+
+/** The skin of an item, from the rule on its card. */
+function skinOf(item: Item): SkinId | undefined {
+  const scene = item.scene;
+  return scene?.kind === 'text' ? SKIN_IDS.find((s) => scene.lines[1] === ruleText(s)) : undefined;
+}
+
+/** A skin from `from` other than the missed item's, so the new example has other people and objects. */
+function otherSkin(rng: Rng, from: readonly SkinId[], missed: Item): SkinId {
+  const not = skinOf(missed);
+  const rest = from.filter((s) => s !== not);
+  return rng.pick(rest.length ? rest : from);
+}
+
+/** The case a yes/no lesson 1 item asked about, read from its wrong choice's example card (engine-computed truths). */
+function askedRow(missed: Item): Row | null {
+  return missed.kind === 'choose' ? rowOfCase(Object.values(missed.feedback ?? {})[0]?.example) : null;
+}
+
+/** The face of a one-card item: the fact that holds on both of its possible backs (its teach cases). */
+function shownFace(missed: Item): Lit | null {
+  const rows = (missed.teach?.cases ?? []).map(rowOfCase).filter((r): r is Row => !!r);
+  return rows.length === 2 ? LITS.find((l) => rows.every((r) => litHolds(l, r))) ?? null : null;
+}
+
+/** The sentence a lesson 2 item asked about: the one fact that is true in exactly the cases its teaching marks true. */
+function askedTarget(missed: Item): Lit | null {
+  const cases = missed.teach?.cases ?? [];
+  const marks = cases.map((c) => ({ row: rowOfCase(c), said: c.truths?.find((t) => t.who === SENTENCE_WHO)?.value }));
+  if (!marks.length || marks.some((m) => !m.row || m.said === undefined)) return null;
+  const hits = LITS.filter((l) => marks.every((m) => litHolds(l, m.row!) === m.said));
+  return hits.length === 1 ? hits[0] : null;
+}
+
+/** The rewrite a lesson 4 yes/no item asked about, read from the sentence in its prompt. */
+function askedRewrite(missed: Item): Rewrite | null {
+  const skin = skinOf(missed);
+  if (!skin) return null;
+  return (Object.keys(REWRITES) as Rewrite[]).find((k) => missed.prompt.endsWith(`“${condText(skin, REWRITES[k])}”`)) ?? null;
+}
+
+const MOVE_OF_TAG = Object.fromEntries(MOVES.map((m) => [MOVE_TAGS[m], m])) as Record<string, Move>;
+/** A settled move and the trap that looks like it: IF happened / THEN happened; THEN did not / IF did not. */
+const MOVE_PAIR: Record<Move, Move> = { mp: 'ac', ac: 'mp', mt: 'da', da: 'mt' };
+/** A card to turn and a card to skip, on the same part of the rule. */
+const FACE_PAIR: Record<Lit, Lit> = { P: 'notP', notP: 'P', notQ: 'Q', Q: 'notQ' };
+
+/**
+ * New examples after a miss: the same situation in another story, then its boundary partner, so the player shows
+ * the edge both ways. A missed kept case gets the one case that breaks the rule; a missed break gets the trap (no
+ * IF part, no THEN part). Forward pairs with backward, each move with the move it is mistaken for, flip and NOT
+ * with flip only or NOT only, and a card to turn with a card to skip. The same sentence is asked again (the THEN
+ * part or NOT the THEN part, flip only or NOT only). "Who broke the rule?", "Which sentence means the same?" and the
+ * four-card rule checker get one new item in another story: in the same story, the same four labels would come back
+ * in a new order (P and Q cases, card faces), and that is not a new example.
+ */
+function fresh(missed: Item, rng: Rng): Item[] {
+  const tag = missed.skill.replace(/^s6\./, '');
+  const make = (m: CondMade) => finish(m, 'new', missed.lesson);
+  if (tag === 'who-broke') return [make(whoBrokeItem(rng, { skin: otherSkin(rng, L1_SKINS, missed) }))];
+  if (tag === 'same-pick') return [make(samePickItem(rng, { skin: otherSkin(rng, SKIN_IDS, missed) }))];
+  if (tag === 'checker') return [make(checkerItem(rng, { skin: otherSkin(rng, CARD_SKINS, missed) }))];
+  if (tag === 'did-break') {
+    const row = askedRow(missed);
+    if (!row) return [];
+    const partner = ruleHolds(row) ? rowAt(true, false) : rowAt(false, false);
+    return [make(didBreakItem(rng, { skin: otherSkin(rng, L1_SKINS, missed), row })), make(didBreakItem(rng, { skin: otherSkin(rng, L1_SKINS, missed), row: partner }))];
+  }
+  if (tag === 'forward' || tag === 'backward') {
+    const fact = tag === 'forward' ? 'P' : 'Q';
+    const target = askedTarget(missed) ?? undefined;
+    return [make(turnItem(rng, { skin: otherSkin(rng, SKIN_IDS, missed), fact, target })), make(turnItem(rng, { skin: otherSkin(rng, SKIN_IDS, missed), fact: fact === 'P' ? 'Q' : 'P' }))];
+  }
+  if (MOVE_OF_TAG[tag]) {
+    const move = MOVE_OF_TAG[tag];
+    return [make(moveItem(rng, { skin: otherSkin(rng, SKIN_IDS, missed), move })), make(moveItem(rng, { skin: otherSkin(rng, SKIN_IDS, missed), move: MOVE_PAIR[move] }))];
+  }
+  if (tag === 'same-yesno') {
+    const asked = askedRewrite(missed);
+    if (!asked) return [];
+    const partner: Rewrite = asked === 'contra' ? rng.pick(['converse', 'inverse'] as const) : 'contra';
+    return [make(sameYesNoItem(rng, { skin: otherSkin(rng, SKIN_IDS, missed), rewrite: asked })), make(sameYesNoItem(rng, { skin: otherSkin(rng, SKIN_IDS, missed), rewrite: partner }))];
+  }
+  if (tag === 'checker-card') {
+    const face = shownFace(missed);
+    if (!face) return [];
+    return [make(cardItem(rng, { skin: otherSkin(rng, CARD_SKINS, missed), face })), make(cardItem(rng, { skin: otherSkin(rng, CARD_SKINS, missed), face: FACE_PAIR[face] }))];
+  }
+  return [];
+}
+
 export const stop6: StopDef = {
   n: STOP,
   id: 's6',
@@ -440,5 +535,5 @@ export const stop6: StopDef = {
   lessons,
   check,
   practice: arcade,
+  fresh,
 };
-

@@ -28,4 +28,3 @@ export const STOPS: readonly StopDef[] = [
 ];
 
 export const stopById = (id: string) => STOPS.find((s) => s.id === id);
-

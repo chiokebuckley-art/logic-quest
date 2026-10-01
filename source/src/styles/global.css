@@ -411,4 +411,3 @@ details > summary { cursor: pointer; min-height: 44px; display: flex; align-item
   .btn, .panel, .stop-node, .switch, .seg > button[aria-checked='true'], .pills > button[aria-checked='true'], .repair-card, .tile-btn { border: 1px solid CanvasText; }
   .meter > i, .bar-col > i, .path-dot { forced-color-adjust: none; }
 }
-
