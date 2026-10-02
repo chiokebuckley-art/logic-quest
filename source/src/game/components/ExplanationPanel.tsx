@@ -17,7 +17,7 @@ import { explanationSpeech, type ExplanationModel } from '../explanation';
 import { ReadAloudButton } from './ReadAloud';
 import { PlayIcon, ThingCard } from './ThingCard';
 
-const DOT: Record<Color, string> = { red: '#ef4444', blue: '#3b82f6', yellow: '#facc15' };
+const DOT: Record<Color, string> = { red: '#ff4d6d', blue: '#3b82f6', yellow: '#facc15' };
 
 /** One worked case as a card: the label in words, a picture, each sentence's truth (icon and word), a note. */
 export function CaseCard({ c, mark }: { c: TeachCase; mark?: boolean }) {

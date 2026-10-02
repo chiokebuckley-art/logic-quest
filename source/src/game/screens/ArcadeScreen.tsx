@@ -1,10 +1,9 @@
-import { PatternBridgeHome, DestinationArt } from '../pattern/PatternBridge';
 /** Arcade: practice any passed stop, one puzzle at a time. Blitz and Conquer come later. */
 import { useState } from 'react';
 import { seedFor } from '../../engine/journey/mastery';
 import { STOPS, stopById } from '../../content/stops';
+import { PageHead, StopArt } from '../components/kit';
 import { useStore, type Route } from '../store';
-import { Icon, STOP_ICONS } from '../components/Icon';
 import { PracticeRunner } from '../components/PracticeRunner';
 
 type ArcadeRoute = Extract<Route, { name: 'arcade' }>;
@@ -19,51 +18,43 @@ export function ArcadeScreen({ route }: { route: ArcadeRoute }) {
 function ArcadeHome() {
   const { save, actions } = useStore();
   if (!save) return null;
+  const openCount = STOPS.filter((stop) => !!save.stops[stop.id]?.passDay && !!stop.practice && stop.ready).length;
   return (
-    <div className="page">
-      <div className="row between wrap" style={{ gap: 6 }}>
-        <h2 className="page-title">ARCADE</h2>
-        <span className="small muted">More games are coming later</span>
+    <div className="page sl-page">
+      <PageHead title="Arcade" right={<span className="sl-section-meta t-lime">{openCount} open</span>} sub="No clock. One puzzle at a time, with the reason after every answer. Stop when you like." />
+      <div className="sl-seg" role="radiogroup" aria-label="Mode">
+        {MODES.map((m) => (
+          <button
+            key={m}
+            type="button"
+            role="radio"
+            className="sl-seg-btn c-lime"
+            aria-checked={m === 'Practice'}
+            aria-selected={m === 'Practice'}
+            disabled={m !== 'Practice'}
+            aria-describedby={m === 'Practice' ? undefined : 'modes-later'}
+          >
+            {m}
+          </button>
+        ))}
       </div>
+      <p id="modes-later" className="sl-note">Blitz and Conquer: coming in a later version.</p>
 
-      <div className="stack" style={{ gap: 6 }}>
-        <div className="seg" role="radiogroup" aria-label="Mode">
-          {MODES.map((m) => (
-            <button
-              key={m}
-              type="button"
-              role="radio"
-              aria-checked={m === 'Practice'}
-              disabled={m !== 'Practice'}
-              aria-describedby={m === 'Practice' ? undefined : 'modes-later'}
-            >
-              {m}
-            </button>
-          ))}
-        </div>
-        <p id="modes-later" className="small muted">Blitz and Conquer: coming in a later version.</p>
-        <p className="soft-text" style={{ fontSize: 14 }}>
-          No clock. One puzzle at a time, with the reason after every answer. Stop when you like.
-        </p>
-      </div>
-
-      <PatternBridgeHome />
-      <div className="arcade-grid">
+      <div className="sl-art-grid">
         {STOPS.map((stop) => {
           const open = !!save.stops[stop.id]?.passDay && !!stop.practice && stop.ready;
-          const sub = open ? `Stop ${stop.n} · tap to practice` : !stop.ready ? `Stop ${stop.n} · coming soon` : `Opens when you pass Stop ${stop.n}`;
+          const sub = open ? 'tap to practice' : !stop.ready ? 'coming soon' : `opens at Stop ${stop.n} pass`;
           return (
             <button
               key={stop.id}
               type="button"
-              className="arcade-card"
+              className="sl-art-card"
               disabled={!open}
               onClick={() => actions.navigate({ name: 'arcade', practice: stop.id })}
             >
-              <DestinationArt stopId={stop.id} />
-              <Icon name={open ? STOP_ICONS[stop.id] ?? 'star' : 'lock'} size={26} color={open ? 'var(--teal)' : 'var(--muted)'} />
-              <span className="arcade-name">{stop.title}</span>
-              <span className="arcade-sub">{sub}</span>
+              <StopArt stopId={stop.id} />
+              <span className="sl-art-name">{stop.n}. {stop.title}</span>
+              <span className={`sl-art-sub ${open ? 't-lime' : 't-muted'}`}>{sub}</span>
             </button>
           );
         })}

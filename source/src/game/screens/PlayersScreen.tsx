@@ -11,12 +11,12 @@ type PlayersRoute = Extract<Route, { name: 'players' }>;
 type Mode = 'list' | 'new' | 'import';
 
 const COLOR_NAMES: Record<string, string> = {
-  '#a78bfa': 'Purple',
-  '#2dd4bf': 'Teal',
-  '#ffb347': 'Orange',
-  '#22d3ee': 'Sky blue',
+  '#9d6bff': 'Purple',
+  '#3cff9d': 'Teal',
+  '#ff7a1a': 'Orange',
+  '#22e6ff': 'Sky blue',
   '#f472b6': 'Pink',
-  '#c9a227': 'Gold',
+  '#ffc93c': 'Gold',
 };
 
 export function PlayersScreen({ route }: { route: PlayersRoute }) {

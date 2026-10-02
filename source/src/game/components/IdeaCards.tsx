@@ -3,7 +3,7 @@
  * Back / Next, and read-aloud. The last card's button says "Try it". Focus goes to the card's title
  * when the cards open and on every move, so a screen reader starts reading at the new card.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { asSentence, sceneSpeech, stopSpeaking } from '../speech';
 import type { IdeaCardsProps } from './contracts';
 import { Dots, ReadAloudButton } from './ItemView';
@@ -14,9 +14,13 @@ export interface IdeaCardsExtraProps {
   doneLabel?: string;
   /** Small label above the title. Default "Key idea". */
   kicker?: string;
+  /** Shown between the card and its buttons (the lesson's thinking-routine chip). */
+  after?: ReactNode;
+  /** A short line under the last card's button ("Then the check opens"). */
+  doneNote?: string;
 }
 
-export function IdeaCards({ cards, readAloud, onDone, doneLabel = 'Try it', kicker = 'Key idea' }: IdeaCardsProps & IdeaCardsExtraProps) {
+export function IdeaCards({ cards, readAloud, onDone, doneLabel = 'Try it', kicker = 'Key idea', after, doneNote }: IdeaCardsProps & IdeaCardsExtraProps) {
   const [i, setI] = useState(0);
   const titleRef = useRef<HTMLHeadingElement>(null);
   const moved = useRef(false);
@@ -71,6 +75,7 @@ export function IdeaCards({ cards, readAloud, onDone, doneLabel = 'Try it', kick
         ))}
       </div>
       {count > 1 && <Dots states={cards.map((_, k) => (k < i ? 'done' : k === i ? 'now' : 'todo'))} label={`Card ${i + 1} of ${count}`} />}
+      {after}
       <div className="play-actions">
         {i > 0 && (
           <button type="button" className="play-btn play-btn--ghost" onClick={() => go(i - 1)}>
@@ -90,6 +95,7 @@ export function IdeaCards({ cards, readAloud, onDone, doneLabel = 'Try it', kick
           {last ? doneLabel : 'Next'}
         </button>
       </div>
+      {last && doneNote && <p className="play-done-note">{doneNote}</p>}
     </article>
   );
 }

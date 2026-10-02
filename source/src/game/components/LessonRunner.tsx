@@ -9,6 +9,17 @@ import type { AnswerRecord, LessonRunnerProps } from './contracts';
 import { IdeaCards } from './IdeaCards';
 import { PlayHeader, type DotState } from './ItemView';
 import { LearnItem } from './LearnItem';
+import { ROUTINE } from '../pattern/bridges';
+
+/** The thinking routine shared with Pattern Lab, as one line under the key idea. */
+function RoutineLine() {
+  return (
+    <div className="play-routine">
+      <img src={`${import.meta.env.BASE_URL}artwork/pl-icon-notice.webp`} alt="" />
+      <span><b>{ROUTINE.join(' → ')}</b> · the same routine as Pattern Lab</span>
+    </div>
+  );
+}
 
 type Step = { at: 'ideas' } | { at: 'try'; i: number } | { at: 'recap' };
 
@@ -119,7 +130,14 @@ export function LessonRunner({ stop, lesson, seed, readAloud, onAnswer, onComple
         dotsLabel={dotsLabel}
       />
       {step.at === 'ideas' && (
-        <IdeaCards cards={lesson.ideas} readAloud={readAloud} onDone={() => setStep(items.length ? { at: 'try', i: 0 } : { at: 'recap' })} />
+        <IdeaCards
+          cards={lesson.ideas}
+          readAloud={readAloud}
+          doneLabel={items.length ? `Try it ▸ ${items.length} ${items.length === 1 ? 'puzzle' : 'puzzles'}` : 'Try it'}
+          doneNote={k === stop.lessons.length - 1 ? 'Then the stop check opens' : `Then Lesson ${k + 2}`}
+          after={<RoutineLine />}
+          onDone={() => setStep(items.length ? { at: 'try', i: 0 } : { at: 'recap' })}
+        />
       )}
       {resumed && step.at === 'try' && step.i === start!.next && (
         <p className="play-fresh-note" role="status">

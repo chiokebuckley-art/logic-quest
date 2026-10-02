@@ -18,7 +18,7 @@ export interface SceneViewProps {
 }
 
 /** Avatar colors for speakers, by place in the list (dark text reads on all of them). */
-const AVATAR = ['#a78bfa', '#22d3ee', '#f5d77a', '#5eead4', '#f9a8d4'];
+const AVATAR = ['#9d6bff', '#22e6ff', '#ffe08a', '#7dffbf', '#f9a8d4'];
 
 /** The rule over a scene ("Rule: Exactly one sign is true."). */
 export function RuleBanner({ rule }: { rule: string }) {
@@ -79,14 +79,14 @@ export function SpeakerCard({ name, says, index, flagged = false, children }: Sp
 /** Tint the little box marker by metal or color words in the name; brass otherwise. */
 function boxTint(name: string): string {
   const n = name.toLowerCase();
-  if (/gold/.test(n)) return '#c9a227';
-  if (/silver/.test(n)) return '#cbd5e1';
-  if (/lead|iron|stone|gray|grey/.test(n)) return '#64748b';
+  if (/gold/.test(n)) return '#ffc93c';
+  if (/silver/.test(n)) return '#c9cff0';
+  if (/lead|iron|stone|gray|grey/.test(n)) return '#6b74a8';
   if (/copper|bronze|wood/.test(n)) return '#c2703d';
-  if (/red/.test(n)) return '#ef4444';
+  if (/red/.test(n)) return '#ff4d6d';
   if (/blue/.test(n)) return '#3b82f6';
-  if (/green/.test(n)) return '#4ade80';
-  return '#c9a227';
+  if (/green/.test(n)) return '#3cff9d';
+  return '#ffc93c';
 }
 
 export function SceneView({ scene, clueState, labelId }: SceneViewProps) {

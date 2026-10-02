@@ -1,5 +1,21 @@
 # LOGIC QUEST
 
+**v0.4.0 — One page per stop, five tabs:** the app is reorganised so each thing lives in one place.
+
+- **Home · Journey · Arcade · Library · Me.** Home says the one next thing: the Next-up card with one gold button,
+  repair quests that are ready, today's plan and the Pattern Scout badge. The old Learn and Progress tabs fold in.
+- **A Stop page for every stop.** Its lessons in order, its check, practice, Pattern Lab events and the repair cards
+  that came from it, with the thing to do now in gold. Four stage tiles show Lessons · Pass · Lock in · Master.
+- **Library** is the cross-stop index: every lesson and key idea to re-read, practice, Pattern Lab and what is
+  coming. **Find anything** searches key ideas, lessons, stops, puzzles, Pattern Lab events and settings.
+- **Me** holds repair quests, My progress, badges, players, play settings, export, and **Grown-ups** (behind a
+  grown-up check): minutes, first try by skill, after-a-miss counts and the CSV.
+- **One question frame** for lessons, checks, practice and repair quests, a key-idea card with the Pattern Lab
+  routine, and a check result with a square per question.
+- **Brighter colours, one meaning each:** cyan learn, lime practice, violet Pattern Lab, orange repair and misses,
+  gold next and passed, mint mastered, red wrong. Same palette as the Engineering Quest remake.
+- Game icons from [game-icons.net](https://game-icons.net) (CC BY 3.0). No save changes: every save carries over.
+
 **v0.3.1 — Wrong answers teach first:** every wrong answer, in every lesson, now gets a full explanation:
 
 - **What your answer means, and exactly where it fails.** Each wrong choice has its own explanation, with a worked

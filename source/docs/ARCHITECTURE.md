@@ -23,7 +23,7 @@ src/
   game/
     store.tsx            React context: players, the active save, screen, autosave
     components/          play components (ItemView, LessonRunner, CheckRunner, …) and chrome (Hud, Nav)
-    screens/             Players, Journey, Learn, Lesson, Check, Arcade, Progress, Settings
+    screens/             Home, Journey, Stop, Library, Me, Search, Lesson, Check, Arcade, Progress/Grown-ups, Notebook, Players, Settings
     hooks/               active-time clock, update check
   styles/                global.css (tokens and base classes), play.css (items and lessons)
 ```

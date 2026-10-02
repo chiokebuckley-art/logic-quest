@@ -38,7 +38,7 @@ export function CheckScreen({ route }: { route: CheckRoute }) {
     recorded.current = Math.max(recorded.current, answered.length);
   };
 
-  const toJourney = () => actions.navigate({ name: 'journey' });
+  const toJourney = () => actions.navigate(stop ? { name: 'stop', stopId: stop.id } : { name: 'journey' });
 
   if (!stop || !save) return <NotOpen onBack={toJourney} />;
 

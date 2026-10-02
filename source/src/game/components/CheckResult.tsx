@@ -153,21 +153,23 @@ export function CheckResult({ stop, kind, items, records, passed, missed, onLear
 
   return (
     <div className="play-root">
-      <PlayHeader over={`Stop ${stop.n} · ${stop.title}`} title={label} onBack={onDone} backLabel="Back to the Journey" />
+      <PlayHeader over={`Stop ${stop.n} · ${stop.title}`} title={label} onBack={onDone} backLabel="Back to the stop" />
 
-      <div className="play-score">
-        <div className={`play-ring ${passed ? 'play-ring--pass' : 'play-ring--notyet'}`} aria-hidden="true">
-          <span className="play-ring-n">{right}</span>
-          <span className="play-ring-of">of {total}</span>
-        </div>
-        <div className="play-score-text">
-          <h2 className={`play-score-head ${passed ? 'is-pass' : 'is-notyet'}`} ref={headRef} tabIndex={-1}>
-            {passed ? 'Passed' : `Not yet · ${right} of ${total}`}
-          </h2>
-          <p className="play-body">
-            {passed ? `You got all ${total} right.` : 'A stop passes when every answer is right.'}
-          </p>
-        </div>
+      <div className={`play-result-hero ${passed ? 'is-pass' : 'is-notyet'}`}>
+        <span className="play-result-eyebrow">{passed ? `Passed · Stop ${stop.n} · ${stop.title}` : `Stop ${stop.n} · ${stop.title}`}</span>
+        <h2 className={`play-score-head ${passed ? 'is-pass' : 'is-notyet'}`} ref={headRef} tabIndex={-1}>
+          {passed ? 'Passed' : `Not yet · ${right} of ${total}`}
+        </h2>
+        <p className="play-body">
+          {passed ? `You got all ${total} right.` : 'A stop passes when every answer is right.'}
+        </p>
+        <ol className="play-result-squares" aria-label={`${right} of ${total} right`}>
+          {items.map((it, i) => {
+            const r = recordFor(it, i);
+            const state = r?.correct ? 'right' : r?.timedOut ? 'time' : 'wrong';
+            return <li key={it.id} className={`is-${state}`} aria-hidden="true">{state === 'right' ? '✓' : state === 'time' ? '⏱' : '✕'}</li>;
+          })}
+        </ol>
       </div>
 
       {passed && (
@@ -175,8 +177,8 @@ export function CheckResult({ stop, kind, items, records, passed, missed, onLear
           <div className="play-feedback play-feedback--right">
             <p>{NEXT_AFTER_PASS[kind](stop.n)}</p>
           </div>
-          <button type="button" className="play-btn play-btn--teal play-btn--block" onClick={onDone}>
-            Back to the Journey
+          <button type="button" className="play-btn play-btn--primary play-btn--block" onClick={onDone}>
+            Back to the stop ▸
           </button>
         </>
       )}
@@ -225,7 +227,7 @@ export function CheckResult({ stop, kind, items, records, passed, missed, onLear
             </div>
           )}
           <button type="button" className="play-btn play-btn--ghost play-btn--block" onClick={onDone}>
-            Back to the Journey
+            Back to the stop
           </button>
         </>
       )}

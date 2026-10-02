@@ -1,12 +1,13 @@
-/** Bottom tab bar: Journey, Learn, Arcade, Progress. */
+/** Bottom tab bar: Home, Journey, Arcade, Library, Me. */
 import { tabFor, useStore, type Route, type Tab } from '../store';
-import { Icon, type IconName } from './Icon';
+import { GIcon, type GameIcon } from './kit';
 
-const TABS: { tab: Tab; label: string; icon: IconName; route: Route }[] = [
-  { tab: 'journey', label: 'Journey', icon: 'journey', route: { name: 'journey' } },
-  { tab: 'learn', label: 'Learn', icon: 'learn', route: { name: 'learn' } },
-  { tab: 'arcade', label: 'Arcade', icon: 'arcade', route: { name: 'arcade' } },
-  { tab: 'progress', label: 'Progress', icon: 'progress', route: { name: 'progress' } },
+const TABS: { tab: Tab; label: string; icon: GameIcon; route: Route }[] = [
+  { tab: 'home', label: 'Home', icon: 'star', route: { name: 'home' } },
+  { tab: 'journey', label: 'Journey', icon: 'map', route: { name: 'journey' } },
+  { tab: 'arcade', label: 'Arcade', icon: 'target', route: { name: 'arcade' } },
+  { tab: 'library', label: 'Library', icon: 'book', route: { name: 'library' } },
+  { tab: 'me', label: 'Me', icon: 'dashboard', route: { name: 'me' } },
 ];
 
 export function Nav() {
@@ -22,7 +23,7 @@ export function Nav() {
           aria-current={active === t.tab ? 'page' : undefined}
           onClick={() => actions.navigate(t.route)}
         >
-          <Icon name={t.icon} size={24} />
+          <GIcon name={t.icon} size={22} />
           <span>{t.label}</span>
         </button>
       ))}

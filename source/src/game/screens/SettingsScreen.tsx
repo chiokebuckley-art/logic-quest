@@ -7,13 +7,14 @@ import { CURRENT_BUILD, useUpdateCheck } from '../hooks/useUpdateCheck';
 import { Icon } from '../components/Icon';
 import { initial } from '../components/Hud';
 import { ImportBox } from './PlayersScreen';
+import { PageHead } from '../components/kit';
 
 export function SettingsScreen() {
   const { player, save, actions } = useStore();
   return (
-    <div className="page">
+    <div className="page sl-page">
       <div className="row between">
-        <h2 className="page-title">SETTINGS</h2>
+        {player ? <PageHead title="Settings" sub="Player, play options, save files, players" back="Me" onBack={() => actions.navigate({ name: 'me' })} /> : <h2 className="page-title">SETTINGS</h2>}
         {!player && (
           <button type="button" className="btn ghost" onClick={() => actions.navigate({ name: 'players', mode: 'list' })}>
             <Icon name="back" size={18} /> Players
@@ -192,7 +193,7 @@ function SavePanel() {
  * A grown-up check before anyone can remove a PIN or a player. Like the PIN itself, it slows down a curious
  * sibling rather than being real security: a two-digit times two-digit sum, typed in.
  */
-function GrownUpGate({ onOpen }: { onOpen(): void }) {
+export function GrownUpGate({ onOpen }: { onOpen(): void }) {
   const pair = () => [13 + Math.floor(Math.random() * 17), 13 + Math.floor(Math.random() * 17)] as const;
   const [[a, b], setQ] = useState(pair);
   const [answer, setAnswer] = useState('');

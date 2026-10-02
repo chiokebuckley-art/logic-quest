@@ -12,3 +12,4 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 
 
 import './styles/pattern.css';
+import './styles/streamline.css';

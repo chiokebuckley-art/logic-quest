@@ -11,24 +11,49 @@ import {
 import { downloadText, useStore } from '../store';
 import { Icon } from '../components/Icon';
 import { TodayMeter } from './JourneyScreen';
+import { GIcon, PageHead, Row } from '../components/kit';
+import { GrownUpGate } from './SettingsScreen';
 
-type View = 'me' | 'grown';
 const RANGES = [7, 14, 30] as const;
 type Range = (typeof RANGES)[number];
 
+/** My progress (Me → My progress): counts, today's minutes and the path strip. */
 export function ProgressScreen() {
-  const [view, setView] = useState<View>('me');
+  const { actions } = useStore();
   return (
-    <div className="page">
-      <div className="row between wrap" style={{ gap: 8 }}>
-        <h2 className="page-title">PROGRESS</h2>
-        <div className="seg pill" role="radiogroup" aria-label="View">
-          <button type="button" role="radio" aria-checked={view === 'me'} onClick={() => setView('me')}>My Progress</button>
-          <button type="button" role="radio" aria-checked={view === 'grown'} onClick={() => setView('grown')}>Grown-ups</button>
-        </div>
-      </div>
+    <div className="page sl-page">
+      <PageHead title="My progress" sub="By stop and by day" back="Me" onBack={() => actions.navigate({ name: 'me' })} />
+      <MyProgress />
       <BridgeProgressCard />
-      {view === 'me' ? <MyProgress /> : <GrownUps />}
+    </div>
+  );
+}
+
+/** Opened once per session: the grown-up check is asked again after a reload. */
+let grownOpen = false;
+
+/** Grown-ups (1k): time, first-try by skill, after-a-miss counts, CSV, and the grown-up settings. Behind a grown-up check. */
+export function GrownUpsScreen() {
+  const { actions } = useStore();
+  const [open, setOpen] = useState(grownOpen);
+  return (
+    <div className="page sl-page">
+      <PageHead title="Grown-ups" sub="7 · 14 · 30 days, CSV, players, settings" back="Me" onBack={() => actions.navigate({ name: 'me' })} />
+      {open ? (
+        <>
+          <GrownUps />
+          <div className="sl-list">
+            <Row lead={<GIcon name="home" color="var(--gold)" />} title="Players & PINs" sub="Rename, PINs, remove a player" meta="›" onClick={() => actions.navigate({ name: 'settings' })} />
+            <Row lead={<GIcon name="compass" color="var(--violet)" />} title="Path" sub="Explorer · Trailblazer · Logician" meta="›" onClick={() => actions.navigate({ name: 'library', kind: 'lab' })} />
+            <Row lead={<GIcon name="hourglass" color="var(--text-2)" />} title="Calm timer · read aloud" sub="Play settings" meta="›" onClick={() => actions.navigate({ name: 'settings' })} />
+            <Row lead={<GIcon name="cloud-sync" color="var(--text-2)" />} title="Sync across devices" sub="Use Export / import in Settings for now" meta="coming v0.5" metaTone="muted" />
+          </div>
+        </>
+      ) : (
+        <section className="sl-card">
+          <GrownUpGate onOpen={() => { grownOpen = true; setOpen(true); }} />
+        </section>
+      )}
     </div>
   );
 }
@@ -89,8 +114,8 @@ function MyProgress() {
           <span><i style={{ background: 'var(--brass)' }} />Locked in</span>
           <span><i style={{ background: 'var(--teal)' }} />Passed</span>
           <span><i style={{ background: 'var(--amber)' }} />You are here</span>
-          <span><i style={{ background: '#64748b' }} />Not open yet</span>
-          <span><i style={{ background: '#334155' }} />Coming soon</span>
+          <span><i style={{ background: '#6b74a8' }} />Not open yet</span>
+          <span><i style={{ background: '#2a3166' }} />Coming soon</span>
         </div>
         {here ? (
           <p className="soft-text" style={{ fontSize: 14 }}>
@@ -154,6 +179,10 @@ function GrownUps() {
         </button>
       </div>
 
+      <section className="panel soft" aria-labelledby="minutes-title" style={{ gap: 8 }}>
+        <h3 id="minutes-title" className="sl-label t-cyan">Last {range} days · {player.name} · minutes</h3>
+        <MinutesChart days={days} range={range} />
+      </section>
       <div className="tiles">
         <Tile value={totalMinutes(save.active, today, range)} label="minutes" />
         <Tile value={rate === null ? '–' : `${rate}%`} label="right first try" />
@@ -194,10 +223,6 @@ function GrownUps() {
         {(save.gaps?.length ?? 0) > 0 && <p className="small muted">Questions with no explanation of their own yet: {save.gaps.length}. They are in the CSV export for repair.</p>}
       </section>
 
-      <section className="panel soft" aria-labelledby="minutes-title" style={{ gap: 8 }}>
-        <h3 id="minutes-title" className="section-title">MINUTES PER DAY</h3>
-        <MinutesChart days={days} range={range} />
-      </section>
 
       <section className="panel soft" aria-labelledby="skills-title" style={{ gap: 8 }}>
         <h3 id="skills-title" className="section-title">SKILLS</h3>
@@ -223,7 +248,7 @@ function GrownUps() {
         )}
       </section>
 
-      <section className="panel soft" aria-labelledby="weak-title" style={{ gap: 8, borderColor: 'rgba(255, 179, 71, 0.4)' }}>
+      <section className="panel soft" aria-labelledby="weak-title" style={{ gap: 8, borderColor: 'rgba(255, 122, 26, 0.4)' }}>
         <h3 id="weak-title" className="section-title" style={{ color: 'var(--amber-soft)' }}>NEEDS PRACTICE</h3>
         {weak.length === 0 ? (
           <p className="muted small">Nothing yet. A skill shows here after 5 answers with under 70% right on the first try.</p>
@@ -232,7 +257,7 @@ function GrownUps() {
         )}
       </section>
 
-      <section className="panel soft" aria-labelledby="strong-title" style={{ gap: 6, borderColor: 'rgba(45, 212, 191, 0.4)' }}>
+      <section className="panel soft" aria-labelledby="strong-title" style={{ gap: 6, borderColor: 'rgba(60, 255, 157, 0.4)' }}>
         <h3 id="strong-title" className="section-title" style={{ color: 'var(--teal-soft)' }}>STRONG</h3>
         {strong.length === 0 ? (
           <p className="muted small">Nothing yet. A skill shows here after 5 answers with 80% or more right on the first try.</p>

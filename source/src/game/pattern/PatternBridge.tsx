@@ -23,12 +23,12 @@ export function BridgeProgressCard() {
       {p.evidenceScout && <figure><img src={art('badge-evidence-scout')} alt="" /><figcaption>Evidence Scout</figcaption></figure>}</div>
     <p className="small soft-text">Bridge badges show preparation. Logic Quest stop checks, Proof, and Junior Badge requirements stay separate.</p></section>;
 }
-export function PatternBridgeHome() {
+export function PatternBridgeHome({ open = false }: { open?: boolean } = {}) {
   const { save, actions, today } = useStore();
   if (!save) return null;
   const p = save.patternBridge;
   const views = viewAll(STOPS, save.stops, today);
-  return <section className="pl-home" aria-labelledby="pl-title"><details><summary id="pl-title">Pattern bridges · Workshop and activities</summary>
+  return <section className="pl-home" aria-labelledby="pl-title"><details open={open || undefined}><summary id="pl-title">Pattern bridges · Workshop and activities</summary>
     <div className="row between wrap"><div><div className="kicker">Engineering Quest connection</div><h2>Choose your preparation</h2></div>
     <label className="pl-path">Learning path<select aria-label="Learning path" value={p.path} onChange={e => actions.setPatternPath(e.target.value as AgePath)}>
       {(['Explorer','Trailblazer','Logician'] as const).map(path => <option key={path}>{path}</option>)}</select></label></div>
@@ -42,7 +42,7 @@ export function PatternBridgeHome() {
       return <article key={d.name} className="pl-destination"><img src={art(`bridge-${d.art}`)} alt="" loading="lazy" />
         <div><h3>{d.name}</h3><p>{d.purpose}</p><div className="pl-event-buttons">{d.events.map((id,i) => <button key={id} className="btn" onClick={() => actions.navigate({name:'pattern',event:id})}>
           {p.completed.includes(id) ? 'Replay' : 'Try'} {i+1}<span className="sr-only">: {d.name}, {id}</span>{p.completed.includes(id) && <span aria-label="completed"> ✓</span>}</button>)}</div>
-        {go ? <button className="pl-core-link" onClick={() => actions.navigate(go)}>Continue Journey: {v?.stop.title}</button> : <p className="small soft-text">{v?.view.status === 'soon' ? 'Full Journey destination coming later. These are preparation activities.' : 'Pass the earlier Journey checks to open the full stop.'}</p>}</div></article>;
+        {go ? <button className="pl-core-link" onClick={() => actions.navigate(go)}>Open the stop: {v?.stop.title}</button> : <p className="small soft-text">{v?.view.status === 'soon' ? 'Full Journey destination coming later. These are preparation activities.' : 'Pass the earlier Journey checks to open the full stop.'}</p>}</div></article>;
     })}</div>
     <RoutineChip />
     <p className="small soft-text">The full 12-unit Pattern Lab belongs in Engineering Quest. These bridges cover overlapping skills only.</p>
@@ -78,7 +78,7 @@ export function PatternBridgeScreen({ route }: { route: Extract<Route,{name:'pat
   const question: Question | null = step===2?round.describe:step===3?round.predict:step===4?round.test:step===5?round.revise:null;
   if(!save) return null;
   return <div className={`page pl-investigation pl-${save.patternBridge.path.toLowerCase()}`}>
-    <div className="row between"><button className="btn" onClick={() => actions.navigate({name:'journey'})}>Back to Journey</button>
+    <div className="row between"><button className="btn" onClick={() => actions.navigate(route.event && d ? {name:'stop',stopId:d.stop} : {name:'library',kind:'lab'})}>{route.event && d ? 'Back to the stop' : 'Back to Pattern Lab'}</button>
       {!done && <button className="btn" onClick={() => setPaused(!paused)}>{paused?'Resume':'Calm Check'}</button>}</div>
     <div className="pl-scene"><picture>{route.workshop && <source media="(max-width:480px)" srcSet={art('pattern-workshop-portrait')} />}
       <img src={art(route.workshop?'pattern-workshop-landscape':`bridge-${d?.art ?? 'signal-camp'}`)} alt="" /></picture>
@@ -89,7 +89,7 @@ export function PatternBridgeScreen({ route }: { route: Extract<Route,{name:'pat
         {save.patternBridge.evidenceScout && <img className="pl-earned" src={art('badge-evidence-scout')} alt="Evidence Scout badge" />}
         <p>{misses ? `You revised ${misses} ${misses===1?'answer':'answers'} using evidence. Revising is part of learning.` : 'You checked each claim against the evidence.'}</p>
         <p>Continue your Journey for Logic Quest stop checks. Bridge activities do not award Proof or Junior Badge completion.</p>
-        <button className="btn primary" onClick={() => actions.navigate({name:'journey'})}>Continue Journey</button></section> : <>
+        <button className="btn primary" onClick={() => actions.navigate(d ? {name:'stop',stopId:d.stop} : {name:'journey'})}>Continue Journey</button></section> : <>
       <RoutineChip step={step} />
       <section className="pl-work"><div className="kicker">{ROUTINE[step]}</div><h2 ref={heading} tabIndex={-1}>{round.title}</h2>
         <div className="pl-evidence"><p>{round.evidence}</p>{round.tokens && <ExactTokens tokens={round.tokens} />}</div>

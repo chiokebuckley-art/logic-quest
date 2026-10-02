@@ -30,6 +30,7 @@ import { SceneView } from '../components/SceneView';
 import { ThingCard } from '../components/ThingCard';
 import { describeAnswer, describeRight, listWords, rightAnswer } from '../describe';
 import { JourneyScreen, RepairCard } from '../screens/JourneyScreen';
+import { HomeScreen } from '../screens/HomeScreen';
 import { NOTEBOOK_INTRO, NotebookList, NotebookScreen, notebookGroups } from '../screens/NotebookScreen';
 import { ProgressScreen } from '../screens/ProgressScreen';
 import { canSpeak, itemSpeech, sceneSpeech, speak, speechChunks, thingName, spoken } from '../speech';
@@ -375,7 +376,7 @@ describe('ThingCard', () => {
     const small = render(h(ThingCard, { thing: card('x', 'small', 'red', 'circle') })).html;
     expect(big).toContain('aria-label="big red circle"');
     expect(big).toContain('role="img"');
-    expect(big).toContain('fill="#ef4444"');
+    expect(big).toContain('fill="#ff4d6d"');
     expect(big).toContain('r="23"');
     expect(small).toContain('r="11.5"');
     expect(render(h(ThingCard, { thing: card('x', 'big', 'blue', 'square') })).html).toContain('width="42"');
@@ -389,7 +390,7 @@ describe('ThingCard', () => {
     expect(back.html).not.toContain('#ef4444'); // the hidden color never leaks into the drawing
     const marked = render(h(ThingCard, { thing: card('x', 'big', 'red', 'circle', { mark: 'no' }) }));
     expect(marked.html).toContain('aria-label="big red circle, marked no"');
-    expect(marked.html).toContain('#ffb347');
+    expect(marked.html).toContain('#ff7a1a');
   });
 
   it('is a real toggle button when selectable', () => {
@@ -592,7 +593,7 @@ describe('CheckResult', () => {
     expect(text).toContain('Passed');
     expect(text).toContain(`You got all ${items.length} right.`);
     expect(text).toContain(next);
-    expect(text).toContain('Back to the Journey');
+    expect(text).toContain('Back to the stop');
     expect(text).not.toContain('Learn this again');
   });
 
@@ -1191,7 +1192,7 @@ describe('Wrong-Answer Notebook', () => {
     const { html, text } = render(h(NotebookList, { notebook: sampleNotebook, today, stops: [stop], onFix: noop }));
     expect(text).toContain(NOTEBOOK_INTRO[0]);
     expect(text).toContain('Repair quests: 1 ready');
-    expect(text).toContain('Fix the ready ones');
+    expect(html).toContain('aria-label="Fix the ready ones"');
     expect(text).toContain('STOP 2');
     expect(text).toContain('STOP 9 · SAMPLE STOP');
     expect(text.indexOf('STOP 2')).toBeLessThan(text.indexOf('STOP 9'));
@@ -1202,16 +1203,16 @@ describe('Wrong-Answer Notebook', () => {
     expect(text).toContain('In a later version');
     expect(text).toContain('Ready in 3 days');
     expect(text).toContain('Fixes done: 1 of 3');
-    expect(count(html, 'class="nb-card')).toBe(3);
+    expect(count(html, 'class="sl-nb-card')).toBe(3);
   });
 
   it('an empty notebook says so, and nothing ready offers no fixing', () => {
     const empty = render(h(NotebookList, { notebook: {}, today, stops: [stop], onFix: noop })).text;
     expect(empty).toContain('Your notebook is empty');
-    expect(empty).not.toContain('Fix the ready ones');
+    expect(empty).not.toContain('FIX');
     const later = render(h(NotebookList, { notebook: { 's9.cards': sampleNotebook['s9.cards'] }, today, stops: [stop], onFix: noop })).text;
     expect(later).toContain('Nothing is ready right now');
-    expect(later).not.toContain('Fix the ready ones');
+    expect(later).not.toContain('FIX');
   });
 
   it('fixing asks a fresh question on the card’s skill, in learn mode', () => {
@@ -1254,7 +1255,8 @@ function storeWithNotebook() {
 describe('notebook screens with the store', () => {
   it('the notebook screen lists the saved cards', () => {
     const { text } = render(h(StoreProvider, { kv: storeWithNotebook(), children: h(NotebookScreen, { route: { name: 'notebook' } }) }));
-    expect(text).toContain('NOTEBOOK');
+    expect(text).toContain('Repair quests');
+    expect(text).toContain('Fixed 4');
     expect(text).toContain('Repair quests: 1 ready');
     expect(text).toContain('STOP 1 ·');
     expect(text).toContain('Can’t tell yet');
@@ -1268,9 +1270,13 @@ describe('notebook screens with the store', () => {
   });
 
   it('the Journey shows the repair card and Progress counts open cards', () => {
+    const home = render(h(StoreProvider, { kv: storeWithNotebook(), children: h(HomeScreen) })).text;
+    expect(home).toContain('Repair quests: 1 ready');
+    expect(home.indexOf('Repair quests')).toBeLessThan(home.indexOf('Today’s plan'));
+    expect(home).toContain('Fix 1 repair quest');
     const journey = render(h(StoreProvider, { kv: storeWithNotebook(), children: h(JourneyScreen) })).text;
-    expect(journey).toContain('Repair quests: 1 ready');
-    expect(journey.indexOf('Repair quests')).toBeLessThan(journey.indexOf('THE JOURNEY'));
+    expect(journey).toContain('1. True or False?');
+    expect(journey).not.toContain('Repair quests');
     const progress = render(h(StoreProvider, { kv: storeWithNotebook(), children: h(ProgressScreen) }));
     expect(progress.text).toContain('2 repair quests . Open the notebook.');
     expect(progress.html).toContain('class="tile tile-btn"');
@@ -1282,7 +1288,7 @@ describe('notebook screens with the store', () => {
     const { reg, player } = saves.addPlayer({ players: [] }, 'Sam', saves.COLORS[0], 1, 0.5);
     saves.saveRegistry(kv, reg);
     saves.writeSave(kv, player.id, saves.newSave());
-    expect(render(h(StoreProvider, { kv, children: h(JourneyScreen) })).text).not.toContain('Repair quests');
+    expect(render(h(StoreProvider, { kv, children: h(HomeScreen) })).text).not.toContain('Repair quests');
   });
 });
 

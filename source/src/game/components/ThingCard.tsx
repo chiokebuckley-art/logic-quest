@@ -8,7 +8,7 @@ import type { ReactElement } from 'react';
 import type { Color, Thing } from '../../engine/types';
 import { thingName } from '../speech';
 
-const FILL: Record<Color, string> = { red: '#ef4444', blue: '#3b82f6', yellow: '#facc15' };
+const FILL: Record<Color, string> = { red: '#ff4d6d', blue: '#3b82f6', yellow: '#facc15' };
 
 export type IconName = 'back' | 'speaker' | 'stop' | 'check' | 'cross' | 'lock' | 'clock' | 'bulb' | 'shield' | 'mask';
 
@@ -82,10 +82,10 @@ function CardBack() {
   }
   return (
     <g>
-      <rect x="4" y="4" width="52" height="72" rx="5" fill="#1d2640" stroke="rgba(201, 162, 39, 0.55)" strokeWidth="1.5" />
-      <g fill="rgba(201, 162, 39, 0.28)">{dots}</g>
-      <circle cx="30" cy="40" r="13" fill="#0b1020" stroke="#c9a227" strokeWidth="1.5" />
-      <text x="30" y="46.5" textAnchor="middle" fontFamily="'Exo 2', 'Segoe UI', system-ui, sans-serif" fontWeight="700" fontSize="19" fill="#f5d77a">?</text>
+      <rect x="4" y="4" width="52" height="72" rx="5" fill="#1d2640" stroke="rgba(255, 201, 60, 0.55)" strokeWidth="1.5" />
+      <g fill="rgba(255, 201, 60, 0.28)">{dots}</g>
+      <circle cx="30" cy="40" r="13" fill="#0a0d2a" stroke="#ffc93c" strokeWidth="1.5" />
+      <text x="30" y="46.5" textAnchor="middle" fontFamily="'Exo 2', 'Segoe UI', system-ui, sans-serif" fontWeight="700" fontSize="19" fill="#ffe08a">?</text>
     </g>
   );
 }
@@ -94,13 +94,13 @@ function CardBack() {
 function MarkBadge({ mark }: { mark: 'yes' | 'no' }) {
   return mark === 'yes' ? (
     <g>
-      <circle cx="49" cy="11" r="9" fill="#2dd4bf" stroke="#0b1020" strokeWidth="1.5" />
-      <path d="M44.5 11.2l3 3 5.5-6" fill="none" stroke="#0b1020" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="49" cy="11" r="9" fill="#3cff9d" stroke="#0a0d2a" strokeWidth="1.5" />
+      <path d="M44.5 11.2l3 3 5.5-6" fill="none" stroke="#0a0d2a" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
     </g>
   ) : (
     <g>
-      <circle cx="49" cy="11" r="9" fill="#ffb347" stroke="#0b1020" strokeWidth="1.5" />
-      <path d="M45.5 7.5l7 7M52.5 7.5l-7 7" fill="none" stroke="#0b1020" strokeWidth="2.4" strokeLinecap="round" />
+      <circle cx="49" cy="11" r="9" fill="#ff7a1a" stroke="#0a0d2a" strokeWidth="1.5" />
+      <path d="M45.5 7.5l7 7M52.5 7.5l-7 7" fill="none" stroke="#0a0d2a" strokeWidth="2.4" strokeLinecap="round" />
     </g>
   );
 }

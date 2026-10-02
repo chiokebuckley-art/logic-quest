@@ -1,6 +1,6 @@
-import { PatternBridgeScreen, RoutineChip, DestinationArt } from './game/pattern/PatternBridge';
+import { PatternBridgeScreen } from './game/pattern/PatternBridge';
 import { useEffect, useRef } from 'react';
-import { StoreProvider, useStore, type Route } from './game/store';
+import { StoreProvider, parentRoute, useStore, type Route } from './game/store';
 import { Hud } from './game/components/Hud';
 import { Nav } from './game/components/Nav';
 import { BACK_EVENT } from './game/components/ItemView';
@@ -8,11 +8,15 @@ import { useActiveTime } from './game/hooks/useActiveTime';
 import { useUpdateCheck } from './game/hooks/useUpdateCheck';
 import { PlayersScreen } from './game/screens/PlayersScreen';
 import { JourneyScreen } from './game/screens/JourneyScreen';
-import { LearnScreen } from './game/screens/LearnScreen';
+import { HomeScreen } from './game/screens/HomeScreen';
+import { StopScreen } from './game/screens/StopScreen';
+import { LibraryScreen } from './game/screens/LibraryScreen';
+import { MeScreen } from './game/screens/MeScreen';
+import { SearchScreen } from './game/screens/SearchScreen';
 import { LessonScreen } from './game/screens/LessonScreen';
 import { CheckScreen } from './game/screens/CheckScreen';
 import { ArcadeScreen } from './game/screens/ArcadeScreen';
-import { ProgressScreen } from './game/screens/ProgressScreen';
+import { GrownUpsScreen, ProgressScreen } from './game/screens/ProgressScreen';
 import { NotebookScreen } from './game/screens/NotebookScreen';
 import { SettingsScreen } from './game/screens/SettingsScreen';
 
@@ -29,14 +33,14 @@ function playing(route: Route): boolean {
 /**
  * The phone's Back button (or the browser's) inside the app. One history entry sits above the page:
  *  - in a lesson, check, practice or notebook fix, Back acts like the screen's own back arrow (a check asks before leaving);
- *  - on Learn, Arcade, Progress, the Notebook or Settings, Back goes to the Journey;
- *  - on the Journey (or Players), Back is let through, so a second Back leaves the app.
+ *  - on any other page, Back goes to its parent (a stop page to the Journey, Me's pages to Me, a tab to Home);
+ *  - on Home (or Players), Back is let through, so a second Back leaves the app.
  */
-function useDeviceBack(route: Route, signedIn: boolean, toJourney: () => void) {
+function useDeviceBack(route: Route, signedIn: boolean, go: (r: Route) => void) {
   const routeRef = useRef(route);
   routeRef.current = route;
   const guarded = useRef(false);
-  const home = route.name === 'journey' || route.name === 'players';
+  const home = parentRoute(route) === null;
 
   useEffect(() => {
     if (typeof window === 'undefined' || guarded.current || home) return;
@@ -48,22 +52,29 @@ function useDeviceBack(route: Route, signedIn: boolean, toJourney: () => void) {
     const onPop = () => {
       guarded.current = false;
       const r = routeRef.current;
-      if (r.name === 'journey' || r.name === 'players') return;
+      const parent = parentRoute(r);
+      if (!parent) return;
       try { window.history.pushState({ lqGuard: true }, ''); guarded.current = true; } catch { /* history blocked */ }
       if (playing(r)) window.dispatchEvent(new Event(BACK_EVENT));
-      else if (signedIn) toJourney();
+      else if (signedIn) go(parent);
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
-  }, [signedIn, toJourney]);
+  }, [signedIn, go]);
 }
 
 function Screen({ route }: { route: Route }) {
   switch (route.name) {
     case 'players': return <PlayersScreen route={route} />;
     case 'pattern': return <PatternBridgeScreen route={route} />;
-    case 'journey': return <JourneyScreen />;
-    case 'learn': return <LearnScreen />;
+    case 'home': return <HomeScreen />;
+    case 'journey': return <JourneyScreen route={route} />;
+    case 'stop': return <StopScreen route={route} />;
+    case 'library': return <LibraryScreen route={route} />;
+    case 'learn': return <LibraryScreen route={{ name: 'library', kind: 'ideas' }} />;
+    case 'me': return <MeScreen />;
+    case 'grownups': return <GrownUpsScreen />;
+    case 'search': return <SearchScreen route={route} />;
     case 'lesson': return <LessonScreen route={route} />;
     case 'check': return <CheckScreen route={route} />;
     case 'arcade': return <ArcadeScreen route={route} />;
@@ -86,20 +97,19 @@ function Shell() {
   const mainRef = useRef<HTMLElement>(null);
   useEffect(() => { mainRef.current?.scrollTo?.({ top: 0 }); }, [state.routeSeq]);
 
-  useDeviceBack(route, !!player, () => actions.navigate({ name: 'journey' }));
+  useDeviceBack(route, !!player, actions.navigate);
 
   const reduceMotion = !!save?.settings.reduceMotion;
   const showNav = !!player && !hidesNav(route);
   return (
     <div className={`app${showNav ? '' : ' immersive'}${reduceMotion ? ' reduce-motion' : ''}`}>
-      {!playing(route) && <Hud />}
+      {!player && <Hud />}
       {update.available && (
         <button type="button" className="update-banner" onClick={update.reload}>
           A new version of Logic Quest is ready. Tap to update.
         </button>
       )}
       <main className="app-main" ref={mainRef}>
-        {route.name === 'lesson' && ['s1','s2','s3','s6'].includes(route.stopId) && <div className="pl-lesson-banner"><DestinationArt stopId={route.stopId} /><RoutineChip /></div>}
         <Screen key={state.routeSeq} route={route} />
       </main>
       {showNav && <Nav />}

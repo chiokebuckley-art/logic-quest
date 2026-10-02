@@ -18,12 +18,23 @@ import type { AnswerRecord } from './components/contracts';
 // ---------- routes ----------
 
 /** Where a lesson was opened from, so finishing or leaving it goes back there. */
-export type LessonFrom = 'journey' | 'learn' | 'check';
+export type LessonFrom = 'journey' | 'learn' | 'check' | 'stop' | 'library' | 'home';
+
+/** The Library's kind filter. */
+export type LibraryKind = 'all' | 'ideas' | 'practice' | 'lab' | 'soon';
 
 export type Route =
   | { name: 'players'; mode?: 'list' | 'new' | 'import'; pinFor?: string }
   | { name: 'pattern'; workshop?: boolean; event?: string }
-  | { name: 'journey' }
+  | { name: 'home' }
+  | { name: 'journey'; track?: 'main' | 'side' }
+  /** One page per stop: lessons, checks, practice, Pattern Lab events and repair cards. */
+  | { name: 'stop'; stopId: string }
+  | { name: 'library'; kind?: LibraryKind }
+  | { name: 'me' }
+  | { name: 'grownups' }
+  | { name: 'search'; q?: string }
+  /** Old address: now the Library's Ideas view. */
   | { name: 'learn' }
   | { name: 'lesson'; stopId: string; lessonId: string; from: LessonFrom }
   | { name: 'check'; stopId: string; kind: CheckKind; result?: boolean }
@@ -33,7 +44,7 @@ export type Route =
   | { name: 'notebook'; fix?: boolean }
   | { name: 'settings' };
 
-export type Tab = 'journey' | 'learn' | 'arcade' | 'progress';
+export type Tab = 'home' | 'journey' | 'arcade' | 'library' | 'me';
 
 /** The last finished check, kept for this session so "Learn this again" can come back to the result. */
 export interface LastCheck {
@@ -118,7 +129,7 @@ function initState(kv: KV): State {
   const registry = saves.loadRegistry(kv);
   const last = registry.players.find((p) => p.id === registry.active);
   if (last && !last.pin) {
-    return { registry, playerId: last.id, save: settleOpenChecks(saves.loadSave(kv, last.id)), route: { name: 'journey' }, routeSeq: 0, lastCheck: null };
+    return { registry, playerId: last.id, save: settleOpenChecks(saves.loadSave(kv, last.id)), route: { name: 'home' }, routeSeq: 0, lastCheck: null };
   }
   return { registry, playerId: null, save: null, route: playersRoute(registry, last?.pin ? last.id : undefined), routeSeq: 0, lastCheck: null };
 }
@@ -278,7 +289,7 @@ export function StoreProvider({ children, kv: kvProp }: { children: ReactNode; k
       flush();
       const now = Date.now();
       const reg = { ...withPlayer(registry, id, (p) => ({ ...p, lastPlayed: now })), active: id };
-      dispatch({ type: 'login', registry: reg, playerId: id, save, route: { name: 'journey' } });
+      dispatch({ type: 'login', registry: reg, playerId: id, save, route: { name: 'home' } });
     };
 
     return {
@@ -298,7 +309,7 @@ export function StoreProvider({ children, kv: kvProp }: { children: ReactNode; k
 
       selectPlayer: (id) => {
         const s = stateRef.current;
-        if (id === s.playerId) { dispatch({ type: 'navigate', route: { name: 'journey' } }); return; }
+        if (id === s.playerId) { dispatch({ type: 'navigate', route: { name: 'home' } }); return; }
         if (!s.registry.players.some((p) => p.id === id)) return;
         login(s.registry, id, settleOpenChecks(saves.loadSave(kv, id)));
       },
@@ -449,10 +460,11 @@ export function useStore(): Store {
 /** The tab a route belongs to, for the bottom bar. */
 export function tabFor(route: Route): Tab | null {
   switch (route.name) {
-    case 'pattern': case 'journey': case 'lesson': case 'check': return 'journey';
-    case 'learn': return 'learn';
+    case 'home': case 'search': return 'home';
+    case 'journey': case 'stop': case 'lesson': case 'check': return 'journey';
     case 'arcade': return 'arcade';
-    case 'progress': case 'notebook': return 'progress';
+    case 'library': case 'learn': case 'pattern': return 'library';
+    case 'me': case 'progress': case 'notebook': case 'grownups': case 'settings': return 'me';
     default: return null;
   }
 }
@@ -468,4 +480,16 @@ export function downloadText(fileName: string, text: string, type: string): void
   a.click();
   a.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/** Where Back goes from a page (not from play screens, which have their own back). Null on Home: Back leaves the app. */
+export function parentRoute(route: Route): Route | null {
+  switch (route.name) {
+    case 'home': case 'players': return null;
+    case 'stop': return { name: 'journey' };
+    case 'learn': return { name: 'library', kind: 'ideas' };
+    case 'pattern': return { name: 'library', kind: 'lab' };
+    case 'progress': case 'notebook': case 'grownups': case 'settings': return { name: 'me' };
+    default: return { name: 'home' };
+  }
 }

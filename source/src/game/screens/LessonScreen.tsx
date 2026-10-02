@@ -22,7 +22,15 @@ export function LessonScreen({ route }: { route: LessonRoute }) {
   const resultRoute: Route | null = route.from === 'check' && last ? { name: 'check', stopId: last.stopId, kind: last.kind, result: true } : null;
 
   /** Leaving without finishing: back to where the lesson was opened. */
-  const back = (): Route => (route.from === 'learn' ? { name: 'learn' } : resultRoute ?? { name: 'journey' });
+  const back = (): Route => {
+    switch (route.from) {
+      case 'learn': case 'library': return { name: 'library', kind: 'ideas' };
+      case 'home': return { name: 'home' };
+      case 'journey': return { name: 'journey' };
+      case 'stop': return { name: 'stop', stopId: route.stopId };
+      case 'check': return resultRoute ?? { name: 'stop', stopId: route.stopId };
+    }
+  };
 
   /**
    * After finishing. From a check result ("Learn this again"): back to the result while other missed
@@ -32,7 +40,7 @@ export function LessonScreen({ route }: { route: LessonRoute }) {
     if (route.from !== 'check') return back();
     const redone = save?.stops[route.stopId]?.notYet?.redone ?? [];
     const left = last && !last.passed ? last.missed.filter((id) => id !== lessonId && !redone.includes(id)) : [];
-    return left.length && resultRoute ? resultRoute : { name: 'journey' };
+    return left.length && resultRoute ? resultRoute : { name: 'stop', stopId: route.stopId };
   };
 
   if (!stop || !lesson || !save) {
