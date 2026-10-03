@@ -4,7 +4,7 @@
  * puzzles where exactly one box fits the rule, and writes the explanation from that case check.
  */
 import { syncWhyWrong } from '../teach';
-import type { ChoiceFeedback, DrillMark, DrillRow, DrillStep, Rng, SignBox, Teach, TeachCase, Truth } from '../types';
+import type { CaseStep, CaseVerdict, ChoiceFeedback, DrillMark, DrillRow, DrillStep, IdeaCard, Rng, Scene, SignBox, Teach, TeachCase, Truth } from '../types';
 import type { ItemCore, Made } from './statements';
 
 export type SignRule = 'one' | 'two' | 'none' | 'owner';
@@ -334,14 +334,14 @@ export function signTeach(p: SignPuzzle, skin: SignSkin): Teach {
   };
 }
 
-// ---------- the Do step: mark a case ----------
+// ---------- the Do step: mark a case on the case board ----------
 //
-// A case is one place the treasure could be. Marking it means: each sign true or false, the count of true signs,
-// then keep or reject. Every right mark comes from signHolds() and fitsRule(), and every message for a wrong mark
-// says what the sign claims and where the treasure is in that case.
+// A case is one place the treasure could be. Marking it on the case board means: tap the box (pretend the treasure
+// is there), stamp each sign True or False, and Keep or Reject the box. The board counts the True stamps itself, so
+// the count is never typed. Every right mark comes from signHolds() and fitsRule(), and every message for a wrong
+// mark says what the sign claims and where the treasure is in that case.
 
 const TF = [{ id: 'true', label: 'True' }, { id: 'false', label: 'False' }];
-const COUNTS = [0, 1, 2, 3].map((n) => ({ id: String(n), label: String(n) }));
 const DECIDE = [{ id: 'keep', label: 'Keep' }, { id: 'reject', label: 'Reject' }];
 
 /** The box a sign talks about: its own box for "this box" signs, otherwise the box it names. */
@@ -361,10 +361,13 @@ export function signDecision(p: SignPuzzle, skin: SignSkin, b: number): string {
   return `${signCaseNote(p, skin, b)} ${fit ? 'Keep' : 'Reject'} ${w.the(b)}.`;
 }
 
-/** One case as a row of marks. given: shown already marked (the worked case); otherwise the learner marks it. */
+/**
+ * One case as a row of the case board: a True or False stamp on each sign (in box order), then Keep or Reject.
+ * given: shown already marked (the worked case); otherwise the learner marks it.
+ */
 export function signCaseRow(p: SignPuzzle, skin: SignSkin, b: number, given: boolean): DrillRow {
   const w = signWords(skin);
-  const ts = trueSigns(p.signs, b);
+  const n = trueSigns(p.signs, b).length;
   const fit = fitsRule(p.signs, p.rule, b);
   const id = `case${b}`;
   const marks: DrillMark[] = p.signs.map((s, i) => {
@@ -374,32 +377,23 @@ export function signCaseRow(p: SignPuzzle, skin: SignSkin, b: number, given: boo
       label: cap(w.signOf(i)),
       options: TF,
       answer: tv(value),
+      on: i,
       ...(given ? { given: true } : {}),
       why: { [tv(!value)]: signMarkWhy(p, skin, i, b) },
     };
   });
-  const n = ts.length;
-  const listed = n === 0 ? 'No sign is true' : `${cap(w.signList(ts))} ${n === 1 ? 'is' : 'are'} true`;
-  marks.push({
-    id: `${id}-count`,
-    label: 'True signs',
-    options: COUNTS,
-    answer: String(n),
-    ...(given ? { given: true } : {}),
-    why: Object.fromEntries(COUNTS.filter((c) => c.id !== String(n)).map((c) => [c.id, `Count the True marks in this row. ${listed} here. That makes ${n}, not ${c.id}.`])),
-  });
   const need = p.rule === 'owner' ? `${w.signOf(b)} to be the only true sign` : p.rule === 'none' ? 'every sign to be false' : `exactly ${needCount[p.rule]} true sign${needCount[p.rule] === 1 ? '' : 's'}`;
   marks.push({
     id: `${id}-decide`,
-    label: 'Keep or reject?',
+    label: `Keep or reject ${w.the(b)}?`,
     options: DECIDE,
     answer: fit ? 'keep' : 'reject',
     ...(given ? { given: true } : {}),
     why: fit
       ? { reject: `The rule needs ${need}. This case has that. So keep ${w.the(b)}.` }
-      : { keep: `The rule needs ${need}. This case has ${n} true sign${n === 1 ? '' : 's'}. So reject ${w.the(b)}.` },
+      : { keep: `The rule needs ${need}. This case has ${n} true sign${n === 1 ? '' : 's'}${p.rule === 'owner' && n === 1 ? `, but it is not ${w.signOf(b)}` : ''}. So reject ${w.the(b)}.` },
   });
-  return { id, label: `Pretend the ${w.item} is ${w.prep} ${w.the(b)}.`, marks, note: signDecision(p, skin, b) };
+  return { id, label: `Pretend the ${w.item} is ${w.prep} ${w.the(b)}.`, marks, note: signDecision(p, skin, b), case: { box: b, name: w.the(b) } };
 }
 
 export interface SignDrillOptions {
@@ -411,9 +405,11 @@ export interface SignDrillOptions {
   /** Cases the learner marks, in order. */
   mark: number[];
   done: string;
+  /** A twin board: what changed, in words, and the sign it changed. */
+  twin?: { note: string; sign: number };
 }
 
-/** A guided board on a sign puzzle: the same boxes and rule as the scene, some cases shown, some to mark. */
+/** A case board on a sign puzzle: the same boxes and rule as the scene, some cases shown, some to mark. */
 export function signDrill(p: SignPuzzle, skin: SignSkin, o: SignDrillOptions): DrillStep {
   const w = signWords(skin);
   return {
@@ -421,9 +417,104 @@ export function signDrill(p: SignPuzzle, skin: SignSkin, o: SignDrillOptions): D
     title: o.title,
     body: o.body,
     scene: { kind: 'boxes', boxes: signBoxes(p, skin), rule: w.ruleText(p.rule) },
+    ...(o.twin ? { twin: o.twin.note, changed: o.twin.sign } : {}),
+    layout: 'cases',
     rows: [...o.shown.map((b) => signCaseRow(p, skin, b, true)), ...o.mark.map((b) => signCaseRow(p, skin, b, false))],
     done: o.done,
   };
+}
+
+// ---------- See: a worked example on the case board, one case per screen ----------
+
+/** One stamp of a worked case, in one short line: "The Silver chest sign says, “…” The treasure is not in the Silver chest. So it is True." */
+export function stampWhy(p: SignPuzzle, skin: SignSkin, i: number, b: number): string {
+  const w = signWords(skin);
+  const target = signTarget(p.signs[i], i);
+  return `${cap(w.signOf(i))} says, “${w.signText(p.signs[i])}” The ${w.item} ${b === target ? 'is' : 'is not'} ${w.prep} ${w.the(target)}. So it is ${cap(tv(signHolds(p.signs[i], i, b)))}.`;
+}
+
+/** "Two signs are true", "No sign is true", "All three signs are true". */
+const countSays = (n: number) => (n === 0 ? 'No sign is true' : n === 3 ? 'All three signs are true' : `${cap(NUM[n])} sign${n === 1 ? ' is' : 's are'} true`);
+
+/** The last line of a worked case: the count, then Keep or Reject. "Two signs are true, so reject the Gold chest." */
+export function caseVerdictLine(p: SignPuzzle, skin: SignSkin, b: number): string {
+  const w = signWords(skin);
+  const ts = trueSigns(p.signs, b);
+  const fit = fitsRule(p.signs, p.rule, b);
+  if (p.rule === 'owner') {
+    if (fit) return `Only ${w.signOf(b)} is true, so keep ${w.the(b)}.`;
+    if (!ts.includes(b)) return `${cap(w.signOf(b))} is false, so reject ${w.the(b)}.`;
+    return `${cap(w.signOf(b))} is true, but so ${ts.length === 2 ? 'is another sign' : 'are the other two'}. So reject ${w.the(b)}.`;
+  }
+  const says = fit && p.rule !== 'none' ? `Exactly ${NUM[ts.length]} sign${ts.length === 1 ? ' is' : 's are'} true` : countSays(ts.length);
+  return `${says}, so ${fit ? 'keep' : 'reject'} ${w.the(b)}.`;
+}
+
+/** The verdict a rule gives each box. */
+export const caseVerdicts = (p: SignPuzzle): CaseVerdict[] => [0, 1, 2].map((b) => (fitsRule(p.signs, p.rule, b) ? 'keep' : 'reject'));
+
+/** The case board picture of a puzzle (no case picked): its boxes and rule. */
+export function caseScene(p: SignPuzzle, skin: SignSkin): Extract<Scene, { kind: 'cases' }> {
+  return { kind: 'cases', rule: signWords(skin).ruleText(p.rule), boxes: signBoxes(p, skin) };
+}
+
+/**
+ * The worked example as key-idea cards, one case per card on the same board: pretend the treasure is in each box in
+ * turn, stamp each sign (one step at a time, each with its reason), count, then keep or cross out the box. Earlier
+ * verdicts stay on the board. A last card shows every verdict: only one box is kept.
+ */
+export function signWalk(p: SignPuzzle, skin: SignSkin): IdeaCard[] {
+  const w = signWords(skin);
+  const counts = [0, 1, 2].map((b) => trueSigns(p.signs, b).length);
+  const verdicts = caseVerdicts(p);
+  const cases = [0, 1, 2].map((b): IdeaCard => {
+    const steps: CaseStep[] = [
+      ...p.signs.map((_, i) => ({ label: `Check ${w.signOf(i)}`, say: stampWhy(p, skin, i, b) })),
+      { label: 'Count and decide', say: caseVerdictLine(p, skin, b) },
+    ];
+    return {
+      title: `Example: ${w.the(b)}`,
+      body: [`Pretend the ${w.item} is ${w.prep} ${w.the(b)}. Check each sign.`],
+      scene: {
+        ...caseScene(p, skin),
+        pretend: b,
+        stamps: p.signs.map((s, i) => signHolds(s, i, b)),
+        counts: counts.map((n, k) => (k <= b ? n : null)),
+        verdicts: verdicts.map((v, k) => (k <= b ? v : null)),
+        steps,
+      },
+    };
+  });
+  return [
+    ...cases,
+    {
+      title: `Example: only one ${w.noun} fits`,
+      body: [signConclusion(p, skin)],
+      scene: { ...caseScene(p, skin), counts, verdicts },
+    },
+  ];
+}
+
+/** The sign a twin changed (by index), and the twin note: "One sign changed. The Bronze chest sign now says, “…”" */
+export function twinOf(p: SignPuzzle, twin: SignPuzzle, skin: SignSkin): { note: string; sign: number } {
+  const w = signWords(skin);
+  const changed = p.signs.flatMap((s, i) => (JSON.stringify(s) === JSON.stringify(twin.signs[i]) ? [] : [i]));
+  if (changed.length !== 1 || p.rule !== twin.rule) throw new Error('a twin changes exactly one sign');
+  const i = changed[0];
+  return { note: `One sign changed. ${cap(w.signOf(i))} now says, “${w.signText(twin.signs[i])}”`, sign: i };
+}
+
+/** A thinking board for a sign question: every case blank, to mark if it helps. It is never checked. */
+export function signScratch(p: SignPuzzle, skin: SignSkin): DrillStep {
+  const w = signWords(skin);
+  return signDrill(p, skin, {
+    id: 'scratch',
+    title: 'Your case board',
+    body: [`Mark it if it helps. Nothing on it is checked.`, `Tap a ${w.noun}. Tap each sign to stamp True or False. Then tap Keep, or Reject to cross it out.`],
+    shown: [],
+    mark: [0, 1, 2],
+    done: '',
+  });
 }
 
 /** A marked case for the Hint: the first place the treasure is not, with every sign's truth shown. */
@@ -472,6 +563,7 @@ export function signItem(rng: Rng, opts: SignItemOptions): SignMade {
     hint,
     hintCase: signHintCase(p, opts.skin),
     teach: signTeach(p, opts.skin),
+    scratch: signScratch(p, opts.skin),
   };
   syncWhyWrong(item);
   if (signDeniesAnswer(p)) item.conflict = true;

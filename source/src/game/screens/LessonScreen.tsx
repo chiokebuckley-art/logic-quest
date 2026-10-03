@@ -1,6 +1,6 @@
 /** Hosts one lesson: key-idea cards, then guided tries. */
 import { useState } from 'react';
-import { lessonWaitsFor } from '../../engine/drill';
+import { lessonWaitsFor, planKey } from '../../engine/drill';
 import { seedFor } from '../../engine/journey/mastery';
 import { MAX_RUN } from '../../engine/save/save';
 import { stopById } from '../../content/stops';
@@ -16,12 +16,14 @@ export function LessonScreen({ route }: { route: LessonRoute }) {
   // A lesson left partway (a refresh, a closed app) picks up at the same try with the same questions.
   // Otherwise a new seed on every visit, so a repeated lesson brings new tries.
   // Not resumed: "Learn this again" after a check (a fresh redo, with its key ideas and boards), a run saved before
-  // this version (no answers kept, and its items have changed), or a run that has used up its quiz items.
+  // the lesson's quiz last changed (its plan differs, or it has none: the try it was on now holds another question),
+  // or a run that has used up its quiz items.
   const [run, setRun] = useState(() => {
     const r = save?.lessonRun;
-    if (!r || r.lessonId !== route.lessonId || r.stopId !== route.stopId || route.from === 'check') return null;
+    if (!r || !lesson || r.lessonId !== route.lessonId || r.stopId !== route.stopId || route.from === 'check') return null;
     if (r.next > 0 && !r.results) return null;
     if (r.next >= MAX_RUN) return null;
+    if (r.plan !== planKey(lesson, r.seed)) return null;
     return r;
   });
   const newSeed = () => seedFor(player?.id ?? 'guest', route.lessonId, save?.stops[route.stopId]?.lessonsDone.length ?? 0, Date.now());
@@ -94,7 +96,7 @@ export function LessonScreen({ route }: { route: LessonRoute }) {
           setRun(null);
           setSeed(newSeed() + 1);
         }}
-        onProgress={(p) => actions.setLessonRun({ stopId: stop.id, lessonId: lesson.id, seed, ...p })}
+        onProgress={(p) => actions.setLessonRun({ stopId: stop.id, lessonId: lesson.id, seed, plan: planKey(lesson, seed), ...p })}
         onDrilled={() => actions.markDrilled(lesson.id)}
         onComplete={() => {
           actions.completeLesson(stop.id, lesson.id);

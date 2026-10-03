@@ -64,6 +64,8 @@ export interface LessonRun {
   results?: RunResult[];
   /** A try whose first answer was wrong before the run was left: it cannot count as a first try on resume. */
   missed?: number;
+  /** The planned quiz the run was made for (planKey). A run without it, or with another one, starts again. */
+  plan?: string;
 }
 
 /** The learner marked a lesson's guided boards right. */
@@ -201,6 +203,7 @@ export function parseSave(raw: unknown): SaveData | null {
       const run: LessonRun = { stopId: r.stopId, lessonId: r.lessonId, seed: Math.trunc(r.seed), next: num(r.next, 0, MAX_RUN), firstTry: num(r.firstTry, 0, MAX_RUN) };
       if (r.drilled === true) run.drilled = true;
       if (typeof r.missed === 'number' && Number.isInteger(r.missed) && r.missed >= 0 && r.missed < MAX_RUN) run.missed = r.missed;
+      if (typeof r.plan === 'string' && /^[0-9a-z]{1,16}$/.test(r.plan)) run.plan = r.plan;
       if (Array.isArray(r.results)) {
         run.results = r.results
           .filter((x): x is { clean: boolean; tags?: unknown } => isObj(x) && typeof x.clean === 'boolean')

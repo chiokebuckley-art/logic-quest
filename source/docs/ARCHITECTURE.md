@@ -55,9 +55,16 @@ Every lesson teaches each new method in three beats (see "Teach before the quiz"
 - **Do.** The guided boards (`LessonDef.drill`, drawn by `DrillBoard`). The same board stays up. A shown case is
   drawn marked, and the learner marks a new case by taps: true or false, fits or not, a check or a cross, a count,
   keep or reject. "Check my marks" names the first mismatch in plain words (`checkDrill` in `engine/drill.ts`). A
-  wrong mark stays until the learner changes it. A board with `columns` is drawn as a grid.
+  wrong mark stays until the learner changes it. A board with `columns` is drawn as a grid. A board with
+  `layout: 'cases'` is a **case board** (`CaseBoard`, sign puzzles): the boxes are cards; tap one to pick its case,
+  tap each sign to stamp True or False, the count is worked out from the stamps (`caseCount`), then Keep (a ring)
+  or Reject (a cross). The same picture, with `Scene` kind `cases`, draws the worked example (`CaseScene`), one
+  step at a time inside `IdeaCards`.
 - **Quiz.** The practice tries (`LearnItem`), only in the rule family the lesson taught. An item can carry its own
-  board (`workFirst`), marked before its answer buttons show. Its Hint shows one marked case (`hintCase`).
+  board (`workFirst`), marked before its answer buttons show. A case board stays up, marked, while the question is
+  answered, and a wrong mark on it makes that try not a first try (`DrillBoard.onWrong` → `onMiss`, saved at once).
+  A sign item also carries an optional thinking board (`scratch`), opened with “Use the case board” and never
+  checked. Its Hint shows one marked case (`hintCase`).
 
 `LessonRunner` runs ideas, then boards, then tries, then the recap. The lesson is passed only when the boards are
 marked right and the pass rule is met (`LessonDef.pass`; default 3 right on the first try with no hint, optionally

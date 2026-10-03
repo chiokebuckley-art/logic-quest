@@ -298,6 +298,8 @@ were mistakes and checked each point with evidence.
 
 ## Lesson 4, Treasure signs: the reference (built first, commit 0e1b9d0)
 
+> Superseded in part by “The case board (v0.5.0)” below: the example, the Do step and the quiz order changed.
+
 This is the screen the player hit in the handoff: Key idea 4 walked the chest example, then Try 1 jumped to a new
 skin and two new rule families. The chest card stays exactly as it was.
 
@@ -330,6 +332,8 @@ skin and two new rule families. The chest card stays exactly as it was.
 
 ## Lessons 5-7: the other sign rules, one lesson each
 
+> Superseded in part by “The case board (v0.5.0)” below: the example, the Do step and the twin changed.
+
 The handoff took “exactly two”, “every sign is false” and the owner’s sign out of Treasure signs: each needs its own
 later lesson with the same See → Do → Quiz shape. They are now Stop 1 lessons 5, 6 and 7 (the lesson cap went from 6
 to 7). Each is built by `signLesson` in `src/content/stop1.ts`, so every case, count and answer comes from the engine.
@@ -339,7 +343,7 @@ The marks below were printed from the built boards.
 |---|---|---|---|
 | s1.l5 Every sign is false | “The treasure is in this chest.” / “The treasure is in the Gold chest.” / “The treasure is not in this chest.” | Bronze: False, False, False, 0, Keep | Gold: True, True, True, 3, Reject |
 | s1.l6 Exactly two signs are true | “The treasure is not in the Silver chest.” / “The treasure is in this chest.” / “The treasure is in the Gold chest.” | Gold: True, False, True, 2, Keep | Silver: False, True, False, 1, Reject |
-| s1.l7 The owner’s sign | “The treasure is in the Bronze chest.” / “The treasure is in this chest.” / “The treasure is not in the Silver chest.” | Silver: False, True, False, 1, Keep | Gold: False, False, True, 1, Reject (its own sign is false) |
+| s1.l7 The owner’s sign | “The treasure is in the Bronze chest.” / “The treasure is in this chest.” / “The treasure is not in the Silver chest.” | Silver: False, True, False, 1, Keep | Gold: False, False, True, 1, Reject (the Gold chest sign is false) |
 
 - **See.** Two short cards (the new rule; how to check it), then “An example”: the three cases in words and the
   conclusion.
@@ -351,3 +355,84 @@ The marks below were printed from the built boards.
 - **Tests.** `signs.test.ts`, “the other sign rules: one lesson each”: each example re-solved from its words, each
   board’s marks re-read from the signs, each quiz pack’s rule and answers, the twin, and the check, Arcade and new
   examples keeping each lesson’s rule.
+
+## The case board (v0.5.0, the Claude Code Pack of 3 Oct 2026)
+
+The pack's complaint: the example was paragraphs under the chests, the Do step was a list of marks under the
+picture, and nothing was crossed out on the chests. Lessons 4-7 now teach on one picture board, the **case board**
+(`CaseBoard` and `CaseScene` in `src/game/components/CaseBoard.tsx`; rows built by `signCaseRow`).
+
+**See: one chest per card** (`signWalk`). Cards 3-6 of Lesson 4 (and 3-6 of Lessons 5-7) are “Example: the Gold
+chest”, “… Silver …”, “… Bronze …”, then “Example: only one chest fits”. The card's main button stamps one sign at a
+time, each with one line saying why, then counts and decides; it says Next only when the whole case shows. Earlier
+verdicts stay on the board.
+
+| case | stamps (Gold, Silver, Bronze signs) | count | verdict | last line |
+|---|---|---|---|---|
+| Gold | True, True, False | 2 | crossed out | “Two signs are true, so reject the Gold chest.” |
+| Silver | False, False, True | 1 | kept (ring) | “Exactly one sign is true, so keep the Silver chest.” |
+| Bronze | False, True, True | 2 | crossed out | “Two signs are true, so reject the Bronze chest.” |
+
+**Do: the same board** (`L4_DRILL`). Silver and Bronze are shown; the learner taps Gold, stamps True, True, False,
+sees “2 signs are True”, and taps Reject. The count is worked out from the stamps, never typed. Keep and Reject are
+never turned off: Keep with a count of 2 is checked and named (“The rule needs exactly 1 true sign. This case has 2
+true signs. So reject the Gold chest.”). Empty marks get a gentle line that names the chest (“Not yet: the Gold
+chest still needs 3 stamps. Tap the Gold chest, then tap each sign.”). After a check the board shows the case its
+message is about. “Clear this case” empties one case only.
+
+**Quiz, in this order.**
+
+1. **The twin** (`L4_TWIN`), the same every time. The pack's own fixture (Gold True, True, True with Silver and
+   Bronze unchanged) cannot come from one sign change: a sign's truth changes in every case at once. So Bronze's sign
+   loses its “not”: “The treasure is in the Gold chest.” Gold: True, True, True (3, crossed out). Silver: False,
+   False, False (0, crossed out). Bronze: False, True, False (1, kept). The answer moves from Silver to Bronze, so
+   remembering the example never passes it. The changed sign is tagged “Changed” on the board. The board is
+   checked before the answer buttons show (`L4_TWIN_WORK`), and stays up, marked, while the question is answered.
+2. **The frozen caves** (`L4_FIRST_QUIZ_WORK`), on the same board in the cave skin. Ice: True, False, False (kept).
+   Fire: True, False, True (crossed out). Moss: False, True, True (crossed out).
+3. **A door board and a box board**, in either order, with “Use the case board” as a thinking tool that is never
+   checked (`ItemBase.scratch`).
+
+A wrong mark on the twin or cave board means that try is not a first try for the pass rule. It is saved at once
+(`onWrong` → `onMiss` → `LessonRun.missed`), so leaving or reloading does not give a clean try. The right answer then
+says “Right.” with a note that it counts as practice, and the stats save it as right but not first try
+(`HelpUse.boardFixed`); no new examples follow, since the board already taught the fix. The pass rule is still 3
+right on the first try; extra items come from the door and box kinds. A run saved by v0.4.1 starts the lesson again
+(each run now keeps `plan`, a fingerprint of its planned quiz), so nobody resumes past the new twin.
+
+On the board, a box that is not picked shows its own case's count as “If here: 2 true”, so it is never read as the
+picked case's count. False stamps carry the word only: the cross means Reject and nothing else.
+
+**Lessons 5-7** use the same walk and board. The Do step shows the kept chest and one more; the learner checks the
+third. Each starts its quiz with a fixed twin on the case board (the first twin of the example whose answer moves):
+
+| lesson | Do: learner checks | twin (one sign changed) | twin answer |
+|---|---|---|---|
+| s1.l5 Every sign is false | Gold: True, True, True, Reject | Bronze: “The treasure is in this chest.” | Silver |
+| s1.l6 Exactly two signs are true | Silver: False, True, False, Reject | Gold: “The treasure is not in this chest.” | Silver |
+| s1.l7 The owner’s sign | Gold: False, False, True, Reject | Gold: “The treasure is in the Silver chest.” | Bronze |
+
+**Accessibility.** Every chest, stamp, Keep, Reject and Clear control is a real button (stamps at least 68 × 44 px).
+Names read like “Gold chest: picked, 2 true signs, crossed out” and “The Silver chest sign: True. Tap to change.”
+Keep and Reject are a radio group with arrow keys. A polite live region says each stamp, the new count and each
+verdict. True and False are words with a check or a cross; Keep is a ring and the word, Reject a cross and the word.
+
+**Art.** The pack's images are optional; this release uses CSS stamps, rings and crosses (the pack's allowed first
+implementation). No interaction state is drawn into a picture.
+
+**Tests.** `signs.test.ts` (the walk, the Do board, the twin, the caves, the thinking board, lessons 5-7),
+`stops.test.ts` (case-board shape rules in the board contract), `play.test.ts` (the board, the walk's step button,
+the twin item, the thinking board). In a browser at 320, 375 and 430 px: only the main button leads to the Do board
+and never to the caves; Keep with a count of 2 stays shut; keyboard picks, stamps and moves the verdict; a wrong
+twin board names the Bronze case and saves the miss; after a reload the twin is back; the fixed twin is not a first
+try; the caves come after; the thinking board keeps its marks when hidden; no sideways scroll.
+
+### Review (21 agents: four lenses, each finding checked by a skeptic)
+
+Confirmed and fixed: “Right, first try.” after a board fix (and in the stats); a v0.4.1 run resuming past the twin;
+counts on unpicked boxes read as the picked case's; copy saying “cross it out” beside a Reject button; focus lost
+after “Clear this case”; the worked example's live region hidden until its first line; skin-blind screen-reader
+names (“the treasure”, “The Box A sign”); read-aloud order on key-idea cards; the owner-rule lines bringing back
+“its own sign”. Also fixed from the browser pass: the saved miss now reaches the resumed question, so it says
+“Right.” after a reload too. Refuted: read-aloud punctuation, a verdict miss shown by colour alone (it is named in
+words), and gaps the fixes had already closed.

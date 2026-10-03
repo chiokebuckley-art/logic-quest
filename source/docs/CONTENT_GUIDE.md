@@ -36,12 +36,20 @@ performed the skill: a learner who only taps Next fails, and a learner who marks
 of the same rule. The reference is Stop 1, Lesson 4 (Treasure signs: `L4_DRILL` in `src/content/stop1.ts`, built by
 `signDrill` in `src/engine/puzzles/signs.ts`).
 
-- **See** (`ideas`): one card shows one case already marked on its board, with its truths. "An example" in the
-  Treasure signs lesson walks the three chests and concludes Silver.
+- **See** (`ideas`): one card shows one case already marked on its board, with its truths. In Treasure signs the
+  worked example is one chest per card on the case board (`signWalk`): Gold, then Silver, then Bronze, then a card
+  with every verdict. Each sign gets its stamp one step at a time with a one-line reason (`Scene` kind `cases` with
+  `steps`); the card's main button shows the next step and says Next only once the whole case is showing.
 - **Do** (`drill`, a list of `DrillStep`s): the same board as the See card (the same scene), or a twin that
   changes one piece (say what changed in `twin`).
-  - Show the worked case as a given row where it helps (Silver: False, False, True, 1, Keep).
-  - The learner marks a new case (Gold: True, True, False, 2, Reject). No final-answer buttons on the board.
+  - Show the worked case as a given row where it helps (Silver: False, False, True, Keep).
+  - The learner marks a new case (Gold: True, True, False, Reject). No final-answer buttons on the board.
+  - Sign puzzles use the **case board** (`layout: 'cases'`, built by `signDrill`): the boxes are drawn as cards.
+    Tap a box to pretend the treasure is there; tap each sign to stamp it (empty, then True, then False and back);
+    the board counts the True stamps (never typed); then Keep (a ring) or Reject (a cross). Keep and Reject are
+    never turned off by the count: the learner applies the rule. "Clear this case" empties one case only. Each row
+    has `case` (its box) and each stamp has `on` (the sign it sits on). Board copy uses the board's own words:
+    "stamp", "Keep", "cross it out".
   - Build boards with an engine helper, so every answer is computed. Never hand-assert one.
   - Every wrong option of every mark to tap has a `why` that names that exact mismatch in plain words: “If the
     treasure is in the Gold chest, the Silver chest sign is true. It says, “The treasure is not in this chest.”
@@ -53,7 +61,12 @@ of the same rule. The reference is Stop 1, Lesson 4 (Treasure signs: `L4_DRILL` 
   and out of the stop check, the Arcade and the new examples too. Treasure signs now uses only “Exactly one sign
   is true.”
   - A first quiz can carry its own board (`workFirst`), marked before its answer buttons show. Treasure signs
-    does this with the frozen Ice, Fire and Moss caves.
+    starts with the example's **twin** on the case board (one sign changed and a new answer: Bronze's sign loses
+    its “not,” so the answer moves from Silver to Bronze), then the frozen Ice, Fire and Moss caves on the same
+    board. A wrong mark on such a board means that try is not a first try (`onWrong`, saved at once); empty marks
+    only get a gentle instruction. Lessons 5–7 start with their own twin the same way.
+  - Later sign questions offer the same board as an optional thinking tool (`ItemBase.scratch`, “Use the case
+    board”). It is never checked and never shown in checks.
   - Every hinted item has `hintCase`: one marked case, not the answer case. A hint models the method; it never
     only restates it.
 - **Pass** (`pass`): the boards marked right, then 3 right on the first try with no hint (the default). A lesson

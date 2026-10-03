@@ -6,6 +6,10 @@
 import type { ReactNode } from 'react';
 import type { Scene } from '../../engine/types';
 import { PlayIcon, ThingCard } from './ThingCard';
+import { boxTint, RuleBanner } from './boxes';
+import { CaseScene } from './CaseBoard';
+
+export { RuleBanner };
 
 export type ClueState = 'ok' | 'broken' | null;
 
@@ -15,20 +19,12 @@ export interface SceneViewProps {
   clueState?: readonly ClueState[];
   /** Optional id for the scene's label, so a question can point at it. */
   labelId?: string;
+  /** A case board shown one step at a time (Scene 'cases' with steps): how many steps are showing. */
+  revealed?: number;
 }
 
 /** Avatar colors for speakers, by place in the list (dark text reads on all of them). */
 const AVATAR = ['#9d6bff', '#22e6ff', '#ffe08a', '#7dffbf', '#f9a8d4'];
-
-/** The rule over a scene ("Rule: Exactly one sign is true."). */
-export function RuleBanner({ rule }: { rule: string }) {
-  return (
-    <div className="play-rule">
-      <span className="play-rule-tag">Rule</span>
-      <strong>{rule}</strong>
-    </div>
-  );
-}
 
 export interface SpeakerCardProps {
   name: string;
@@ -76,21 +72,10 @@ export function SpeakerCard({ name, says, index, flagged = false, children }: Sp
   );
 }
 
-/** Tint the little box marker by metal or color words in the name; brass otherwise. */
-function boxTint(name: string): string {
-  const n = name.toLowerCase();
-  if (/gold/.test(n)) return '#ffc93c';
-  if (/silver/.test(n)) return '#c9cff0';
-  if (/lead|iron|stone|gray|grey/.test(n)) return '#6b74a8';
-  if (/copper|bronze|wood/.test(n)) return '#c2703d';
-  if (/red/.test(n)) return '#ff4d6d';
-  if (/blue/.test(n)) return '#3b82f6';
-  if (/green/.test(n)) return '#3cff9d';
-  return '#ffc93c';
-}
-
-export function SceneView({ scene, clueState, labelId }: SceneViewProps) {
+export function SceneView({ scene, clueState, labelId, revealed }: SceneViewProps) {
   switch (scene.kind) {
+    case 'cases':
+      return <CaseScene scene={scene} revealed={revealed} labelId={labelId} />;
     case 'things':
       return (
         <ul className="play-things play-scene" aria-label="Cards, from first to last" id={labelId}>

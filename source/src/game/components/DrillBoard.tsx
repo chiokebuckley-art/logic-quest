@@ -6,6 +6,7 @@
  */
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import { checkDrill, drillSpeech, rowDone, type DrillCheck } from '../../engine/drill';
+import { CaseBoard, firstPicked } from './CaseBoard';
 import type { DrillMark, DrillRow, DrillStep } from '../../engine/types';
 import { sceneSpeech, stopSpeaking } from '../speech';
 import { ReadAloudButton } from './ReadAloud';
@@ -25,6 +26,12 @@ export interface DrillBoardProps {
   autoFocus?: boolean;
   /** Every mark is right. firstTry: right at the first "Check my marks". */
   onDone(result: { firstTry: boolean; checks: number }): void;
+  /** A check found a wrong mark (not only empty ones). */
+  onWrong?(): void;
+  /** The board is done and its button was used: it stays up, marked and locked, with no button. */
+  settled?: boolean;
+  /** A thinking board: marks are free, nothing is checked, and there is no button. */
+  scratch?: boolean;
 }
 
 const isTruthy = (id: string) => id === 'true' || id === 'yes' || id === 'fit' || id === 'holds' || id === 'keep';
@@ -221,8 +228,11 @@ function DrillGrid({ step, picks, wrong, locked, onPick }: DrillGridProps) {
   );
 }
 
-export function DrillBoard({ step, readAloud, kicker = 'Do it', doneLabel = 'Next', embedded = false, autoFocus = true, onDone }: DrillBoardProps) {
+export function DrillBoard({ step, readAloud, kicker = 'Do it', doneLabel = 'Next', embedded = false, autoFocus = true, onDone, onWrong, settled = false, scratch = false }: DrillBoardProps) {
   const [picks, setPicks] = useState<Record<string, string>>({});
+  const cases = step.layout === 'cases';
+  /** A case board: the box whose case is shown. */
+  const [picked, setPicked] = useState<number | null>(() => (cases ? firstPicked(step) : null));
   /** The latest check, kept until a mark changes (then the message stays, but a changed mark is no longer flagged). */
   const [result, setResult] = useState<DrillCheck | null>(null);
   const [checks, setChecks] = useState(0);
@@ -252,10 +262,27 @@ export function DrillBoard({ step, readAloud, kicker = 'Do it', doneLabel = 'Nex
     });
   };
 
+  /** Clear the learner's marks in one row (a case board's "Clear this case"). */
+  const clearRow = (rowId: string) => {
+    const ids = step.rows.find((r) => r.id === rowId)?.marks.filter((m) => !m.given).map((m) => m.id) ?? [];
+    setPicks((p) => Object.fromEntries(Object.entries(p).filter(([k]) => !ids.includes(k))));
+    setResult((r) => {
+      if (!r || r.done) return r;
+      const stale = (r.wrong[0] && ids.includes(r.wrong[0])) || (!r.wrong[0] && r.missing.length > 0);
+      return { ...r, wrong: r.wrong.filter((w) => !ids.includes(w)), message: stale ? '' : r.message };
+    });
+  };
+
   const check = () => {
     const r = checkDrill(step, picks);
     setResult(r);
     setChecks((n) => n + 1);
+    if (r.wrong.length) onWrong?.();
+    // A case board shows the case the message is about.
+    if (cases && !r.done && r.row) {
+      const box = step.rows.find((x) => x.id === r.row)?.case?.box;
+      if (box !== undefined) setPicked(box);
+    }
     requestAnimationFrame(() => statusRef.current?.focus({ preventScroll: false }));
   };
 
@@ -269,7 +296,8 @@ export function DrillBoard({ step, readAloud, kicker = 'Do it', doneLabel = 'Nex
             label="Read the board aloud"
             text={() => {
               const lines = drillSpeech(step);
-              return [lines[0], ...(step.scene && !embedded ? sceneSpeech(step.scene) : []), ...lines.slice(1)];
+              // A case board draws its scene itself, so it reads it too.
+              return [lines[0], ...(step.scene && (!embedded || cases) ? sceneSpeech(step.scene) : []), ...lines.slice(1)];
             }}
           />
         )}
@@ -277,7 +305,7 @@ export function DrillBoard({ step, readAloud, kicker = 'Do it', doneLabel = 'Nex
       <Title className="play-idea-title" ref={titleRef} tabIndex={-1}>
         {step.title}
       </Title>
-      {!embedded && step.scene && <SceneView scene={step.scene} />}
+      {!embedded && !cases && step.scene && <SceneView scene={step.scene} />}
       {step.twin && <p className="play-drill-twin"><span className="play-drill-tag">What changed</span> {step.twin}</p>}
       <div className="play-idea-body">
         {step.body.map((p, k) => (
@@ -298,7 +326,19 @@ export function DrillBoard({ step, readAloud, kicker = 'Do it', doneLabel = 'Nex
           )}
         </>
       )}
-      {!step.columns && <div className="play-drill-rows">
+      {cases && (
+        <CaseBoard
+          step={step}
+          picks={picks}
+          wrong={result?.wrong ?? []}
+          locked={done || settled}
+          picked={picked}
+          onPickCase={setPicked}
+          onPick={pickOne}
+          onClear={clearRow}
+        />
+      )}
+      {!step.columns && !cases && <div className="play-drill-rows">
         {step.rows.map((row) => {
           const given = row.marks.every((m) => m.given);
           // A row turns teal only once the whole board is right: no checking a row by watching it.
@@ -339,10 +379,12 @@ export function DrillBoard({ step, readAloud, kicker = 'Do it', doneLabel = 'Nex
           );
         })}
       </div>}
-      <p ref={statusRef} tabIndex={-1} role="status" className={`play-drill-status${done ? ' is-done' : result?.message ? ' is-wrong' : ''}`}>
-        {done ? step.done : result ? result.message : ''}
-      </p>
-      <div className="play-actions">
+      {!scratch && (
+        <p ref={statusRef} tabIndex={-1} role="status" className={`play-drill-status${done ? ' is-done' : result?.message ? ' is-wrong' : ''}`}>
+          {done ? step.done : result ? result.message : ''}
+        </p>
+      )}
+      {!scratch && !settled && <div className="play-actions">
         {!done ? (
           <button type="button" className="play-btn play-btn--primary play-btn--grow" onClick={check}>
             Check my marks
@@ -359,7 +401,7 @@ export function DrillBoard({ step, readAloud, kicker = 'Do it', doneLabel = 'Nex
             {doneLabel}
           </button>
         )}
-      </div>
+      </div>}
     </section>
   );
 }

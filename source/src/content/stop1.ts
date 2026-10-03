@@ -36,14 +36,13 @@ import {
 import {
   SIGN_RULES,
   SIGN_SKINS,
-  signBoxes,
   signCaseNote,
-  signConclusion,
   signDrill,
   signItem,
   signTwins,
+  signWalk,
   signWords,
-  trueSigns,
+  twinOf,
   type Sign,
   type SignPuzzle,
   type SignRule,
@@ -688,64 +687,74 @@ function lesson3Practice(rng: Rng): Made[] {
 /** The worked example: Gold "It is here." Silver "It is not here." Bronze "It is not in Gold." Exactly one sign is true. */
 export const L4_EXAMPLE: SignPuzzle = { signs: [{ t: 'here' }, { t: 'notHere' }, { t: 'notIn', x: 0 }], rule: 'one', answer: 1 };
 
-function exampleCases(): string[] {
-  const w = signWords('chest');
-  return [0, 1, 2].map((b) => {
-    const ts = trueSigns(L4_EXAMPLE.signs, b);
-    const n = ts.length;
-    const which = n === 0 ? 'no sign is true' : `${n === 1 ? 'only ' : ''}${w.signList(ts)} ${n === 1 ? 'is' : 'are'} true`;
-    return `If the ${w.item} is ${w.prep} ${w.the(b)}, ${which}. That makes ${['zero', 'one', 'two', 'three'][n]} true sign${n === 1 ? '' : 's'}.`;
-  });
-}
-
 /**
- * Do: the same chest board as the worked example. The Silver case is shown marked (the example already finished
- * it); the learner marks the Gold case by taps: each sign True or False, the count, then Keep or Reject.
+ * Do: the same chest board as the worked example. Silver and Bronze are shown (the example checked them); the
+ * learner checks Gold on the board: pick it, stamp each sign True or False, then keep it or cross it out.
  */
 export const L4_DRILL = signDrill(L4_EXAMPLE, 'chest', {
   id: 's1.l4-do',
   title: 'Mark a case',
   body: [
-    'This is the board from the example. The Silver row is already marked.',
-    'Now pretend the treasure is in the Gold chest. Mark each sign True or False. Count the true signs. Then keep or reject Gold.',
+    'This is the board from the example. Silver and Bronze are already checked.',
+    'Tap the Gold chest. Tap each sign to stamp True or False. The board counts the True stamps. Then tap Keep, or Reject to cross it out.',
   ],
-  shown: [1],
+  shown: [1, 2],
   mark: [0],
-  done: 'Right. With the treasure in the Gold chest, two signs are true. The rule needs exactly one, so Gold is rejected. You just did a case check.',
+  done: 'Right. With the treasure in the Gold chest, two signs are true. The rule needs exactly one, so Gold is crossed out. You just did a case check.',
 });
 
 /**
- * The first quiz, the same every time: a cave board with the rule the lesson taught. Ice: "not in the Moss cave".
+ * The first quiz: the example's chests with one sign changed. Bronze's sign loses its “not”: “The treasure is in the
+ * Gold chest.” Then Gold makes all three signs true, Silver none, and only Bronze makes exactly one. The answer moves
+ * from Silver to Bronze, so remembering the example's answer never passes it.
+ */
+export const L4_TWIN: SignPuzzle = { signs: [{ t: 'here' }, { t: 'notHere' }, { t: 'in', x: 0 }], rule: 'one', answer: 2 };
+
+/** Its board, marked before the answer buttons show: every chest, by the learner. */
+export const L4_TWIN_WORK = signDrill(L4_TWIN, 'chest', {
+  id: 's1.l4-p1-work',
+  title: 'Check each chest',
+  body: ['The same three chests, with one sign changed. Check every chest on the board. Keep exactly one. Tap Reject to cross out the rest.'],
+  shown: [],
+  mark: [0, 1, 2],
+  done: 'Every chest is checked. Now answer the question.',
+  twin: twinOf(L4_EXAMPLE, L4_TWIN, 'chest'),
+});
+
+/**
+ * The second quiz, the same every time: a cave board with the rule the lesson taught. Ice: "not in the Moss cave".
  * Fire: "in the Moss cave". Moss: "not in the Ice cave". Only Ice makes exactly one sign true.
  */
 export const L4_FIRST_QUIZ: SignPuzzle = { signs: [{ t: 'notIn', x: 2 }, { t: 'in', x: 2 }, { t: 'notIn', x: 0 }], rule: 'one', answer: 0 };
 
-/** Its board, marked before the answer buttons show: every case, by the learner. */
+/** Its board, marked before the answer buttons show: every cave, by the learner, on the same kind of board. */
 export const L4_FIRST_QUIZ_WORK = signDrill(L4_FIRST_QUIZ, 'cave', {
-  id: 's1.l4-p1-work',
+  id: 's1.l4-p2-work',
   title: 'Check each cave',
-  body: ['Before you answer, mark each case. Pretend the egg is in each cave, one at a time.'],
+  body: ['Now three caves. Pretend the egg is in each cave, one at a time. Keep exactly one. Tap Reject to cross out the rest.'],
   shown: [],
   mark: [0, 1, 2],
-  done: 'Every case is marked. Now answer the question.',
+  done: 'Every cave is checked. Now answer the question.',
 });
 
 /**
- * Quiz: four puzzles, every one with the rule the lesson taught ("Exactly one sign is true"). Try 1 is the frozen
- * cave board, marked case by case before its answer buttons show. Then a door board, a box board and a chest twin
- * (the example's chests with one sign changed), in any order. The other rules (exactly two, every sign false, the
- * owner's sign) are not in this lesson: a new rule is never introduced inside a quiz.
+ * Quiz: four puzzles, every one with the rule the lesson taught ("Exactly one sign is true"). Try 1 is the chest
+ * twin, checked on the case board before its answer buttons show. Try 2 is the frozen cave board, checked the same
+ * way. Then a door board and a box board in any order, each with the case board there if it helps. The other rules
+ * (exactly two, every sign false, the owner's sign) are not in this lesson: a new rule is never introduced inside a quiz.
  */
 function lesson4Practice(rng: Rng): Made[] {
-  const first = signItem(rng, { skin: 'cave', puzzle: L4_FIRST_QUIZ });
-  first.item.workFirst = L4_FIRST_QUIZ_WORK;
-  // A twin whose answer is not Silver, so remembering the example's answer never passes it.
-  const twin = signItem(rng, { skin: 'chest', puzzle: rng.pick(signTwins(L4_EXAMPLE).filter((t) => t.answer !== L4_EXAMPLE.answer)) });
+  const twin = signItem(rng, { skin: 'chest', puzzle: L4_TWIN });
+  twin.item.workFirst = L4_TWIN_WORK;
   twin.item.fixed = true;
+  const cave = signItem(rng, { skin: 'cave', puzzle: L4_FIRST_QUIZ });
+  cave.item.workFirst = L4_FIRST_QUIZ_WORK;
+  cave.item.fixed = true;
   const one = distinctItems();
-  one(() => first);
-  const rest = rng.shuffle<SignSkin | 'twin'>(['door', 'box', 'twin']).map((k) => (k === 'twin' ? one(() => twin) : one(() => newSign(rng, { skin: k, rule: 'one' }))));
-  return [first, ...rest];
+  one(() => twin);
+  one(() => cave);
+  const rest = rng.shuffle<SignSkin>(['door', 'box']).map((k) => one(() => newSign(rng, { skin: k, rule: 'one' })));
+  return [twin, cave, ...rest];
 }
 
 // ---------- lessons ----------
@@ -766,66 +775,70 @@ export const L6_EXAMPLE: SignPuzzle = { signs: [{ t: 'notIn', x: 1 }, { t: 'here
 /** The owner's sign: only the Silver chest has its own sign true and the other two false. */
 export const L7_EXAMPLE: SignPuzzle = { signs: [{ t: 'in', x: 2 }, { t: 'here' }, { t: 'notIn', x: 1 }], rule: 'owner', answer: 1 };
 
-/** Sign sets the quizzes, the check, the Arcade and new examples never repeat: the worked examples and the frozen cave. */
-const SHOWN_SIGNS = new Set([L4_EXAMPLE, L4_FIRST_QUIZ, L5_EXAMPLE, L6_EXAMPLE, L7_EXAMPLE].map((p) => JSON.stringify(p.signs)));
+/** The other rules' twins: the first twin of each example whose answer moves (one sign changed). */
+const twinFor = (p: SignPuzzle) => signTwins(p).find((t) => t.answer !== p.answer)!;
+export const L5_TWIN = twinFor(L5_EXAMPLE);
+export const L6_TWIN = twinFor(L6_EXAMPLE);
+export const L7_TWIN = twinFor(L7_EXAMPLE);
 
-/** A random sign puzzle that is never a worked example or the frozen cave (in any skin). */
+/** Sign sets the quizzes, the check, the Arcade and new examples never repeat: the worked examples, the twins and the frozen cave. */
+const SHOWN_SIGNS = new Set([L4_EXAMPLE, L4_TWIN, L4_FIRST_QUIZ, L5_EXAMPLE, L6_EXAMPLE, L7_EXAMPLE, L5_TWIN, L6_TWIN, L7_TWIN].map((p) => JSON.stringify(p.signs)));
+
+/** A random sign puzzle that is never a worked example, a twin or the frozen cave (in any skin). */
 function newSign(rng: Rng, opts: { skin: SignSkin; rule: SignRule }) {
   let m = signItem(rng, opts);
   for (let i = 0; i < 60 && SHOWN_SIGNS.has(JSON.stringify(m.puzzle.signs)); i++) m = signItem(rng, opts);
   return m;
 }
 
-/** A worked example's three cases as sentences: which signs are true, then what the rule says about that. */
-function caseLines(p: SignPuzzle, skin: SignSkin): string[] {
-  const w = signWords(skin);
-  return [0, 1, 2].map((b) => {
-    const ts = trueSigns(p.signs, b);
-    const which = ts.length === 0 ? 'no sign is true' : `${ts.length === 1 ? 'only ' : ''}${w.signList(ts)} ${ts.length === 1 ? 'is' : 'are'} true`;
-    return `If the ${w.item} is ${w.prep} ${w.the(b)}, ${which}. ${signCaseNote(p, skin, b)}`;
-  });
-}
-
 interface SignLessonSpec {
   id: string;
   title: string;
   example: SignPuzzle;
+  twin: SignPuzzle;
   /** The cards before the worked example: the new rule, and how to check it. */
   intro: { title: string; body: string[] }[];
 }
 
-/** One sign-rule lesson: the intro cards, the worked example (See), Mark a case (Do), and a quiz of only its rule. */
+/**
+ * One sign-rule lesson: the intro cards, the worked example on the case board one chest at a time (See), one chest
+ * to check on that board (Do), and a quiz of only its rule: the twin first, checked on the board, then the rest.
+ */
 function signLesson(o: SignLessonSpec): LessonDef {
   const w = signWords('chest');
   const p = o.example;
   const reject = [0, 1, 2].find((b) => b !== p.answer)!;
+  const others = [0, 1, 2].filter((b) => b !== reject);
   const drill = signDrill(p, 'chest', {
     id: `${o.id}-do`,
     title: 'Mark a case',
     body: [
-      `This is the board from the example. The ${w.short[p.answer]} row is already marked.`,
-      `Now pretend the treasure is in the ${w.name(reject)}. Mark each sign True or False. Count the true signs. Then keep or reject ${w.short[reject]}.`,
+      `This is the board from the example. ${others.map((b) => w.short[b]).join(' and ')} are already checked.`,
+      `Tap the ${w.name(reject)}. Tap each sign to stamp True or False. Then tap Keep, or Reject to cross it out.`,
     ],
-    shown: [p.answer],
+    shown: others,
     mark: [reject],
-    done: `Right. ${signCaseNote(p, 'chest', reject)} So ${w.the(reject)} is rejected. You just did a case check.`,
+    done: `Right. ${signCaseNote(p, 'chest', reject)} So ${w.the(reject)} is crossed out. You just did a case check.`,
+  });
+  const twinWork = signDrill(o.twin, 'chest', {
+    id: `${o.id}-p1-work`,
+    title: 'Check each chest',
+    body: ['The same three chests, with one sign changed. Check every chest on the board. Keep the one that fits. Tap Reject to cross out the rest.'],
+    shown: [],
+    mark: [0, 1, 2],
+    done: 'Every chest is checked. Now answer the question.',
+    twin: twinOf(p, o.twin, 'chest'),
   });
   return {
     id: o.id,
     title: o.title,
-    ideas: [
-      ...o.intro,
-      {
-        title: 'An example',
-        body: [...caseLines(p, 'chest'), signConclusion(p, 'chest')],
-        scene: { kind: 'boxes', boxes: signBoxes(p, 'chest'), rule: w.ruleText(p.rule) },
-      },
-    ],
+    ideas: [...o.intro, ...signWalk(p, 'chest')],
     drill: [drill],
-    // Quiz: try 1 is a twin of the example (one sign changed, a different answer), then a door, a cave and a box
-    // board in any order. Every one uses this lesson's rule and nothing else.
+    // Quiz: try 1 is the twin (one sign changed, a different answer), checked on the case board; then a door, a cave
+    // and a box board in any order. Every one uses this lesson's rule and nothing else.
     practice: practiceOf(o.id, (rng) => {
-      const twin = signItem(rng, { skin: 'chest', puzzle: rng.pick(signTwins(p).filter((t) => t.answer !== p.answer)) });
+      const twin = signItem(rng, { skin: 'chest', puzzle: o.twin });
+      twin.item.workFirst = twinWork;
       twin.item.fixed = true;
       const one = distinctItems();
       one(() => twin);
@@ -838,6 +851,7 @@ const L5 = signLesson({
   id: 's1.l5',
   title: 'Every sign is false',
   example: L5_EXAMPLE,
+  twin: L5_TWIN,
   intro: [
     {
       title: 'A new rule',
@@ -861,6 +875,7 @@ const L6 = signLesson({
   id: 's1.l6',
   title: 'Exactly two signs are true',
   example: L6_EXAMPLE,
+  twin: L6_TWIN,
   intro: [
     {
       title: 'A new rule',
@@ -884,6 +899,7 @@ const L7 = signLesson({
   id: 's1.l7',
   title: 'The owner’s sign',
   example: L7_EXAMPLE,
+  twin: L7_TWIN,
   intro: [
     {
       title: 'A new rule',
@@ -1077,32 +1093,21 @@ const lessons: LessonDef[] = [
     title: 'Treasure signs',
     ideas: [
       {
-        title: 'Three chests',
+        title: 'Three chests and a rule',
         body: [
-          'There are three chests. The treasure is in just one of them.',
-          'Each chest has a sign. A sign might tell the truth, or it might not.',
-          'A sign that says “this chest” means the chest it is on.',
-        ],
-      },
-      {
-        title: 'The rule',
-        body: [
-          'A rule tells you about the signs. For example: “Exactly one sign is true.”',
+          'There are three chests. The treasure is in just one of them. Each chest has a sign.',
+          'A sign might tell the truth, or it might not. A rule tells you about the signs: “Exactly one sign is true.”',
           'The rule is always right. Use it to find the treasure.',
         ],
       },
       {
         title: 'Try each chest',
         body: [
-          'Pretend the treasure is in the first chest. Check each sign. Is it true or false?',
-          'Count the true signs. Does that fit the rule? If not, try the next chest.',
+          'Pretend the treasure is in one chest. Check each sign: is it true or false? A sign that says “this chest” means the chest it is on.',
+          'Count the true signs. Keep the chest if the count fits the rule. If not, reject it: cross it out. Then try the next chest.',
         ],
       },
-      {
-        title: 'An example',
-        body: [...exampleCases(), signConclusion(L4_EXAMPLE, 'chest')],
-        scene: { kind: 'boxes', boxes: signBoxes(L4_EXAMPLE, 'chest'), rule: signWords('chest').ruleText('one') },
-      },
+      ...signWalk(L4_EXAMPLE, 'chest'),
     ],
     drill: [L4_DRILL],
     practice: practiceOf('s1.l4', lesson4Practice),

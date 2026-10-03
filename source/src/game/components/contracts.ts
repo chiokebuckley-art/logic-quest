@@ -25,6 +25,11 @@ export interface HelpUse {
   freshPassed: boolean;
   /** The player chose "Move on for now". */
   moveOn?: boolean;
+  /**
+   * Not a first try, though no answer was wrong here: the question's own board (workFirst) had a wrong mark at a
+   * check, or the try had a miss before it was left. No new examples follow a right answer.
+   */
+  boardFixed?: boolean;
   /** A choice that had no explanation of its own ("skill:choiceId"), for repair. */
   gap?: string;
 }

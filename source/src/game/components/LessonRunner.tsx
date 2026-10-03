@@ -312,6 +312,7 @@ export function LessonRunner({ stop, lesson, seed, readAloud, onAnswer, onComple
           readAloud={readAloud}
           kicker={tryLabel(step.i)}
           nextLabel={step.i + 1 < items.length ? 'Next' : 'Finish'}
+          priorMiss={lost.current.has(step.i)}
           onMiss={() => {
             lost.current.add(step.i);
             onProgress?.({ next: step.i, firstTry, drilled: true, results, missed: step.i });

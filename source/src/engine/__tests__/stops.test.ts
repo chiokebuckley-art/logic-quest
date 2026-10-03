@@ -46,6 +46,22 @@ function drillProblems(step: DrillStep, boards: readonly string[], where: string
       if (!m.given) for (const o of m.options) if (o.id !== m.answer && !m.why[o.id]?.trim()) out.push(`${where} ${m.id}: no words for a wrong “${o.label}”`);
     }
   }
+  // A case board: one row per case (a box), a stamp on every sign of the board, then one Keep or Reject mark.
+  if (step.layout === 'cases') {
+    const boxes = step.scene?.kind === 'boxes' ? step.scene.boxes : [];
+    if (!boxes.length) out.push(`${where}: a case board needs a boxes scene`);
+    const cases = step.rows.map((r) => r.case?.box);
+    if (cases.some((b) => b === undefined || !boxes[b])) out.push(`${where}: a case board row without its box`);
+    if (new Set(cases).size !== cases.length) out.push(`${where}: a box with two cases`);
+    for (const r of step.rows) {
+      const on = r.marks.filter((m) => m.on !== undefined).map((m) => m.on);
+      if (JSON.stringify(on) !== JSON.stringify(boxes.map((_, i) => i))) out.push(`${where} ${r.id}: one stamp per sign, in box order`);
+      for (const m of r.marks.filter((x) => x.on !== undefined)) if (JSON.stringify(m.options.map((o) => o.id)) !== '["true","false"]') out.push(`${where} ${m.id}: a stamp is True or False`);
+      const verdicts = r.marks.filter((m) => m.on === undefined);
+      if (verdicts.length !== 1 || JSON.stringify(verdicts[0].options.map((o) => o.id)) !== '["keep","reject"]') out.push(`${where} ${r.id}: one Keep or Reject mark`);
+      if (r.marks.some((m) => m.given) && !r.marks.every((m) => m.given)) out.push(`${where} ${r.id}: a case is shown whole or marked whole`);
+    }
+  }
   if (step.columns) {
     for (const r of step.rows) if (r.marks.length !== step.columns.length) out.push(`${where} ${r.id}: ${r.marks.length} boxes for ${step.columns.length} columns`);
     for (const m of step.rows.flatMap((r) => r.marks)) if (!m.options.every((o) => o.id === 'yes' || o.id === 'no')) out.push(`${where} ${m.id}: a grid box takes only yes and no`);
@@ -76,8 +92,15 @@ const drillText = (step: DrillStep): string[] => [
   ...step.rows.flatMap((r) => [r.label, r.note ?? '', ...r.marks.flatMap((m) => [m.label, ...Object.values(m.why)])]),
 ];
 
-/** The See boards of a lesson: every key-idea card's scene. */
-const seeBoards = (l: LessonDef) => l.ideas.filter((c) => c.scene).map((c) => JSON.stringify(c.scene));
+/**
+ * The See boards of a lesson: every key-idea card's scene. A worked case on the case board counts as the boxes and
+ * rule it is drawn on, so a case board on the same boxes is the same board.
+ */
+const seeBoards = (l: LessonDef) =>
+  l.ideas.flatMap((c) => (c.scene ? [JSON.stringify(c.scene), ...(c.scene.kind === 'cases' ? [JSON.stringify({ kind: 'boxes', boxes: c.scene.boxes, rule: c.scene.rule })] : [])] : []));
+
+/** Every player-facing string of a key-idea card: its body, and a worked case's lines and buttons. */
+const cardText = (c: LessonDef['ideas'][number]): string[] => [...c.body, ...(c.scene?.kind === 'cases' ? (c.scene.steps ?? []).flatMap((st) => [st.say, st.label]) : [])];
 
 /** Shape rules for a worked case card. */
 function caseProblems(c: TeachCase, where: string): string[] {
@@ -301,7 +324,7 @@ describe.each(built.map((s) => [s.n, s] as const))('stop %i', (_n, stop) => {
 
   it(`reads at a 6th-grade level (Flesch-Kincaid <= ${READING.maxGrade}, sentences <= ${READING.maxSentenceWords} words)`, () => {
     for (const l of stop.lessons) {
-      const ideas = l.ideas.flatMap((c) => c.body).join('\n');
+      const ideas = l.ideas.flatMap(cardText).join('\n');
       const practice = prose([1, 2, 3, 4, 5].flatMap((s) => l.practice(createRng(s))));
       for (const [what, text] of [['ideas', ideas], ['practice', practice]] as const) {
         expect(fkGrade(text), `${l.id} ${what} grade`).toBeLessThanOrEqual(READING.maxGrade);

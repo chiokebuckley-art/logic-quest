@@ -10,7 +10,7 @@
  */
 import { looks } from './fresh';
 import { createRng } from './rng';
-import type { DrillMark, DrillStep, Item, LessonDef, LessonPass, StopDef } from './types';
+import type { DrillMark, DrillRow, DrillStep, Item, LessonDef, LessonPass, StopDef } from './types';
 
 /** The options of a grid box (DrillStep.columns): drawn as ✓ and ✗, read aloud as yes and no. */
 export const YES_NO = [{ id: 'yes', label: 'Yes' }, { id: 'no', label: 'No' }] as const;
@@ -32,6 +32,8 @@ export interface DrillCheck {
   wrong: string[];
   /** '' when done. Otherwise the first mismatch in plain words, or how many marks are still empty. */
   message: string;
+  /** The row of the first wrong mark, or else of the first empty one (a case board shows that case). */
+  row?: string;
 }
 
 const optionLabel = (m: DrillMark, id: string) => m.options.find((o) => o.id === id)?.label ?? id;
@@ -41,17 +43,53 @@ export function checkDrill(step: DrillStep, picks: DrillPicks): DrillCheck {
   const marks = marksToTap(step);
   const missing = marks.filter((m) => !picks[m.id]).map((m) => m.id);
   const wrong = marks.filter((m) => picks[m.id] && picks[m.id] !== m.answer).map((m) => m.id);
+  const rowOf = (markId: string) => step.rows.find((r) => r.marks.some((m) => m.id === markId));
   if (wrong.length) {
     const m = marks.find((x) => x.id === wrong[0])!;
     const pick = picks[m.id];
     const message = m.why[pick] ?? `${m.label}: not “${optionLabel(m, pick)}.” Look at the board again.`;
-    return { done: false, missing, wrong, message };
+    return { done: false, missing, wrong, message, row: rowOf(m.id)?.id };
   }
   if (missing.length) {
+    const row = rowOf(missing[0]);
+    if (step.layout === 'cases' && row?.case) return { done: false, missing, wrong, message: caseMissing(row, picks), row: row.id };
     const n = missing.length;
-    return { done: false, missing, wrong, message: `Not yet: ${n === 1 ? 'one mark is' : `${n} marks are`} still empty. Mark ${n === 1 ? 'it' : 'each one'}, then check.` };
+    return { done: false, missing, wrong, message: `Not yet: ${n === 1 ? 'one mark is' : `${n} marks are`} still empty. Mark ${n === 1 ? 'it' : 'each one'}, then check.`, row: row?.id };
   }
   return { done: true, missing, wrong, message: '' };
+}
+
+// ---------- case boards (DrillStep.layout 'cases') ----------
+
+/** A mark's value on the board: shown, or what the learner picked. */
+const valueOf = (m: DrillMark, picks: DrillPicks): string | undefined => (m.given ? m.answer : picks[m.id]);
+
+/** The stamps of a case (one per sign, in box order) and its verdict mark. */
+export function caseMarks(row: DrillRow): { stamps: DrillMark[]; verdict: DrillMark | undefined } {
+  return { stamps: row.marks.filter((m) => m.on !== undefined), verdict: row.marks.find((m) => m.on === undefined) };
+}
+
+/** How many signs are stamped True in a case, counted from the stamps; null until every sign is stamped. */
+export function caseCount(row: DrillRow, picks: DrillPicks): number | null {
+  const values = caseMarks(row).stamps.map((m) => valueOf(m, picks));
+  return values.some((v) => v === undefined) ? null : values.filter((v) => v === 'true').length;
+}
+
+/** A case's verdict as marked: 'keep', 'reject', or undefined. */
+export function caseVerdict(row: DrillRow, picks: DrillPicks): string | undefined {
+  const v = caseMarks(row).verdict;
+  return v ? valueOf(v, picks) : undefined;
+}
+
+/** The next stamp after a tap: an empty sign becomes True, then each tap flips True and False. */
+export const nextStamp = (v: string | undefined): string => (v === 'true' ? 'false' : 'true');
+
+/** What a case still needs, in a gentle sentence: its stamps, or its verdict. */
+function caseMissing(row: DrillRow, picks: DrillPicks): string {
+  const name = row.case!.name;
+  const left = caseMarks(row).stamps.filter((m) => !m.given && !picks[m.id]).length;
+  if (left) return `Not yet: ${name} still needs ${left === 1 ? 'a stamp' : `${left} stamps`}. Tap ${name}, then tap each sign.`;
+  return `Almost: now tap Keep or Reject for ${name}.`;
 }
 
 /** A row is finished when it is given or every mark the learner sets in it is right. */
@@ -69,7 +107,7 @@ export function drillSpeech(step: DrillStep): string[] {
   const lines = [step.title, ...(step.twin ? [step.twin] : []), ...step.body];
   for (const r of step.rows) {
     lines.push(r.label);
-    for (const m of r.marks) lines.push(m.given ? `${m.label}: ${bare(optionLabel(m, m.answer))}.` : `${m.label}: ${orList(m.options.map((o) => bare(o.label)))}?`);
+    for (const m of r.marks) lines.push(m.given ? `${bare(m.label)}: ${bare(optionLabel(m, m.answer))}.` : `${bare(m.label)}: ${orList(m.options.map((o) => bare(o.label)))}?`);
     if (r.marks.every((m) => m.given) && r.note) lines.push(r.note);
   }
   return lines;
@@ -144,6 +182,18 @@ export function extraQuizItem(lesson: LessonDef, seed: number, shown: readonly I
     }
   }
   return fallback ? { ...fallback, id: `${lesson.id}-x${k}` } : null;
+}
+
+/**
+ * A short fingerprint of a lesson's planned quiz for a seed. A saved run keeps it, so a run saved before the lesson
+ * changed (a new first quiz, new items) starts the lesson again instead of picking up at a try that now holds a
+ * different question.
+ */
+export function planKey(lesson: LessonDef, seed: number): string {
+  const text = lesson.practice(createRng(seed)).map((it) => JSON.stringify([it.id, it.prompt, it.scene ?? null, it.workFirst?.id ?? null])).join('|');
+  let h = 5381;
+  for (let i = 0; i < text.length; i++) h = (Math.imul(h, 33) ^ text.charCodeAt(i)) >>> 0;
+  return h.toString(36);
 }
 
 // ---------- lesson order ----------

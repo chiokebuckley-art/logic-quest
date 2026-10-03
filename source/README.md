@@ -1,5 +1,19 @@
 # LOGIC QUEST
 
+**v0.5.0 — The case board:** the treasure sign lessons (Stop 1, Lessons 4–7) now teach on one picture board.
+
+- **See it one chest at a time.** The example shows the Gold chest, then Silver, then Bronze. One tap stamps one sign
+  True or False, right on the sign, with one line that says why. Then the count shows, and the chest is crossed out
+  or kept with a ring. A last card shows all three: only Silver is kept.
+- **Do it on the same board.** Tap the Gold chest to pretend the treasure is there. Tap each sign to stamp it. The
+  board counts the True stamps for you. Then tap Keep or Reject. A wrong stamp or a wrong Keep stays until you fix
+  it, and the board says which chest and sign to look at. “Clear this case” starts one chest again.
+- **Then a twin, on the board.** The first puzzle is the same three chests with one sign changed, so the answer
+  moves from Silver to Bronze. You check every chest on the board before you answer. A mistake on that board means
+  it does not count as a first try. The caves come next, on the same board. Later puzzles have “Use the case board”
+  if it helps.
+- Lessons 5–7 (“Every sign is false”, “Exactly two signs are true”, “The owner’s sign”) use the same board.
+
 **v0.4.1 — Teach before the quiz:** every lesson in Stops 1–6 is now See, Do, Quiz.
 
 - **See.** The key ideas end on one case already marked on its board: the Gold, Silver and Bronze chests, a deck of

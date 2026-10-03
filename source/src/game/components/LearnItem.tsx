@@ -29,15 +29,20 @@ export interface LearnItemProps {
   onDone(record: AnswerRecord): void;
   /** The item's first answer was wrong (it is not finished yet). */
   onMiss?(): void;
+  /** This try already had a miss before it was left: it never counts as a first try. */
+  priorMiss?: boolean;
   /** For tests: the new examples to use instead of the engine's. */
   freshFor?(round: number, avoid: readonly Item[]): Item[];
 }
 
 type Step = { at: 'first' } | { at: 'fresh'; round: number; set: Item[]; i: number };
 
+/** The only help was fixing a mark on the question's own board (no wrong answer, no explanation). */
+const boardOnly = (r: AnswerRecord) => !!r.help?.boardFixed && !r.help.explained;
+
 const MODE: ItemMode = 'learn';
 
-export function LearnItem({ stop, item, seed, readAloud, kicker, nextLabel = 'Next', autoFocus = true, onDone, onMiss, freshFor }: LearnItemProps) {
+export function LearnItem({ stop, item, seed, readAloud, kicker, nextLabel = 'Next', autoFocus = true, onDone, onMiss, priorMiss = false, freshFor }: LearnItemProps) {
   const [step, setStep] = useState<Step>({ at: 'first' });
   const first = useRef<AnswerRecord | null>(null);
   const shown = useRef<Item[]>([]);
@@ -59,7 +64,8 @@ export function LearnItem({ stop, item, seed, readAloud, kicker, nextLabel = 'Ne
     const t = tally.current;
     onDone({
       ...r,
-      correct: r.firstTry || passed,
+      // Right on the first answer after fixing the question's own board: right, but not a first try.
+      correct: r.firstTry || passed || (boardOnly(r) && r.correct),
       help: {
         explained: r.help?.explained ?? false,
         simpler: (r.help?.simpler ?? false) || t.simpler,
@@ -68,6 +74,7 @@ export function LearnItem({ stop, item, seed, readAloud, kicker, nextLabel = 'Ne
         fresh: t.fresh,
         freshPassed: passed,
         ...(moveOn ? { moveOn: true } : {}),
+        ...(r.help?.boardFixed ? { boardFixed: true } : {}),
         ...(r.help?.gap ? { gap: r.help.gap } : {}),
       },
     });
@@ -75,7 +82,8 @@ export function LearnItem({ stop, item, seed, readAloud, kicker, nextLabel = 'Ne
 
   const afterFirst = (r: AnswerRecord) => {
     first.current = r;
-    if (r.firstTry) return finish(false);
+    // The board already taught its fix: an answer right at once after it needs no new examples.
+    if (r.firstTry || (boardOnly(r) && r.correct)) return finish(false);
     const set = newSet(1);
     if (!set.length) return finish(false);
     setStep({ at: 'fresh', round: 1, set, i: 0 });
@@ -110,6 +118,7 @@ export function LearnItem({ stop, item, seed, readAloud, kicker, nextLabel = 'Ne
         afterHelpLabel="Try a new example"
         autoFocus={autoFocus}
         onMiss={onMiss}
+        priorMiss={priorMiss}
         onDone={afterFirst}
       />
     ),

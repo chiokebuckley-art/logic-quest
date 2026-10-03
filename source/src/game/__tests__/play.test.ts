@@ -7,6 +7,7 @@
 import { createElement as h } from 'react';
 import { renderToString } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+import { planKey } from '../../engine/drill';
 import { claimTrue, clueHolds, grade, gridClueHolds, speakerFits } from '../../engine/grade';
 import { addDays, journeyDay, type CheckKind } from '../../engine/journey/mastery';
 import type { NoteCard, Notebook } from '../../engine/notebook';
@@ -561,20 +562,64 @@ describe('See -> Do -> Quiz (skill-drill handoff)', () => {
   const l4 = stop1.lessons[3];
   const props = { stop: stop1, lesson: l4, seed: 5, readAloud: false, onAnswer: noop, onComplete: noop, onExit: noop };
 
-  it('the guided board: the Silver row shown, the Gold row the learner’s to tap, no “which chest?” buttons', () => {
+  it('the case board (Do): Silver and Bronze shown, Gold the learner’s; stamps sit on the signs; no “which chest?” buttons', () => {
     const { html, text } = render(h(DrillBoard, { step: L4_DRILL, readAloud: true, onDone: noop }));
     expect(text).toContain('Mark a case');
-    expect(text).toContain('Shown');
-    expect(text).toContain('Pretend the treasure is in the Silver chest.');
-    expect(text).toContain('Your turn');
-    expect(text).toContain('Pretend the treasure is in the Gold chest.');
-    // The Silver row is text, not buttons; the Gold row has 3 signs x 2 + 4 counts + keep/reject = 12 radios.
-    expect(count(html, 'role="radio"')).toBe(12);
-    expect(count(html, 'aria-checked="true"')).toBe(0);
+    // Three chest cards, each a button that picks its case. Silver (the worked case) is picked first.
+    expect(count(html, 'class="play-case-head"')).toBe(3);
+    expect(count(html, 'aria-pressed="true"')).toBe(1);
+    expect(html).toMatch(/aria-label="Silver chest: picked, 1 true sign, kept\. Picked\."/);
+    expect(html).toMatch(/aria-label="Bronze chest: if it is here, 2 true signs, crossed out\. Tap to pretend it is here\."/);
+    expect(html).toMatch(/aria-label="Gold chest\. Tap to pretend it is here\."/);
+    // A box that is not picked shows its own case's count as “If here”, so it is never read as the picked case's.
+    expect(text).toContain('If here: 2 true');
+    expect(text).toContain('Pretend it’s here');
+    // Silver's stamps are shown on the three signs (False, False, True), not as buttons.
+    expect(count(html, 'class="play-stamp is-false is-given"')).toBe(2);
+    expect(count(html, 'class="play-stamp is-true is-given"')).toBe(1);
+    expect(html).not.toContain('<button type="button" class="play-stamp');
+    // The count is worked out, shown big; the verdict is shown, not tappable; a ring for Keep, a cross for Reject.
+    // Which case the stamps belong to comes first, above the chests; the count and the verdict come after them.
+    expect(text).toContain('Rule Exactly one sign is true. Shown Pretend the treasure is in the Silver chest. 1 Gold chest');
+    expect(text).toContain('1 sign is True. Keep or reject the Silver chest? Keep Reject');
+    expect(count(html, 'class="play-case-ring"')).toBe(1);
+    expect(count(html, 'class="play-case-x"')).toBe(1);
+    expect(count(html, 'role="radio"')).toBe(2);
+    expect(count(html, 'aria-disabled="true" tabindex')).toBe(2);
+    expect(text).toContain('That makes 1 true sign. This fits the rule. Keep the Silver chest.');
     expect(text).toContain('Check my marks');
     expect(text).not.toMatch(/Which chest/);
+    expect(text).not.toMatch(/True signs/);
     expect(html).toContain('aria-label="Read the board aloud"');
-    expect(text).toContain('That makes 1 true sign. This fits the rule. Keep the Silver chest.');
+    // A polite live region announces each tap.
+    expect(html).toContain('role="status" aria-live="polite"');
+  });
+
+  it('the case board (quiz): nothing picked, every sign waits for a box; the changed sign is tagged', () => {
+    const twin = l4.practice(createRng(5))[0].workFirst!;
+    const { html, text } = render(h(DrillBoard, { step: twin, readAloud: false, embedded: true, onDone: noop }));
+    expect(count(html, 'aria-pressed="true"')).toBe(0);
+    expect(text).toContain('Nothing picked yet. Tap one below to start.');
+    expect(count(html, 'play-stamp')).toBe(0);
+    expect(text).toContain('Changed Bronze chest, sign: The treasure is in the Gold chest.');
+    expect(text).toContain('What changed One sign changed.');
+  });
+
+  it('the cave board is the same board in the cave skin: stamps on the Ice, Fire and Moss cards', () => {
+    const cave = l4.practice(createRng(5))[1].workFirst!;
+    const { html, text } = render(h(DrillBoard, { step: cave, readAloud: false, embedded: true, onDone: noop }));
+    expect(count(html, 'class="play-case-head"')).toBe(3);
+    for (const name of ['Ice cave', 'Fire cave', 'Moss cave']) expect(html).toContain(`aria-label="${name}. Tap to pretend it is here."`);
+    expect(text).toContain('Ice cave, sign: The dragon egg is not in the Moss cave.');
+    expect(text).toContain('Check my marks');
+    expect(html).not.toContain('play-drill-mark');
+  });
+
+  it('a thinking board has no Check button and no message', () => {
+    const door = l4.practice(createRng(5)).slice(2)[0];
+    const { text } = render(h(DrillBoard, { step: door.scratch!, readAloud: false, embedded: true, scratch: true, onDone: noop }));
+    expect(text).toContain('Nothing on it is checked.');
+    expect(text).not.toContain('Check my marks');
   });
 
   it('a grid board: shown boxes are pictures, the learner’s boxes are buttons (the handoff’s Mia and Leo)', () => {
@@ -612,7 +657,7 @@ describe('See -> Do -> Quiz (skill-drill handoff)', () => {
   });
 
   it('boards come after the last card, unless a board names the card it follows (Stop 5 lesson 1: well, swim, others)', () => {
-    expect(lessonStages(l4)).toEqual([{ kind: 'cards', from: 0, to: 3 }, { kind: 'board', j: 0 }]);
+    expect(lessonStages(l4)).toEqual([{ kind: 'cards', from: 0, to: 5 }, { kind: 'board', j: 0 }]);
     const s5l1 = STOPS.find((s) => s.n === 5)!.lessons[0];
     const stages = lessonStages(s5l1);
     expect(stages.map((st) => st.kind)).toEqual(['cards', 'board', 'cards', 'board', 'cards', 'board']);
@@ -642,13 +687,55 @@ describe('See -> Do -> Quiz (skill-drill handoff)', () => {
   });
 
   it('opens on the key ideas; their last button leads to the board, not the quiz', () => {
-    expect(render(h(LessonRunner, props)).text).toContain('Three chests');
-    // A copy with only the worked-example card, so its button (the last card's) shows.
-    const { text } = render(h(LessonRunner, { ...props, lesson: { ...l4, ideas: [l4.ideas[3]] } }));
-    expect(text).toContain('An example');
+    expect(render(h(LessonRunner, props)).text).toContain('Three chests and a rule');
+    // A copy with only the last worked-example card, so its button (the last card's) shows.
+    const { text } = render(h(LessonRunner, { ...props, lesson: { ...l4, ideas: [l4.ideas[5]] } }));
+    expect(text).toContain('Example: only one chest fits');
     expect(text).toContain('Now you do it');
     expect(text).toContain('Next you do it: mark a case. Then 4 puzzles.');
     expect(text).not.toContain('Try it');
+  });
+
+  it('the worked example: one chest per card, and its button shows the next stamp before it moves on', () => {
+    const gold = l4.ideas[2];
+    const { html, text } = render(h(IdeaCards, { cards: [gold, l4.ideas[3]], readAloud: false, onDone: noop }));
+    expect(text).toContain('Example: the Gold chest');
+    expect(text).toContain('Pretend it’s here');
+    // Nothing stamped yet: the main button stamps the first sign, it does not move on.
+    expect(count(html, 'class="play-stamp is-true')).toBe(0);
+    expect(text).toContain('Check the Gold chest sign');
+    expect(text).not.toMatch(/\bNext\b/);
+    // Part way: two stamps on their signs, no count or cross yet.
+    const part = render(h(SceneView, { scene: gold.scene!, revealed: 2 }));
+    expect(count(part.html, 'class="play-stamp is-true')).toBe(2);
+    expect(part.html).not.toContain('play-case-x');
+    expect(part.text).toContain('The Silver chest sign says, “The treasure is not in this chest.” The treasure is not in the Silver chest. So it is True.');
+    // All shown: True, True, False on the signs, 2 true signs, Gold crossed out, one line under the picture.
+    const all = render(h(SceneView, { scene: gold.scene!, revealed: 4 }));
+    expect(count(all.html, 'class="play-stamp is-true')).toBe(2);
+    expect(count(all.html, 'class="play-stamp is-false')).toBe(1);
+    expect(all.text).toContain('2 true signs');
+    expect(all.text).toContain('Crossed out');
+    expect(count(all.html, 'class="play-case-x"')).toBe(1);
+    expect(all.text).toContain('Two signs are true, so reject the Gold chest.');
+    // Silver's card keeps Gold's cross and ends with Silver's ring.
+    const silver = render(h(SceneView, { scene: l4.ideas[3].scene!, revealed: 4 }));
+    expect(count(silver.html, 'class="play-case-x"')).toBe(1);
+    expect(count(silver.html, 'class="play-case-ring"')).toBe(1);
+    expect(silver.text).toContain('Exactly one sign is true, so keep the Silver chest.');
+    // The last card: Gold and Bronze crossed out, Silver kept.
+    const last = render(h(SceneView, { scene: l4.ideas[5].scene! }));
+    expect(count(last.html, 'class="play-case-x"')).toBe(2);
+    expect(count(last.html, 'class="play-case-ring"')).toBe(1);
+    // Read aloud: the signs, earlier verdicts, and the lines shown so far.
+    expect(sceneSpeech(l4.ideas[3].scene!, 1)).toEqual([
+      'Exactly one sign is true.',
+      'Gold chest sign: The treasure is in this chest.',
+      'Silver chest sign: The treasure is not in this chest.',
+      'Bronze chest sign: The treasure is not in the Gold chest.',
+      'Gold chest: 2 true signs, crossed out.',
+      'The Gold chest sign says, “The treasure is in this chest.” The treasure is not in the Gold chest. So it is False.',
+    ]);
   });
 
   it('a lesson left before its board was marked (an older save) shows the board first', () => {
@@ -665,17 +752,35 @@ describe('See -> Do -> Quiz (skill-drill handoff)', () => {
     expect(text).toContain('To finish: 3 right on the first try. You have 1.');
   });
 
-  it('the first quiz waits for its case marks: no answer buttons until every cave is marked (learn mode only)', () => {
-    const cave = l4.practice(createRng(5))[0];
-    const learn = render(h(ItemView, { item: cave, mode: 'learn', onDone: noop, readAloud: false }));
+  it('the first quiz is the twin on the case board: no answer buttons until every chest is checked (learn mode only)', () => {
+    const [twin, cave] = l4.practice(createRng(5));
+    const learn = render(h(ItemView, { item: twin, mode: 'learn', onDone: noop, readAloud: false }));
     expect(learn.text).toContain('First, mark the cases');
-    expect(learn.text).toContain('Check each cave');
+    expect(learn.text).toContain('Check each chest');
     expect(learn.html).not.toContain('play-choices');
     expect(learn.text).toContain('Check my marks');
     expect(learn.text).not.toMatch(/\bHint\b/);
-    const check = render(h(ItemView, { item: cave, mode: 'check', onDone: noop, readAloud: false }));
+    // The board draws the chests and signs itself: one rule banner, no second picture of the boxes.
+    expect(count(learn.html, 'class="play-rule"')).toBe(1);
+    expect(learn.html).not.toContain('play-box-list');
+    const check = render(h(ItemView, { item: twin, mode: 'check', onDone: noop, readAloud: false }));
     expect(check.html).toContain('play-choices');
     expect(check.text).not.toContain('First, mark the cases');
+    expect(check.text).not.toContain('case board');
+    const caves = render(h(ItemView, { item: cave, mode: 'learn', onDone: noop, readAloud: false }));
+    expect(caves.text).toContain('Check each cave');
+    expect(caves.html).not.toContain('play-choices');
+  });
+
+  it('later tries answer with the choices, and offer the case board as a thinking tool (learn mode only)', () => {
+    const later = l4.practice(createRng(5))[2];
+    const learn = render(h(ItemView, { item: later, mode: 'learn', onDone: noop, readAloud: false }));
+    expect(learn.html).toContain('play-choices');
+    expect(learn.text).toContain('Use the case board');
+    expect(learn.html).toContain('aria-expanded="false"');
+    expect(learn.html).toContain('play-box-list');
+    const check = render(h(ItemView, { item: later, mode: 'check', onDone: noop, readAloud: false }));
+    expect(check.text).not.toContain('Use the case board');
   });
 
   it('the recap of a lesson not passed yet says what is still needed, and never says “Lesson done”', () => {
@@ -1488,9 +1593,22 @@ describe('lesson screen: resuming, redoing, lessons in order (skill-drill review
     const kv = storeWith((d) => {
       d.stops.s1 = { lessonsDone: ['s1.l1', 's1.l2', 's1.l3'], attempts: 0 };
       d.drilled = ['s1.l4'];
-      d.lessonRun = { stopId: 's1', lessonId: 's1.l4', seed: 5, next: 2, firstTry: 1, drilled: true, results: [{ clean: true, tags: [] }, { clean: false, tags: [] }] };
+      d.lessonRun = { stopId: 's1', lessonId: 's1.l4', seed: 5, next: 2, firstTry: 1, drilled: true, results: [{ clean: true, tags: [] }, { clean: false, tags: [] }], plan: planKey(stop1.lessons[3], 5) };
     });
     expect(render(h(StoreProvider, { kv, children: h(LessonScreen, { route: lessonRoute('s1.l4') }) })).text).toContain('Welcome back. You are on try 3 of 4.');
+  });
+
+  it('a run saved before the lesson’s quiz changed (v0.4.1: no plan, or another plan) starts the lesson again', () => {
+    for (const plan of [undefined, 'zzz']) {
+      const kv = storeWith((d) => {
+        d.stops.s1 = { lessonsDone: ['s1.l1', 's1.l2', 's1.l3'], attempts: 0 };
+        d.drilled = ['s1.l4'];
+        d.lessonRun = { stopId: 's1', lessonId: 's1.l4', seed: 5, next: 1, firstTry: 1, drilled: true, results: [{ clean: true, tags: [] }], ...(plan ? { plan } : {}) };
+      });
+      const { text } = render(h(StoreProvider, { kv, children: h(LessonScreen, { route: lessonRoute('s1.l4') }) }));
+      expect(text).toContain('Three chests and a rule');
+      expect(text).not.toContain('Welcome back');
+    }
   });
 
   it('“Learn this again” after a check starts fresh, even with a run of that lesson saved', () => {
@@ -1516,5 +1634,7 @@ describe('lesson screen: resuming, redoing, lessons in order (skill-drill review
     expect(text).toContain('Start it again with new puzzles.');
     expect(rightTitle('first', 0, true)).toBe('Right, with a hint.');
     expect(rightTitle('first', 0, false)).toBe('Right, first try.');
+    // A wrong mark on the question's own board (or a miss saved before a reload): never “first try”.
+    expect(rightTitle('first', 0, false, true)).toBe('Right.');
   });
 });

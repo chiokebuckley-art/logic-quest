@@ -3,8 +3,8 @@
  * and the rule), so the engine's answer, explanation and feedback are checked against the page itself.
  */
 import { describe, expect, it } from 'vitest';
-import { L4_DRILL, L4_EXAMPLE, L4_FIRST_QUIZ, L4_FIRST_QUIZ_WORK, L5_EXAMPLE, L6_EXAMPLE, L7_EXAMPLE, stop1 } from '../../content/stop1';
-import { checkDrill, marksToTap } from '../drill';
+import { L4_DRILL, L4_EXAMPLE, L4_FIRST_QUIZ, L4_FIRST_QUIZ_WORK, L4_TWIN, L4_TWIN_WORK, L5_EXAMPLE, L5_TWIN, L6_EXAMPLE, L6_TWIN, L7_EXAMPLE, L7_TWIN, stop1 } from '../../content/stop1';
+import { caseCount, caseVerdict, checkDrill, marksToTap, nextStamp } from '../drill';
 import { createRng } from '../rng';
 import {
   SIGN_RULES,
@@ -15,9 +15,11 @@ import {
   signBoxes,
   signConclusion,
   signDeniesAnswer,
+  signDrill,
   signHolds,
   signItem,
   signTwins,
+  signWalk,
   signWords,
   solutions,
   trueSigns,
@@ -28,7 +30,7 @@ import {
 import { freshCheckSet } from '../fresh';
 import { READING, fkGrade, longestSentence, sentences, words } from '../readability';
 import { feedbackText, teachStrings } from '../teach';
-import type { Item, SignBox } from '../types';
+import type { Item, Scene, SignBox } from '../types';
 
 /** Reads a sign ("The treasure is not in the Gold chest.") and says whether it is true for a treasure spot. */
 function readSign(skin: SignSkin, box: number, text: string): (t: number) => boolean {
@@ -241,25 +243,40 @@ describe('treasure signs', () => {
     }
   });
 
-  it('the worked example on the key-idea card has one answer: the Silver chest', () => {
+  it('See: the worked example is one chest per card on the case board (Gold, Silver, Bronze), stamped from the words', () => {
     expect(solutions(L4_EXAMPLE.signs, L4_EXAMPLE.rule)).toEqual([1]);
-    expect(L4_EXAMPLE.answer).toBe(1);
     expect(explainSigns(L4_EXAMPLE, 'chest')).toContain('Only the Silver chest makes exactly one sign true, so the treasure is in it.');
-    const card = stop1.lessons[3].ideas.find((c) => c.scene?.kind === 'boxes')!;
-    if (card.scene?.kind !== 'boxes') throw new Error('no example scene');
-    expect(solveFromText('chest', card.scene.boxes, card.scene.rule)).toEqual([1]);
-    // One paragraph per chest, each with the right true signs and count, then the conclusion.
-    const w = signWords('chest');
-    const COUNT = ['zero', 'one', 'two', 'three'];
-    expect(card.body.length).toBe(4);
+    const walk = stop1.lessons[3].ideas.slice(2);
+    expect(walk.map((c) => c.title)).toEqual(['Example: the Gold chest', 'Example: the Silver chest', 'Example: the Bronze chest', 'Example: only one chest fits']);
+    const scenes = walk.map((c) => c.scene as Extract<Scene, { kind: 'cases' }>);
+    for (const sc of scenes) expect(sc.kind).toBe('cases');
+    const boxes = scenes[0].boxes;
+    expect(boxes).toEqual(signBoxes(L4_EXAMPLE, 'chest'));
+    expect(solveFromText('chest', boxes, scenes[0].rule)).toEqual([1]);
+    // The pack's three cases: Gold True, True, False (2, crossed out); Silver False, False, True (1, kept); Bronze False, True, True (2, crossed out).
+    const STAMPS = [[true, true, false], [false, false, true], [false, true, true]];
+    const LAST = ['Two signs are true, so reject the Gold chest.', 'Exactly one sign is true, so keep the Silver chest.', 'Two signs are true, so reject the Bronze chest.'];
     [0, 1, 2].forEach((b) => {
-      const ts = trueSigns(L4_EXAMPLE.signs, b);
-      expect(card.body[b].startsWith(`If the treasure is in ${w.the(b)}, `), card.body[b]).toBe(true);
-      expect(card.body[b]).toContain(w.signList(ts));
-      expect(card.body[b].endsWith(`That makes ${COUNT[ts.length]} true sign${ts.length === 1 ? '' : 's'}.`), card.body[b]).toBe(true);
+      const sc = scenes[b];
+      expect(sc.pretend).toBe(b);
+      expect(sc.stamps).toEqual(STAMPS[b]);
+      expect(sc.stamps).toEqual(truthsFromText('chest', boxes, b));
+      expect(walk[b].body).toEqual([`Pretend the treasure is in ${signWords('chest').the(b)}. Check each sign.`]);
+      // One step per sign, each saying why its stamp is True or False, then the count and the verdict.
+      expect(sc.steps!.map((st) => st.label)).toEqual(['Check the Gold chest sign', 'Check the Silver chest sign', 'Check the Bronze chest sign', 'Count and decide']);
+      sc.steps!.slice(0, 3).forEach((st, i) => expect(st.say.endsWith(`So it is ${STAMPS[b][i] ? 'True' : 'False'}.`), st.say).toBe(true));
+      expect(sc.steps![3].say).toBe(LAST[b]);
+      // Earlier verdicts stay on the board; later chests have none yet.
+      expect(sc.counts).toEqual([2, 1, 2].map((n, k) => (k <= b ? n : null)));
+      expect(sc.verdicts).toEqual(['reject', 'keep', 'reject'].map((v, k) => (k <= b ? v : null)));
+      for (const st of sc.steps!) expect(longestSentence(st.say).words, st.say).toBeLessThanOrEqual(READING.maxSentenceWords);
     });
-    expect(card.body[3]).toBe('Only the Silver chest makes exactly one sign true. So the treasure is in the Silver chest.');
-    expect(signConclusion(L4_EXAMPLE, 'chest')).toBe(card.body[3]);
+    // The last card: every verdict, and only Silver kept.
+    expect(scenes[3].pretend).toBeUndefined();
+    expect(scenes[3].counts).toEqual([2, 1, 2]);
+    expect(scenes[3].verdicts).toEqual(['reject', 'keep', 'reject']);
+    expect(walk[3].body).toEqual(['Only the Silver chest makes exactly one sign true. So the treasure is in the Silver chest.']);
+    expect(signConclusion(L4_EXAMPLE, 'chest')).toBe(walk[3].body[0]);
   });
 
   it('T-teach, T-truth and T-cover: every item teaches with all three places the treasure could be, read from the words', () => {
@@ -400,7 +417,7 @@ describe('treasure signs', () => {
 
   it('lesson 4 teaches one rule: the chest example stays, “Other rules” is gone, and every quiz, check and arcade item says “Exactly one sign is true.”', () => {
     const l4 = stop1.lessons[3];
-    expect(l4.ideas.map((c) => c.title)).toEqual(['Three chests', 'The rule', 'Try each chest', 'An example']);
+    expect(l4.ideas.map((c) => c.title)).toEqual(['Three chests and a rule', 'Try each chest', 'Example: the Gold chest', 'Example: the Silver chest', 'Example: the Bronze chest', 'Example: only one chest fits']);
     const ruleOf = (it: Item) => (it.scene?.kind === 'boxes' ? it.scene.rule : '');
     for (let seed = 1; seed <= 40; seed++) {
       for (const it of l4.practice(createRng(seed))) expect(ruleOf(it), it.id).toBe('Exactly one sign is true.');
@@ -410,19 +427,26 @@ describe('treasure signs', () => {
     }
   });
 
-  it('Do: the same chest board as the example. Silver is shown (False, False, True, 1, Keep); the learner marks Gold (True, True, False, 2, Reject)', () => {
+  it('Do: the same chest board as the example. Silver and Bronze are shown; the learner checks Gold (True, True, False, counted 2, Reject)', () => {
     const l4 = stop1.lessons[3];
     const step = l4.drill![0];
     expect(l4.drill!.length).toBe(1);
     expect(step).toBe(L4_DRILL);
-    expect(step.scene).toEqual(l4.ideas[3].scene);
-    const [silver, gold] = step.rows;
+    expect(step.layout).toBe('cases');
+    const walk = l4.ideas[2].scene as Extract<Scene, { kind: 'cases' }>;
+    expect(step.scene).toEqual({ kind: 'boxes', boxes: walk.boxes, rule: walk.rule });
+    const [silver, bronze, gold] = step.rows;
+    expect(step.rows.map((r) => r.case)).toEqual([{ box: 1, name: 'the Silver chest' }, { box: 2, name: 'the Bronze chest' }, { box: 0, name: 'the Gold chest' }]);
     expect(silver.label).toBe('Pretend the treasure is in the Silver chest.');
-    expect(silver.marks.every((m) => m.given)).toBe(true);
-    expect(silver.marks.map((m) => m.answer)).toEqual(['false', 'false', 'true', '1', 'keep']);
+    expect([silver, bronze].every((r) => r.marks.every((m) => m.given))).toBe(true);
+    expect(silver.marks.map((m) => m.answer)).toEqual(['false', 'false', 'true', 'keep']);
+    expect(bronze.marks.map((m) => m.answer)).toEqual(['false', 'true', 'true', 'reject']);
     expect(gold.label).toBe('Pretend the treasure is in the Gold chest.');
     expect(gold.marks.some((m) => m.given)).toBe(false);
-    expect(gold.marks.map((m) => m.answer)).toEqual(['true', 'true', 'false', '2', 'reject']);
+    expect(gold.marks.map((m) => m.answer)).toEqual(['true', 'true', 'false', 'reject']);
+    // Each stamp sits on its sign; there is no count to type.
+    expect(gold.marks.map((m) => m.on)).toEqual([0, 1, 2, undefined]);
+    expect(JSON.stringify(step)).not.toMatch(/True signs/);
     // Re-solved from the words on the board.
     const boxes = step.scene!.kind === 'boxes' ? step.scene!.boxes : [];
     const read = boxes.map((b, i) => readSign('chest', i, b.sign));
@@ -430,66 +454,157 @@ describe('treasure signs', () => {
     expect(silver.marks.slice(0, 3).map((m) => m.answer)).toEqual(read.map((f) => String(f(1))));
     // No answer buttons on this board: nothing asks which chest.
     expect(JSON.stringify(step)).not.toMatch(/Which chest/);
-    // Right taps pass; a wrong Silver-sign tap names the first mismatch in plain words.
     const right = Object.fromEntries(marksToTap(step).map((m) => [m.id, m.answer]));
     expect(checkDrill(step, right).done).toBe(true);
+    // The count comes from the stamps.
+    expect(caseCount(gold, {})).toBeNull();
+    expect(caseCount(gold, right)).toBe(2);
+    expect(caseCount(silver, {})).toBe(1);
+    expect(caseVerdict(bronze, {})).toBe('reject');
+    // Empty marks: a gentle instruction that names the chest, never an answer.
+    const empty = checkDrill(step, {});
+    expect(empty).toMatchObject({ done: false, row: 'case0', message: 'Not yet: the Gold chest still needs 3 stamps. Tap the Gold chest, then tap each sign.' });
+    const stamped = { 'case0-sign0': 'true', 'case0-sign1': 'true', 'case0-sign2': 'false' };
+    expect(checkDrill(step, stamped).message).toBe('Almost: now tap Keep or Reject for the Gold chest.');
+    // A wrong stamp, or Keep with a count of 2, keeps the gate shut and names the first mismatch.
     const wrong = checkDrill(step, { ...right, 'case0-sign1': 'false' });
     expect(wrong.done).toBe(false);
+    expect(wrong.row).toBe('case0');
     expect(wrong.message).toBe('If the treasure is in the Gold chest, the Silver chest sign is true. It says, “The treasure is not in this chest.” The treasure is not in the Silver chest.');
+    const kept = checkDrill(step, { ...right, 'case0-decide': 'keep' });
+    expect(kept.done).toBe(false);
+    expect(kept.message).toBe('The rule needs exactly 1 true sign. This case has 2 true signs. So reject the Gold chest.');
     // Every wrong option of every mark has its own words, at the reading level.
     for (const m of marksToTap(step)) {
       for (const o of m.options) if (o.id !== m.answer) expect(m.why[o.id], `${m.id}:${o.id}`).toBeTruthy();
-      for (const t of Object.values(m.why)) {
-        expect(longestSentence(t).words, t).toBeLessThanOrEqual(READING.maxSentenceWords);
-      }
+      for (const t of Object.values(m.why)) expect(longestSentence(t).words, t).toBeLessThanOrEqual(READING.maxSentenceWords);
     }
     const text = [step.title, ...step.body, step.done, ...step.rows.flatMap((r) => [r.label, r.note ?? '', ...r.marks.flatMap((m) => Object.values(m.why))])].join(' ');
     expect(fkGrade(text), text).toBeLessThanOrEqual(READING.maxGrade);
   });
 
-  it('Quiz try 1 is the frozen cave board every time, and its answer buttons wait until every case is marked', () => {
+  it('a stamp belongs to one sign in one case: marking a case never changes another case', () => {
+    const work = L4_TWIN_WORK;
+    const ids = work.rows.flatMap((r) => r.marks.map((m) => m.id));
+    expect(new Set(ids).size).toBe(ids.length);
+    // Every stamp id names its case and its sign.
+    for (const r of work.rows) for (const m of r.marks) if (m.on !== undefined) expect(m.id).toBe(`case${r.case!.box}-sign${m.on}`);
+    const [gold, silver, bronze] = work.rows;
+    const goldOnly = { 'case0-sign0': 'true', 'case0-sign1': 'true', 'case0-sign2': 'true' };
+    expect(caseCount(gold, goldOnly)).toBe(3);
+    expect(caseCount(silver, goldOnly)).toBeNull();
+    expect(caseCount(bronze, goldOnly)).toBeNull();
+    // Picking another case and stamping it leaves Gold's stamps and count as they were.
+    const both = { ...goldOnly, 'case1-sign0': 'false', 'case1-sign1': 'false', 'case1-sign2': 'false' };
+    expect(caseCount(gold, both)).toBe(3);
+    expect(caseCount(silver, both)).toBe(0);
+    expect(caseVerdict(gold, { ...both, 'case0-decide': 'reject' })).toBe('reject');
+    expect(caseVerdict(silver, { ...both, 'case0-decide': 'reject' })).toBeUndefined();
+  });
+
+  it('the case board and the worked steps name the sign, never “its own sign”, in every skin and rule', () => {
+    for (let seed = 1; seed <= 40; seed++) {
+      for (const skin of SIGN_SKINS) {
+        const p = makeSignPuzzle(createRng(seed), SIGN_RULES[seed % 4]);
+        const steps = signWalk(p, skin).flatMap((c) => (c.scene?.kind === 'cases' ? (c.scene.steps ?? []).map((st) => st.say) : []));
+        const board = signDrill(p, skin, { id: 'x', title: 'x', body: [], shown: [], mark: [0, 1, 2], done: 'x' });
+        const why = board.rows.flatMap((r) => r.marks.flatMap((m) => Object.values(m.why)));
+        for (const t of [...steps, ...why]) expect(t, t).not.toMatch(/\bits own\b/i);
+      }
+    }
+  });
+
+  it('a stamp tap goes empty, True, then flips True and False', () => {
+    expect(nextStamp(undefined)).toBe('true');
+    expect(nextStamp('true')).toBe('false');
+    expect(nextStamp('false')).toBe('true');
+  });
+
+  it('Quiz try 1 is the chest twin every time: one sign changed (Bronze: “in the Gold chest”), checked on the case board, answer Bronze', () => {
+    expect(solutions(L4_TWIN.signs, 'one')).toEqual([2]);
+    expect(signTwins(L4_EXAMPLE)).toContainEqual(L4_TWIN);
+    const example = signBoxes(L4_EXAMPLE, 'chest').map((b) => b.sign);
     for (let seed = 1; seed <= 20; seed++) {
       const first = stop1.lessons[3].practice(createRng(seed))[0];
       if (first.kind !== 'choose' || first.scene?.kind !== 'boxes') throw new Error('not a sign item');
-      expect(first.prompt).toBe('Read the signs and the rule. Which cave has the dragon egg?');
-      expect(first.scene.boxes.map((b) => b.sign)).toEqual(['The dragon egg is not in the Moss cave.', 'The dragon egg is in the Moss cave.', 'The dragon egg is not in the Ice cave.']);
-      expect(first.scene.rule).toBe('Exactly one sign is true.');
-      expect(first.choices.find((c) => c.id === first.answer)!.label).toBe('Ice cave');
+      expect(first.prompt).toBe('Read the signs and the rule. Which chest has the treasure?');
+      expect(first.scene.boxes.map((b) => b.sign)).toEqual(['The treasure is in this chest.', 'The treasure is not in this chest.', 'The treasure is in the Gold chest.']);
+      expect(first.scene.boxes.filter((b, i) => b.sign !== example[i]).length).toBe(1);
+      expect(first.choices.find((c) => c.id === first.answer)!.label).toBe('Bronze chest');
+      expect(first.fixed).toBe(true);
       const work = first.workFirst!;
-      expect(work).toBe(L4_FIRST_QUIZ_WORK);
+      expect(work).toBe(L4_TWIN_WORK);
+      expect(work.layout).toBe('cases');
+      expect(work.changed).toBe(2);
+      expect(work.twin).toBe('One sign changed. The Bronze chest sign now says, “The treasure is in the Gold chest.”');
       expect(work.rows.every((r) => r.marks.every((m) => !m.given))).toBe(true);
-      // Ice: True, False, False, 1, Keep. Fire: True, False, True, 2, Reject. Moss: False, True, True, 2, Reject.
+      // Gold: all three true (3, crossed out). Silver: none (0, crossed out). Bronze: one (kept).
       expect(work.rows.map((r) => r.marks.map((m) => m.answer))).toEqual([
-        ['true', 'false', 'false', '1', 'keep'],
-        ['true', 'false', 'true', '2', 'reject'],
-        ['false', 'true', 'true', '2', 'reject'],
+        ['true', 'true', 'true', 'reject'],
+        ['false', 'false', 'false', 'reject'],
+        ['false', 'true', 'false', 'keep'],
       ]);
-      const read = first.scene.boxes.map((b, i) => readSign('cave', i, b.sign));
+      const read = first.scene.boxes.map((b, i) => readSign('chest', i, b.sign));
+      work.rows.forEach((r, t) => expect(r.marks.slice(0, 3).map((m) => m.answer)).toEqual(read.map((f) => String(f(t)))));
+      // Answer buttons alone never pass it: the board has to be checked right first (a marks-only board is not checked).
+      expect(checkDrill(work, {}).done).toBe(false);
+      // Reject for the one chest with a count of 1 is not accepted.
+      const right = Object.fromEntries(marksToTap(work).map((m) => [m.id, m.answer]));
+      const bad = checkDrill(work, { ...right, 'case2-decide': 'reject' });
+      expect(bad.done).toBe(false);
+      expect(bad.row).toBe('case2');
+      expect(bad.message).toBe('The rule needs exactly 1 true sign. This case has that. So keep the Bronze chest.');
+      expect(checkDrill(work, right).done).toBe(true);
+    }
+  });
+
+  it('Quiz try 2 is the frozen cave board every time, checked on the same case board before its answer buttons show', () => {
+    for (let seed = 1; seed <= 20; seed++) {
+      const cave = stop1.lessons[3].practice(createRng(seed))[1];
+      if (cave.kind !== 'choose' || cave.scene?.kind !== 'boxes') throw new Error('not a sign item');
+      expect(cave.prompt).toBe('Read the signs and the rule. Which cave has the dragon egg?');
+      expect(cave.scene.boxes.map((b) => b.sign)).toEqual(['The dragon egg is not in the Moss cave.', 'The dragon egg is in the Moss cave.', 'The dragon egg is not in the Ice cave.']);
+      expect(cave.scene.rule).toBe('Exactly one sign is true.');
+      expect(cave.choices.find((c) => c.id === cave.answer)!.label).toBe('Ice cave');
+      const work = cave.workFirst!;
+      expect(work).toBe(L4_FIRST_QUIZ_WORK);
+      expect(work.layout).toBe('cases');
+      expect(work.title).toBe('Check each cave');
+      expect(work.rows.every((r) => r.marks.every((m) => !m.given))).toBe(true);
+      // Ice: True, False, False, Keep. Fire: True, False, True, Reject. Moss: False, True, True, Reject.
+      expect(work.rows.map((r) => r.marks.map((m) => m.answer))).toEqual([
+        ['true', 'false', 'false', 'keep'],
+        ['true', 'false', 'true', 'reject'],
+        ['false', 'true', 'true', 'reject'],
+      ]);
+      const read = cave.scene.boxes.map((b, i) => readSign('cave', i, b.sign));
       work.rows.forEach((r, t) => expect(r.marks.slice(0, 3).map((m) => m.answer)).toEqual(read.map((f) => String(f(t)))));
     }
     expect(L4_FIRST_QUIZ.answer).toBe(0);
     expect(solutions(L4_FIRST_QUIZ.signs, 'one')).toEqual([0]);
   });
 
-  it('Quiz tries 2-4: a door board, a box board and a chest twin with one sign changed, in any order', () => {
+  it('Quiz tries 3-4: a door board and a box board in either order, each with a case board to use if it helps', () => {
     const orders = new Set<string>();
     for (let seed = 1; seed <= 40; seed++) {
       const items = stop1.lessons[3].practice(createRng(seed));
       expect(items.length).toBe(4);
       const skinOf = (it: Item) => (it.kind === 'choose' ? SIGN_SKINS.find((k) => signWords(k).name(0) === it.choices[0].label)! : null);
-      const rest = items.slice(1).map(skinOf);
-      expect([...rest].sort()).toEqual(['box', 'chest', 'door']);
+      expect(items.map(skinOf).slice(0, 2)).toEqual(['chest', 'cave']);
+      const rest = items.slice(2).map(skinOf);
+      expect([...rest].sort()).toEqual(['box', 'door']);
       orders.add(rest.join());
-      const twin = items.find((it) => skinOf(it) === 'chest')!;
-      if (twin.scene?.kind !== 'boxes') throw new Error('no boxes');
-      const example = signBoxes(L4_EXAMPLE, 'chest').map((b) => b.sign);
-      const changed = twin.scene.boxes.filter((b, i) => b.sign !== example[i]);
-      expect(changed.length, JSON.stringify(twin.scene.boxes)).toBe(1);
-      // Its answer is never Silver, the example's answer.
-      expect(twin.kind === 'choose' && twin.choices.find((c) => c.id === twin.answer)!.label).not.toBe('Silver chest');
-      for (const it of items.slice(1)) expect(it.workFirst).toBeUndefined();
+      for (const it of items.slice(2)) {
+        expect(it.workFirst).toBeUndefined();
+        expect(it.fixed).toBeUndefined();
+        const scratch = it.scratch!;
+        expect(scratch.layout).toBe('cases');
+        expect(scratch.rows.length).toBe(3);
+        expect(scratch.rows.every((r) => r.marks.every((m) => !m.given))).toBe(true);
+        expect(scratch.scene).toEqual(it.scene);
+      }
     }
-    expect(orders.size).toBeGreaterThan(1);
+    expect(orders.size).toBe(2);
     expect(signTwins(L4_EXAMPLE).every((t) => solutions(t.signs, 'one').length === 1)).toBe(true);
   });
 
@@ -531,46 +646,60 @@ describe('the other sign rules: one lesson each, See -> Do -> Quiz (skill-drill 
     expect(stop1.lessons.slice(4).map((l) => l.title)).toEqual(['Every sign is false', 'Exactly two signs are true', 'The owner’s sign']);
   });
 
-  it.each(SPECS)('$id See: the worked example is computed from its words and concludes the one chest that fits', ({ id, rule, text, example }) => {
+  it.each(SPECS)('$id See: the worked example is one chest per card on the case board, computed from its words, ending on the one chest that fits', ({ id, rule, text, example }) => {
     const l = lessonOf(id);
-    const card = l.ideas.find((c) => c.title === 'An example')!;
-    expect(l.ideas[l.ideas.length - 1]).toBe(card);
-    if (card.scene?.kind !== 'boxes') throw new Error('no boxes');
-    expect(card.scene.rule).toBe(text);
-    const fits = [0, 1, 2].filter((t) => fitsFromWords(card.scene!.kind === 'boxes' ? card.scene!.boxes : [], 'chest', rule, t));
+    const walk = l.ideas.slice(-4);
+    expect(l.ideas.length).toBe(6);
+    const w = signWords('chest');
+    expect(walk.slice(0, 3).map((c) => c.title)).toEqual([0, 1, 2].map((b) => `Example: ${w.the(b)}`));
+    const scenes = walk.map((c) => c.scene as Extract<Scene, { kind: 'cases' }>);
+    expect(scenes.every((sc) => sc.kind === 'cases' && sc.rule === text)).toBe(true);
+    const boxes = scenes[0].boxes;
+    const fits = [0, 1, 2].filter((t) => fitsFromWords(boxes, 'chest', rule, t));
     expect(fits).toEqual([example.answer]);
     expect(solutions(example.signs, rule)).toEqual([example.answer]);
-    expect(card.body[card.body.length - 1]).toBe(signConclusion(example, 'chest'));
-    expect(card.body.length).toBe(4);
-    for (const line of card.body) expect(longestSentence(line).words, line).toBeLessThanOrEqual(READING.maxSentenceWords);
+    [0, 1, 2].forEach((b) => {
+      expect(scenes[b].stamps).toEqual(truthsFromText('chest', boxes, b));
+      expect(scenes[b].verdicts![b]).toBe(b === example.answer ? 'keep' : 'reject');
+      expect(scenes[b].steps![3].say).toMatch(b === example.answer ? /, so keep the \w+ chest\.$/ : /reject the \w+ chest\.$/);
+      for (const st of scenes[b].steps!) expect(longestSentence(st.say).words, st.say).toBeLessThanOrEqual(READING.maxSentenceWords);
+    });
+    expect(scenes[3].verdicts).toEqual([0, 1, 2].map((b) => (b === example.answer ? 'keep' : 'reject')));
+    expect(walk[3].body).toEqual([signConclusion(example, 'chest')]);
   });
 
-  it.each(SPECS)('$id Do: the same board; the kept chest is shown, the learner marks a rejected one, every mark from the words', ({ id, example }) => {
+  it.each(SPECS)('$id Do: the same board; the kept chest and one more are shown, the learner checks the other, every mark from the words', ({ id, example }) => {
     const l = lessonOf(id);
     const step = l.drill![0];
     expect(l.drill!.length).toBe(1);
-    expect(step.scene).toEqual(l.ideas[l.ideas.length - 1].scene);
-    const [shown, mine] = step.rows;
-    expect(shown.marks.every((m) => m.given)).toBe(true);
+    expect(step.layout).toBe('cases');
+    const walk = l.ideas[l.ideas.length - 1].scene as Extract<Scene, { kind: 'cases' }>;
+    expect(step.scene).toEqual({ kind: 'boxes', boxes: walk.boxes, rule: walk.rule });
+    const mine = step.rows[step.rows.length - 1];
+    const shown = step.rows.slice(0, -1);
+    expect(shown.length).toBe(2);
+    expect(shown.every((r) => r.marks.every((m) => m.given))).toBe(true);
+    expect(shown.some((r) => r.case!.box === example.answer)).toBe(true);
     expect(mine.marks.some((m) => m.given)).toBe(false);
     const w = signWords('chest');
-    expect(shown.label).toBe(`Pretend the treasure is in ${w.the(example.answer)}.`);
     const reject = [0, 1, 2].find((b) => b !== example.answer)!;
     expect(mine.label).toBe(`Pretend the treasure is in ${w.the(reject)}.`);
     const boxes = step.scene!.kind === 'boxes' ? step.scene!.boxes : [];
-    for (const [row, t] of [[shown, example.answer], [mine, reject]] as const) {
+    for (const row of step.rows) {
+      const t = row.case!.box;
       const truth = boxes.map((b, i) => readSign('chest', i, b.sign)(t));
       expect(row.marks.slice(0, 3).map((m) => m.answer)).toEqual(truth.map(String));
-      expect(row.marks[3].answer).toBe(String(truth.filter(Boolean).length));
-      expect(row.marks[4].answer).toBe(t === example.answer ? 'keep' : 'reject');
+      expect(row.marks[3].answer).toBe(t === example.answer ? 'keep' : 'reject');
+      expect(row.marks.length).toBe(4);
     }
     expect(checkDrill(step, Object.fromEntries(marksToTap(step).map((m) => [m.id, m.answer]))).done).toBe(true);
     expect(JSON.stringify(step)).not.toMatch(/Which chest/);
   });
 
-  it.each(SPECS)('$id Quiz: a twin of the example first (a new answer), then a door, a cave and a box, all with this rule', ({ id, rule, text, example }) => {
+  it.each(SPECS)('$id Quiz: the twin first (a new answer, checked on the case board), then a door, a cave and a box, all with this rule', ({ id, rule, text, example }) => {
     const l = lessonOf(id);
-    const shownSets = [L4_EXAMPLE, L4_FIRST_QUIZ, L5_EXAMPLE, L6_EXAMPLE, L7_EXAMPLE].map((p) => JSON.stringify(signBoxes(p, 'chest').map((b) => b.sign)));
+    const twinOfLesson = { 's1.l5': L5_TWIN, 's1.l6': L6_TWIN, 's1.l7': L7_TWIN }[id]!;
+    const shownSets = [L4_EXAMPLE, L4_TWIN, L4_FIRST_QUIZ, L5_EXAMPLE, L6_EXAMPLE, L7_EXAMPLE, L5_TWIN, L6_TWIN, L7_TWIN].map((p) => JSON.stringify(signBoxes(p, 'chest').map((b) => b.sign)));
     for (let seed = 1; seed <= 30; seed++) {
       const items = l.practice(createRng(seed));
       expect(items.length).toBe(4);
@@ -585,13 +714,22 @@ describe('the other sign rules: one lesson each, See -> Do -> Quiz (skill-drill 
       const [twin, ...rest] = items;
       expect(twin.fixed).toBe(true);
       if (twin.kind !== 'choose' || twin.scene?.kind !== 'boxes') throw new Error('no twin');
+      expect(twin.scene.boxes).toEqual(signBoxes(twinOfLesson, 'chest'));
       const ex = signBoxes(example, 'chest').map((b) => b.sign);
       expect(twin.scene.boxes.filter((b, i) => b.sign !== ex[i]).length).toBe(1);
       expect(twin.answer).not.toBe(signBoxes(example, 'chest')[example.answer].id);
+      // The twin is checked on the case board before its answer buttons show, with the changed sign tagged.
+      const work = twin.workFirst!;
+      expect(work.layout).toBe('cases');
+      expect(work.changed).toBe(twin.scene.boxes.findIndex((b, i) => b.sign !== ex[i]));
+      expect(work.scene).toEqual(twin.scene);
+      expect(work.rows.every((r) => r.marks.every((m) => !m.given))).toBe(true);
       const skins = rest.map((it) => (it.kind === 'choose' ? SIGN_SKINS.find((k) => signWords(k).name(0) === it.choices[0].label) : null));
       expect([...skins].sort()).toEqual(['box', 'cave', 'door']);
-      // A random board is never a worked example (or the frozen cave) in new words.
+      // A random board is never a worked example, a twin (or the frozen cave) in new words.
       for (const it of rest) {
+        expect(it.workFirst).toBeUndefined();
+        expect(it.scratch?.layout).toBe('cases');
         if (it.scene?.kind !== 'boxes' || it.kind !== 'choose') continue;
         const skin = SIGN_SKINS.find((k) => signWords(k).name(0) === it.choices[0].label)!;
         const asChest = JSON.stringify(signsOnBoard(it.scene.boxes, skin));

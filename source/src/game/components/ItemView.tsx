@@ -212,8 +212,8 @@ function TimerBar({ left, limit }: { left: number; limit: number }) {
 // ---------- the item ----------
 
 /** The title of the "right" panel: first try, on your own (a new example), or right after help. */
-export function rightTitle(stage: 'first' | 'fresh', misses: number, hint: boolean): string {
-  if (misses > 0) return 'Right.';
+export function rightTitle(stage: 'first' | 'fresh', misses: number, hint: boolean, boardFixed = false): string {
+  if (misses > 0 || boardFixed) return 'Right.';
   if (stage === 'fresh') return hint ? 'Right.' : 'Right, on your own.';
   return hint ? 'Right, with a hint.' : 'Right, first try.';
 }
@@ -238,6 +238,11 @@ export interface ItemViewExtraProps {
   canMoveOn?: boolean;
   /** Learn mode: called at the first wrong Check, before the item is finished (so a host can save the miss). */
   onMiss?(): void;
+  /**
+   * Learn mode: this try already had a miss before it was left (a lesson picked up after a reload). A right answer
+   * then says "Right." and counts as practice, never as a first try.
+   */
+  priorMiss?: boolean;
 }
 
 /** One item. Its state resets whenever the item changes. */
@@ -245,7 +250,7 @@ export function ItemView(props: ItemViewProps & ItemViewExtraProps) {
   return <ItemRun key={props.item.id} {...props} />;
 }
 
-function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, nextLabel = 'Next', autoFocus = true, stage = 'first', afterHelpLabel = nextLabel, canMoveOn = false, onMiss }: ItemViewProps & ItemViewExtraProps) {
+function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, nextLabel = 'Next', autoFocus = true, stage = 'first', afterHelpLabel = nextLabel, canMoveOn = false, onMiss, priorMiss = false }: ItemViewProps & ItemViewExtraProps) {
   const learn = mode === 'learn';
   const uid = useId().replace(/[^A-Za-z0-9_-]/g, '');
   const promptId = `${uid}-prompt`;
@@ -263,6 +268,16 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
   const [hintOpen, setHintOpen] = useState(false);
   /** Learn mode: the item's guided board (workFirst) is marked right, so the answer buttons can show. */
   const [workDone, setWorkDone] = useState(() => !learn || !item.workFirst);
+  /** The item's board is a case board: it draws the scene itself and stays up, marked, once it is done. */
+  const caseWork = learn && item.workFirst?.layout === 'cases';
+  /** A wrong mark was checked on the item's board: the item no longer counts as right on the first try. */
+  const boardMissed = useRef(priorMiss);
+  const [boardFixed, setBoardFixed] = useState(priorMiss);
+  /** Fixed when the item opens: the try had a miss before it was left. */
+  const [missedBefore] = useState(priorMiss);
+  /** Learn mode: the thinking board (item.scratch) is open. Once opened it keeps its marks while hidden. */
+  const [scratchOpen, setScratchOpen] = useState(false);
+  const [scratchUsed, setScratchUsed] = useState(false);
   /** The explanation of the latest wrong answer. Kept for "Review the explanation" during a retry. */
   const [explained, setExplained] = useState<ExplanationModel | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -306,6 +321,7 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
             retried: misses > 0 && correct,
             fresh: 0,
             freshPassed: false,
+            ...(boardMissed.current ? { boardFixed: true } : {}),
             ...(help.current.gap ? { gap: help.current.gap } : {}),
           },
         }
@@ -362,7 +378,7 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
     if (g.correct) {
       solvedMs.current = Date.now() - startedAt;
       setPhase('right');
-      setLive(rightTitle(stage, misses, help.current.hint));
+      setLive(rightTitle(stage, misses, help.current.hint, boardMissed.current));
     } else {
       // Teach at once: no second wrong guess before the explanation.
       const m = explanationFor(item, answer);
@@ -384,7 +400,7 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
   const finish = (correct: boolean, extra?: { moveOn?: boolean }) => {
     if (finished.current) return;
     finished.current = true;
-    const r = record(correct, correct && misses === 0, lastAnswer.current);
+    const r = record(correct, correct && misses === 0 && !boardMissed.current, lastAnswer.current);
     onDone(extra?.moveOn && r.help ? { ...r, help: { ...r.help, moveOn: true } } : r);
   };
   const next = () => finish(phase === 'right');
@@ -604,9 +620,9 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
         {item.prompt}
       </p>
 
-      {item.scene && !sceneInControls && <SceneView scene={item.scene} clueState={clueState} />}
+      {item.scene && !sceneInControls && !caseWork && !(learn && scratchOpen) && <SceneView scene={item.scene} clueState={clueState} />}
 
-      {learn && item.workFirst && !workDone ? (
+      {learn && item.workFirst && (!workDone || caseWork) && (
         <DrillBoard
           step={item.workFirst}
           embedded
@@ -614,14 +630,44 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
           kicker="First, mark the cases"
           doneLabel="Now answer the question"
           autoFocus={false}
+          settled={workDone}
+          onWrong={() => {
+            // A wrong mark on the item's own board: the item is no longer a first try (saved at once, so leaving
+            // and coming back does not give a clean try).
+            if (boardMissed.current || misses > 0) return;
+            boardMissed.current = true;
+            setBoardFixed(true);
+            onMiss?.();
+          }}
           onDone={() => {
             setWorkDone(true);
             requestAnimationFrame(() => promptRef.current?.focus());
           }}
         />
-      ) : (
-        controls
       )}
+
+      {learn && item.scratch && !item.workFirst && (
+        <div className="play-scratch">
+          <button
+            type="button"
+            className="play-btn play-btn--ghost play-btn--small play-scratch-toggle"
+            aria-expanded={scratchOpen}
+            onClick={() => {
+              setScratchOpen((o) => !o);
+              setScratchUsed(true);
+            }}
+          >
+            {scratchOpen ? 'Hide the case board' : 'Use the case board'}
+          </button>
+          {scratchUsed && (
+            <div hidden={!scratchOpen}>
+              <DrillBoard step={item.scratch} embedded scratch readAloud={readAloud} kicker="Thinking board" autoFocus={false} onDone={() => undefined} />
+            </div>
+          )}
+        </div>
+      )}
+
+      {(!learn || !item.workFirst || workDone) && controls}
 
       {learn && phase === 'answer' && workDone && (
         <>
@@ -682,10 +728,17 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
         <div className="play-feedback play-feedback--right">
           <div className="play-feedback-title">
             <PlayIcon name="check" size={20} />
-            <span>{rightTitle(stage, misses, help.current.hint)}</span>
+            <span>{rightTitle(stage, misses, help.current.hint, boardFixed)}</span>
           </div>
           {stage === 'first' && misses > 0 && (
             <p className="play-feedback-note">You fixed it with the explanation’s help. That counts as practice with help.</p>
+          )}
+          {stage === 'first' && misses === 0 && boardFixed && (
+            <p className="play-feedback-note">
+              {missedBefore
+                ? 'This question had a miss before you left, so it counts as practice with help, not a first try.'
+                : 'You fixed a mark on the board first. That counts as practice with help, not a first try.'}
+            </p>
           )}
           {stage === 'fresh' && help.current.hint && <p className="play-feedback-note">You used a hint, so this idea will come back in your notebook for another try later.</p>}
           <p>{item.explain}</p>

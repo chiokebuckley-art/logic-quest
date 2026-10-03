@@ -155,8 +155,11 @@ export function thingName(t: Thing): string {
   return base;
 }
 
-/** What a scene says, as lines to read aloud. */
-export function sceneSpeech(scene: Scene): string[] {
+/**
+ * What a scene says, as lines to read aloud. revealed: for a case board shown one step at a time, how many steps
+ * are showing (default: all of them).
+ */
+export function sceneSpeech(scene: Scene, revealed?: number): string[] {
   switch (scene.kind) {
     case 'things':
       // Numbered, because explanations say "Card 2" and "face-down card 3".
@@ -186,6 +189,24 @@ export function sceneSpeech(scene: Scene): string[] {
         ...(scene.caption ? [asSentence(scene.caption)] : []),
         ...scene.rows.map((r) => `${r.label}: ${scene.cols.map((c) => `${c.label}: ${word(scene.marks[r.id]?.[c.id])}${scene.labels?.[r.id]?.[c.id] ? `, ${scene.labels[r.id][c.id]}` : ''}`).join('; ')}.`),
       ];
+    }
+    case 'cases': {
+      // The rule and the signs, every verdict on the board, then the worked steps shown so far.
+      const steps = scene.steps ?? [];
+      const shown = Math.min(revealed ?? steps.length, steps.length);
+      const own = steps.length > 0 && shown < steps.length ? scene.pretend : undefined;
+      const lines = [asSentence(scene.rule), ...scene.boxes.map((b) => `${b.name} sign: ${asSentence(b.sign)}`)];
+      scene.boxes.forEach((b, k) => {
+        const v = scene.verdicts?.[k];
+        const n = scene.counts?.[k];
+        if (!v || k === own) return;
+        lines.push(`${b.name}: ${n !== null && n !== undefined ? `${n} true sign${n === 1 ? '' : 's'}, ` : ''}${v === 'keep' ? 'kept' : 'crossed out'}.`);
+      });
+      if (steps.length) lines.push(...steps.slice(0, shown).map((st) => st.say));
+      else if (scene.pretend !== undefined && scene.stamps) {
+        lines.push(`Picked: ${scene.boxes[scene.pretend].name}.`, ...scene.boxes.map((b, i) => `${b.name} sign: ${scene.stamps![i] ? 'True' : 'False'}.`));
+      }
+      return lines;
     }
   }
 }

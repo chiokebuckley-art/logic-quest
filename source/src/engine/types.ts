@@ -52,7 +52,24 @@ export type Scene =
    * A logic grid drawn as a picture (not playable): rows × cols with some ✓ / ✗ marks. For worked examples.
    * labels: a short word drawn inside a box ('the break'), by row id and column id.
    */
-  | { kind: 'grid'; rows: Choice[]; cols: Choice[]; marks: Record<string, Record<string, 'yes' | 'no'>>; caption?: string; labels?: Record<string, Record<string, string>> };
+  | { kind: 'grid'; rows: Choice[]; cols: Choice[]; marks: Record<string, Record<string, 'yes' | 'no'>>; caption?: string; labels?: Record<string, Record<string, string>> }
+  /**
+   * A case board drawn as a picture (sign puzzles): the boxes as cards, each with its sign. One case can be picked
+   * (pretend the treasure is in box `pretend`): then each sign carries a True or False stamp for that case. Each box
+   * can show its count of true signs and its verdict: Keep (a ring) or Reject (a cross). `steps`: a worked example
+   * shown one stamp at a time (each sign, then the count and the verdict), one line each. `changed`: the sign a twin
+   * changed, tagged on the picture.
+   */
+  | { kind: 'cases'; rule: string; boxes: SignBox[]; pretend?: number; stamps?: boolean[]; counts?: (number | null)[]; verdicts?: (CaseVerdict | null)[]; steps?: CaseStep[]; changed?: number };
+
+/** A box's verdict on a case board: Keep (drawn as a ring) or Reject (drawn as a cross). */
+export type CaseVerdict = 'keep' | 'reject';
+
+/** One step of a worked case on a case board: the button that shows it ("Check the Gold chest sign") and its line. */
+export interface CaseStep {
+  label: string;
+  say: string;
+}
 
 export interface Choice {
   id: string;
@@ -210,6 +227,11 @@ interface ItemBase {
    * lesson's planned quiz only: never an extra quiz item, a notebook repair or a new example after a miss.
    */
   fixed?: boolean;
+  /**
+   * A thinking board the learner may open while answering (lessons and practice, never checks): the question's own
+   * board to mark by taps. It is never checked and never counts; it only helps.
+   */
+  scratch?: DrillStep;
 }
 
 export interface ChooseItem extends ItemBase {
@@ -334,6 +356,8 @@ export interface DrillMark {
   given?: boolean;
   /** The shape card this mark is about, drawn beside its label ("Fits or Not" on each card of a deck). */
   thing?: Thing;
+  /** A case board's stamp (DrillStep.layout 'cases'): the box whose sign it sits on, by index. */
+  on?: number;
   /**
    * The first mismatch in plain words, keyed by the wrong option's id: "Silver’s sign is true if the treasure is
    * in Gold. The treasure is not in Silver." Every wrong option of every mark to tap has one.
@@ -351,6 +375,11 @@ export interface DrillRow {
   note?: string;
   /** A picture for this row: the shape cards it is about. */
   things?: Thing[];
+  /**
+   * A case board's row (DrillStep.layout 'cases'): the box this case pretends the treasure is in, by index, and its
+   * name in a sentence ("the Gold chest", "Box A").
+   */
+  case?: { box: number; name: string };
 }
 
 /** A guided board: the Do beat. Same board as the worked example, or a twin that changes one piece. */
@@ -377,6 +406,14 @@ export interface DrillStep {
   columns?: string[];
   /** A grid board's caption ("Snacks"). */
   caption?: string;
+  /**
+   * 'cases': a case board (sign puzzles). The scene's boxes are drawn as cards. Tap a box to pretend the treasure is
+   * there (a row with that `case`), tap each sign to stamp True or False (the marks with `on`), and the board counts
+   * the True stamps. Then Keep (a ring) or Reject (a cross) the box (the row's mark without `on`).
+   */
+  layout?: 'cases';
+  /** A case board that is a twin: the sign it changed, by index, tagged "Changed" on the board. */
+  changed?: number;
   /**
    * Open this board right after key-idea card number afterCard (0-based) instead of after the last card, so the Do
    * sits next to its See. Boards keep their order; later cards follow the board.

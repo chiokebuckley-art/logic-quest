@@ -103,7 +103,7 @@ describe('fields from a newer version', () => {
 
 describe('the lesson in progress', () => {
   it('is kept through a reload, and a damaged one is dropped', () => {
-    const d = { ...newSave(0), lessonRun: { stopId: 's1', lessonId: 's1.l3', seed: 12345, next: 2, firstTry: 1 } };
+    const d = { ...newSave(0), lessonRun: { stopId: 's1', lessonId: 's1.l3', seed: 12345, next: 2, firstTry: 1, plan: '1k3m9x' } };
     expect(parseSave(JSON.parse(JSON.stringify(d)))!.lessonRun).toEqual(d.lessonRun);
     for (const bad of [{ stopId: 's1', lessonId: 's2.l1', seed: 1, next: 1, firstTry: 0 }, { stopId: 's1', lessonId: 's1.l3', seed: 'x' }, 'nope']) {
       expect(parseSave({ ...newSave(0), lessonRun: bad })!.lessonRun).toBeNull();
