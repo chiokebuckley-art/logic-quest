@@ -8,6 +8,7 @@ src/
   engine/                pure TypeScript, tested with vitest
     types.ts             the Item model (choose, tapall, order, assign, multi), Scene, LessonDef, StopDef
     teach.ts             helpers for the teaching after a wrong answer (Item.teach, ChoiceFeedback)
+    drill.ts             the Do step: checkDrill() for guided boards, and the lesson pass rule (passState)
     fresh.ts             new examples on the same skill after a miss
     grade.ts             grade(item, answer); clueHolds() for line-ups, gridClueHolds() for logic grids,
                          claimTrue() / speakerFits() for knights and knaves
@@ -45,6 +46,24 @@ the contract test (`src/engine/__tests__/stops.test.ts`) proves each item is wel
 islands, it brute-forces every possible answer and checks that exactly one fits. An item can set `seconds` for a
 longer check timer: grids and three-islander puzzles get 150–180 seconds instead of 90.
 
+## Lessons: See, Do, Quiz
+
+Every lesson teaches each new method in three beats (see "Teach before the quiz" in `CONTENT_GUIDE.md`):
+
+- **See.** The key-idea cards (`IdeaCards`). One card shows a worked case already marked on its board. Tapping
+  Next is allowed, and it never passes anything.
+- **Do.** The guided boards (`LessonDef.drill`, drawn by `DrillBoard`). The same board stays up. A shown case is
+  drawn marked, and the learner marks a new case by taps: true or false, fits or not, a check or a cross, a count,
+  keep or reject. "Check my marks" names the first mismatch in plain words (`checkDrill` in `engine/drill.ts`). A
+  wrong mark stays until the learner changes it. A board with `columns` is drawn as a grid.
+- **Quiz.** The practice tries (`LearnItem`), only in the rule family the lesson taught. An item can carry its own
+  board (`workFirst`), marked before its answer buttons show. Its Hint shows one marked case (`hintCase`).
+
+`LessonRunner` runs ideas, then boards, then tries, then the recap. The lesson is passed only when the boards are
+marked right and the pass rule is met (`LessonDef.pass`; default 3 right on the first try with no hint, optionally
+in a row or including tagged items). Until then, extra quiz items come from the lesson's own practice
+(`extraQuizItem`). The store refuses `completeLesson` for a lesson with boards that are not in `SaveData.drilled`.
+
 ## Wrong answers
 
 A wrong answer is a teaching moment (see "Wrong answers: teach first" in `CONTENT_GUIDE.md`):
@@ -77,9 +96,11 @@ A wrong answer is a teaching moment (see "Wrong answers: teach first" in `CONTEN
 
 `notebook.ts` follows Engineering Quest's notebook:
 
-- A miss adds a card for that skill: a wrong check answer, a timeout, or "Show me".
+- A miss adds a card for that skill: a wrong check answer, a timeout, or a lesson try not passed on its own after
+  the explanation.
 - The card comes back as a **fresh** question on the same skill. `freshItem` draws it from the lesson's
-  practice sets. It is ready right away, then 3 days after the first fix, then 7 days after the second.
+  practice sets, never the lesson's scaffolded first quiz (`workFirst`). It is ready right away, then 3 days after
+  the first fix, then 7 days after the second.
 - Three clean fixes, each right on the first try, clear the card.
 - A miss while fixing starts the card over from tomorrow.
 - A card for a stop this version does not have (from a newer version's save) waits as "In a later version". It
@@ -94,6 +115,10 @@ Players and saves live in `localStorage`:
 
 - `logic-quest.players.v1` holds the registry.
 - `logic-quest.save.<id>` holds each player's save.
+
+A save also keeps `drilled` (lessons whose guided boards were marked right) and `lessonRun` (the lesson in
+progress: its seed, the next try, whether the boards are done, and each quiz answer, so a resumed lesson rebuilds the
+same extra items).
 
 Every save carries `game: "logic-quest"`, so saves from other family games are refused. Top-level fields that
 this version does not know (added by a newer version) are carried through untouched. So an older tab that saves

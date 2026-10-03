@@ -51,5 +51,7 @@ export function teachStrings(item: Item): string[] {
       out.push(...(fb.simpler ?? []));
     }
   }
+  if (item.hint) out.push(item.hint);
+  if (item.hintCase) out.push(...caseText(item.hintCase));
   return out;
 }

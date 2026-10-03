@@ -40,11 +40,19 @@ export interface Speaker {
 export type Scene =
   | { kind: 'things'; things: Thing[] } // a row of shape cards, some may be face down
   | { kind: 'boxes'; boxes: SignBox[]; rule: string } // rule: 'Exactly one sign is true.'
-  | { kind: 'clues'; clues: string[] } // pinned clue list, always visible while solving
+  /**
+   * A pinned clue list, always visible while solving. A worked example can also show one line of people (first to
+   * last) and mark each clue as holding or broken for that line.
+   */
+  | { kind: 'clues'; clues: string[]; marks?: ('ok' | 'broken')[]; line?: { names: string[]; first: string; last: string } }
   | { kind: 'text'; lines: string[] } // a sentence, rule or quote card
-  | { kind: 'speakers'; speakers: Speaker[]; rule?: string } // speech bubbles; rule: 'Knights always tell the truth…'
-  /** A logic grid drawn as a picture (not playable): rows × cols with some ✓ / ✗ marks. For worked examples. */
-  | { kind: 'grid'; rows: Choice[]; cols: Choice[]; marks: Record<string, Record<string, 'yes' | 'no'>>; caption?: string };
+  /** Speech bubbles. rule: 'Knights always tell the truth…'. fact: what is true on this board ('The well is full.'), drawn as a banner. */
+  | { kind: 'speakers'; speakers: Speaker[]; rule?: string; fact?: string }
+  /**
+   * A logic grid drawn as a picture (not playable): rows × cols with some ✓ / ✗ marks. For worked examples.
+   * labels: a short word drawn inside a box ('the break'), by row id and column id.
+   */
+  | { kind: 'grid'; rows: Choice[]; cols: Choice[]; marks: Record<string, Record<string, 'yes' | 'no'>>; caption?: string; labels?: Record<string, Record<string, string>> };
 
 export interface Choice {
   id: string;
@@ -185,6 +193,23 @@ interface ItemBase {
   seconds?: number;
   /** Teaching shown after a wrong answer in lessons and practice (never in checks). */
   teach?: Teach;
+  /**
+   * A marked case the Hint shows with its words (lessons and practice only): one case with every truth already
+   * marked, so the hint models the method instead of only restating it. Pick a case that is not the answer.
+   */
+  hintCase?: TeachCase;
+  /**
+   * A guided board the learner marks before the answer buttons appear (the first quiz of a new method). The
+   * answer counts only after these marks are right. Never shown in checks.
+   */
+  workFirst?: DrillStep;
+  /** Tags a lesson's pass rule can ask for (LessonPass.include), such as 'false-statement' or 'cant-tell'. */
+  tags?: string[];
+  /**
+   * The same board every time (a first quiz on the worked example's cards, a frozen twin). It belongs in its
+   * lesson's planned quiz only: never an extra quiz item, a notebook repair or a new example after a miss.
+   */
+  fixed?: boolean;
 }
 
 export interface ChooseItem extends ItemBase {
@@ -281,13 +306,110 @@ export interface IdeaCard {
   scene?: Scene;
 }
 
+// ---------- the Do step: guided boards ----------
+//
+// Every new method is taught See -> Do -> Quiz. See: a key-idea card with one case already marked. Do: the learner
+// marks a case on that same board by taps (true or false, fits or not, a check or a cross, a count, keep or
+// reject). Quiz: a twin of the same rule family, only after the marks are right. Reading the cards never passes a
+// lesson: the learner has to perform the marks.
+
+/** One choice on a guided board: "True", "False", "2", "Keep". */
+export interface DrillOption {
+  id: string;
+  label: string;
+}
+
+/**
+ * One mark on a guided board. A given mark is shown already set (the worked case); the learner sets every other
+ * mark by tapping one option. A wrong option stays wrong until the learner changes it; nothing is filled in.
+ */
+export interface DrillMark {
+  id: string;
+  /** What is being marked, in words: "Gold sign", "True signs", "Big red circle", "Leo and the apple". */
+  label: string;
+  options: DrillOption[];
+  /** The id of the right option, computed by the engine. */
+  answer: string;
+  /** Shown already marked, not tappable. */
+  given?: boolean;
+  /** The shape card this mark is about, drawn beside its label ("Fits or Not" on each card of a deck). */
+  thing?: Thing;
+  /**
+   * The first mismatch in plain words, keyed by the wrong option's id: "Silver’s sign is true if the treasure is
+   * in Gold. The treasure is not in Silver." Every wrong option of every mark to tap has one.
+   */
+  why: Record<string, string>;
+}
+
+/** One row of a guided board: one case, card, box or person, with its marks. */
+export interface DrillRow {
+  id: string;
+  /** "Pretend the treasure is in the Silver chest." Enough on its own if a picture cannot load. */
+  label: string;
+  marks: DrillMark[];
+  /** Shown under a given row, and under the learner's row once its marks are right: "1 true sign. Keep." */
+  note?: string;
+  /** A picture for this row: the shape cards it is about. */
+  things?: Thing[];
+}
+
+/** A guided board: the Do beat. Same board as the worked example, or a twin that changes one piece. */
+export interface DrillStep {
+  id: string;
+  /** "Mark a case" */
+  title: string;
+  /** What to do, in a few short sentences. */
+  body: string[];
+  /** The board: the same scene as the worked example. */
+  scene?: Scene;
+  /**
+   * When the board is a twin of the worked example rather than the same board: what changed, in words ("Card 2
+   * is gone."). A twin changes one piece.
+   */
+  twin?: string;
+  /** Given rows first (the shown case), then the rows the learner marks. */
+  rows: DrillRow[];
+  /**
+   * A grid board (a logic grid, or the four boxes of an IF-THEN rule): one column per entry, and each row's marks
+   * fill its columns in order. Grid marks use the options 'yes' (✓) and 'no' (✗); a tap cycles a box blank, ✗, ✓.
+   * Row labels are short ("Mia"). Without columns, each row is a card of labelled choices.
+   */
+  columns?: string[];
+  /** A grid board's caption ("Snacks"). */
+  caption?: string;
+  /**
+   * Open this board right after key-idea card number afterCard (0-based) instead of after the last card, so the Do
+   * sits next to its See. Boards keep their order; later cards follow the board.
+   */
+  afterCard?: number;
+  /** Said once every mark is right. */
+  done: string;
+}
+
+/**
+ * When a lesson is passed: the Do boards are marked right, then this many quiz answers are right on the first try
+ * with no hint. More quiz items come until the rule is met. Default: 3 first-try answers.
+ */
+export interface LessonPass {
+  firstTry: number;
+  /** The first-try answers must come in a row. */
+  inARow?: boolean;
+  /** Each group needs at least one first-try answer on an item carrying its tag (ItemBase.tags). */
+  include?: { tag: string; label: string }[];
+}
+
 export interface LessonDef {
   /** 's1.l1' */
   id: string;
   title: string;
+  /** See: the key ideas, ending on a worked example with one case already marked. */
   ideas: IdeaCard[];
-  /** 3-5 guided tries in different skins (everyday, fantasy, abstract). Same rng -> same items. */
+  /** Do: the guided boards, marked by taps after the cards and before any quiz. Required on every lesson. */
+  drill?: DrillStep[];
+  /** 3-5 quiz tries in different skins (everyday, fantasy, abstract), all in the rule family the lesson taught. */
   practice(rng: Rng): Item[];
+  /** Default { firstTry: 3 }. */
+  pass?: LessonPass;
 }
 
 export interface StopDef {

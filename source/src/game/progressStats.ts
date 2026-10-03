@@ -153,7 +153,7 @@ export const SKILL_NAMES: Readonly<Record<string, string>> = {
   's1.not-exactly': 'The NOT of “exactly”',
   's1.not-at-least': 'The NOT of “at least”',
   's1.not-first': 'The NOT of “the first card”',
-  's1.not-more': 'The NOT of “more than” (a tie or exactly k)',
+  's1.not-more': 'The NOT of “more than” (a tie)',
   's1.signs-count': 'Treasure signs: count the true signs',
   's1.signs-owner': 'Treasure signs: the treasure box’s sign',
   's2.not': 'NOT',

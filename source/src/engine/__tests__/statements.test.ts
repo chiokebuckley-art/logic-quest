@@ -3,8 +3,9 @@
  * evaluator written separately from the engine, by brute force over all ways to fill the face-down cards.
  */
 import { describe, expect, it } from 'vitest';
-import { FRESH_CONTRAST, L1_RULE, L2_EXAMPLES, L3_EXAMPLE, SENTENCES, TEACH_SENTENCES, isStatement, rowSentence, sentenceId, stop1 } from '../../content/stop1';
+import { FRESH_CONTRAST, L1_DO, L1_EXAMPLE, L1_RULE, L1_SHOWN, L2_EXAMPLES, L2_TWIN, L3_EXAMPLE, L3_TIE, SENTENCES, TEACH_SENTENCES, isStatement, rowSentence, sentenceId, stop1 } from '../../content/stop1';
 import { explanationFor } from '../../game/explanation';
+import { checkDrill, marksToTap, passState } from '../drill';
 import {
   CANT_TELL_TERM,
   CARD,
@@ -36,8 +37,8 @@ import {
 import { freshCheckSet } from '../fresh';
 import { READING, fkGrade, longestSentence } from '../readability';
 import { createRng, type Rng } from '../rng';
-import { feedbackText, teachStrings } from '../teach';
-import type { ChooseItem, Item, TeachCase, Thing } from '../types';
+import { caseText, feedbackText, teachStrings } from '../teach';
+import type { ChooseItem, DrillMark, DrillStep, Item, TeachCase, Thing } from '../types';
 
 // ---------- an independent evaluator ----------
 
@@ -569,7 +570,8 @@ describe('stop 1 sets', () => {
       expect(nots[0].conflict).toBe(true);
       if (nots.length === 3) extraNots++;
     }
-    expect(extraNots).toBeGreaterThan(50);
+    // Seven lessons share ten check items, so the check has exactly two NOT flips: an every trap and a comparison.
+    expect(extraNots).toBe(0);
     expect(new Set(Object.values(NOT_TAGS)).size).toBeGreaterThanOrEqual(5);
   });
 
@@ -1144,5 +1146,548 @@ describe('lesson 2 wrong answers teach first', () => {
 
   it('T-read: each item reads at grade 7 or lower, with curly quotes and “Can’t tell” spelled one way', () => {
     for (const it of lessonItems('s1.l2', 30)) expectReadable(it);
+  });
+});
+
+// ---------- See -> Do -> Quiz: lessons 1-3 (the skill-drill handoff, 2 Oct 2026) ----------
+//
+// Every mark on every guided board is recomputed here, apart from the engine: lesson 1 from labels written in this
+// file, lessons 2 and 3 by reading each sentence back from its words and judging it with the evaluator above.
+
+describe('See -> Do -> Quiz: lessons 1-3 (skill-drill handoff)', () => {
+  const [l1, l2, l3] = stop1.lessons;
+  const tap = (st: DrillStep) => marksToTap(st);
+  const right = (st: DrillStep) => Object.fromEntries(tap(st).map((m) => [m.id, m.answer]));
+  const unquote = (x: string) => x.replace(/^“|”$/g, '');
+  const wrongOptions = (m: DrillMark) => m.options.filter((o) => o.id !== m.answer).map((o) => o.id);
+  /** A wrong tap on one mark names that mismatch: checkDrill's message is the mark's own words for it. */
+  function expectNamedMismatch(st: DrillStep) {
+    const ok = right(st);
+    expect(checkDrill(st, ok).done).toBe(true);
+    for (const m of tap(st)) {
+      for (const o of wrongOptions(m)) {
+        const c = checkDrill(st, { ...ok, [m.id]: o });
+        expect(c.done).toBe(false);
+        expect(c.message).toBe(m.why[o]);
+      }
+    }
+    expect(checkDrill(st, {}).done, 'only tapping Next marks nothing').toBe(false);
+  }
+
+  // ---------- lesson 1 ----------
+
+  /** Labels written here, apart from the bank: the cards' four sentences and the board's three. */
+  const L1_LABELS: Record<string, string> = {
+    'A week has seven days.': 'true',
+    'Cats can fly.': 'false',
+    'Is it raining?': 'question',
+    'Pizza is the best food.': 'opinion',
+    'The moon is made of cheese.': 'false',
+    'Is the moon made of cheese?': 'question',
+    'The moon is the prettiest thing in the sky.': 'opinion',
+  };
+  const bankKind = new Map(SENTENCES.map((s) => [s.text, s.kind as string]));
+
+  it('lesson 1 See: the last key idea sorts four card sentences on a board (true, false, a question, an opinion)', () => {
+    const card = l1.ideas[l1.ideas.length - 1];
+    expect(card.title).toBe('An example');
+    expect(l1.ideas.length).toBeLessThanOrEqual(6);
+    if (card.scene?.kind !== 'grid') throw new Error('no board');
+    const { rows, cols, marks } = card.scene;
+    expect(cols.map((c) => c.label)).toEqual(['True', 'A statement']);
+    expect(rows.map((r) => unquote(r.label))).toEqual(L1_EXAMPLE.map((s) => s.text));
+    for (const r of rows) {
+      const text = unquote(r.label);
+      const kind = L1_LABELS[text];
+      // The bank labels the same sentence the same way.
+      if (bankKind.has(text)) expect(bankKind.get(text), text).toBe(kind);
+      expect(marks[r.id].statement, text).toBe(KIND_IS_STATEMENT[kind] ? 'yes' : 'no');
+      expect(marks[r.id].true, text).toBe(kind === 'true' ? 'yes' : kind === 'false' ? 'no' : undefined);
+    }
+    // The false sentence is marked: not true, still a statement.
+    const cats = rows.find((r) => r.label === '“Cats can fly.”')!;
+    expect(marks[cats.id]).toEqual({ true: 'no', statement: 'yes' });
+  });
+
+  it('lesson 1 Do: the sorted example stays up; the learner sorts the handoff’s moon pair and an opinion by taps', () => {
+    expect(l1.drill!.length).toBe(1);
+    const st = l1.drill![0];
+    expect(st.scene).toBe(l1.ideas[l1.ideas.length - 1].scene);
+    expect(st.rows.every((r) => r.marks.every((m) => !m.given))).toBe(true);
+    const texts = st.rows.map((r) => unquote(r.label));
+    expect(texts).toEqual(L1_DO.map((s) => s.text));
+    for (const [r, text] of st.rows.map((r) => [r, unquote(r.label)] as const)) {
+      // New sentences: not in the bank, not a teaching sentence, so no quiz can repeat them.
+      expect(SENTENCES.some((s) => s.text === text), text).toBe(false);
+      expect(Object.values(TEACH_SENTENCES).some((s) => s.text === text), text).toBe(false);
+      const kind = L1_LABELS[text];
+      if (text.endsWith('?')) expect(kind).toBe('question');
+      const [m] = r.marks;
+      expect(m.answer, text).toBe(KIND_IS_STATEMENT[kind] ? 'yes' : 'no');
+      // The quiz's own two choices, so the taps are the same taps as the quiz.
+      expect(m.options).toEqual([{ id: 'yes', label: 'A statement' }, { id: 'no', label: 'Not a statement' }]);
+      const why = m.why[wrongOptions(m)[0]];
+      expect(why, text).toContain(`“${text.replace(/\.$/, '')}”`);
+      expect(why).toContain({ false: 'a false sentence is still a statement', question: 'A question can’t be true or false', opinion: 'we do not count an opinion as a statement' }[kind]!);
+    }
+    // The handoff's sample taps: “The moon is made of cheese.” is a statement (false, still a statement).
+    // “Is the moon made of cheese?” is not a statement.
+    expect(st.rows[0].marks[0].answer).toBe('yes');
+    expect(st.rows[1].marks[0].answer).toBe('no');
+    expectNamedMismatch(st);
+    expect(tap(st).length).toBeLessThanOrEqual(12);
+  });
+
+  it('lesson 1 Quiz: new sentences only; sorts first (not a statement, false, true or unknown, an opinion or exclamation), then one “Which of these”', () => {
+    for (let seed = 1; seed <= 200; seed++) {
+      const items = l1.practice(createRng(seed)).map(choose);
+      expect(items.length).toBe(5);
+      const kinds = items.slice(0, 4).map((it) => {
+        expect(it.prompt).toBe('Is this sentence a statement?');
+        return bankKind.get((it.scene as { lines: string[] }).lines[0])!;
+      });
+      expect(['question', 'command']).toContain(kinds[0]);
+      expect(kinds[1]).toBe('false');
+      expect(['true', 'unknown']).toContain(kinds[2]);
+      expect(['opinion', 'feeling']).toContain(kinds[3]);
+      expect(items[4].prompt).toMatch(/^Which of these is (not )?a statement\?$/);
+      expect(items.map((it) => it.tags)).toEqual([['not-statement'], ['false-statement'], ['statement'], ['not-statement'], ['which']]);
+      // Any three sorts in a row hold a false sentence and one that is not a statement.
+      for (const w of [items.slice(0, 3), items.slice(1, 4)]) {
+        expect(w.some((it) => it.tags!.includes('false-statement'))).toBe(true);
+        expect(w.some((it) => it.tags!.includes('not-statement'))).toBe(true);
+      }
+    }
+    expect(l1.pass).toEqual({
+      firstTry: 3,
+      inARow: true,
+      include: [
+        { tag: 'false-statement', label: 'a false sentence (it is still a statement)' },
+        { tag: 'not-statement', label: 'a sentence that is not a statement' },
+      ],
+    });
+  });
+
+  it('lesson 1: no quiz, check, Arcade item or new example asks about a sentence the cards or the board showed', () => {
+    const ideaText = l1.ideas.flatMap((c) => c.body).join(' ');
+    // Every bank sentence a card quotes is on the shown list.
+    for (const s of SENTENCES) if (ideaText.includes(`“${s.text.replace(/\.$/, '')}`)) expect(L1_SHOWN, s.text).toContain(s.text);
+    expect(L1_SHOWN).toEqual(expect.arrayContaining([...L1_EXAMPLE, ...L1_DO].map((s) => s.text)));
+    const shown = new Set(L1_SHOWN);
+    const asked = (it: ChooseItem) => (it.scene?.kind === 'text' ? it.scene.lines : it.choices.map((c) => c.label));
+    let n = 0;
+    for (let seed = 1; seed <= 300; seed++) {
+      const practice = l1.practice(createRng(seed)).map(choose);
+      const all = [
+        ...practice,
+        ...stop1.check!(createRng(seed)).filter((i) => i.lesson === 's1.l1').map(choose),
+        ...[stop1.practice!(createRng(seed))].filter((i) => i.lesson === 's1.l1').map(choose),
+        ...practice.flatMap((it) => freshCheckSet(stop1, it, seed, [], 1)).map(choose),
+      ];
+      for (const it of all) for (const t of asked(it)) {
+        expect(shown.has(t), `${it.id}: ${t}`).toBe(false);
+        n++;
+      }
+    }
+    expect(n).toBeGreaterThan(3000);
+  });
+
+  it('lesson 1 hints: one sentence already sorted, never the one asked and never the answer', () => {
+    const teach = new Map(Object.values(TEACH_SENTENCES).map((s) => [s.text, s.kind as string]));
+    for (let seed = 1; seed <= 100; seed++) {
+      for (const it of l1.practice(createRng(seed)).map(choose)) {
+        const c = it.hintCase!;
+        expect(it.hint).toMatch(/^Here is one /);
+        const text = unquote(c.label);
+        const kind = teach.get(text) ?? bankKind.get(text)!;
+        expect(kind, text).toBeTruthy();
+        const truths = Object.fromEntries(c.truths!.map((t) => [t.who, t.value]));
+        expect(truths['It is a statement'], text).toBe(KIND_IS_STATEMENT[kind]);
+        expect(c.note).toBeTruthy();
+        if (it.scene?.kind === 'text') {
+          // "Is this a statement?": a teaching sentence of the same kind, never a bank sentence.
+          expect(teach.has(text), text).toBe(true);
+          expect(text).not.toBe(it.scene.lines[0]);
+          expect(kind).toBe(bankKind.get(it.scene.lines[0]));
+        } else {
+          // "Which of these": one of its own choices, sorted, and not the answer.
+          const answer = it.choices.find((x) => x.id === it.answer)!.label;
+          expect(it.choices.map((x) => x.label)).toContain(text);
+          expect(text).not.toBe(answer);
+        }
+        const words = [it.hint!, ...caseText(c)].join('\n');
+        expect(fkGrade(words), words).toBeLessThanOrEqual(READING.maxGrade);
+      }
+    }
+  });
+
+  // ---------- reading lesson 2 and 3 sentences back from their words ----------
+
+  const NUMW: Record<string, number> = { one: 1, two: 2, three: 3 };
+  const OPS: Record<string, 'ge' | 'le' | 'lt' | 'eq'> = { 'At least': 'ge', 'At most': 'le', 'Fewer than': 'lt', Exactly: 'eq' };
+  /** A sentence as the player reads it, turned back into a statement from its words alone. */
+  function readSentence(raw: string): Stmt {
+    const t = unquote(raw);
+    let m: RegExpMatchArray | null;
+    if ((m = t.match(/^There is an? (.+)\.$/))) return { t: 'some', d: descOf(m[1]) };
+    if ((m = t.match(/^Every card is (?:an? )?(.+)\.$/))) return { t: 'every', d: descOf(m[1]) };
+    if ((m = t.match(/^No card is (?:an? )?(.+)\.$/))) return { t: 'none', d: descOf(m[1]) };
+    if ((m = t.match(/^At least one card is not (?:an? )?(.+)\.$/))) return { t: 'someNot', d: descOf(m[1]) };
+    if ((m = t.match(/^There are more (.+?) than (.+)\.$/))) return { t: 'more', a: descOf(m[1]), b: descOf(m[2]) };
+    if ((m = t.match(/^There are at least as many (.+?) as (.+)\.$/))) return { t: 'asMany', a: descOf(m[1]), b: descOf(m[2]) };
+    if ((m = t.match(/^(At least|At most|Fewer than|Exactly) (one|two|three) cards? (?:is|are) (not )?(.+)\.$/))) {
+      return { t: 'count', d: descOf(m[4]), op: OPS[m[1]], k: NUMW[m[2]], ...(m[3] ? { not: true } : {}) };
+    }
+    throw new Error(`cannot read: ${raw}`);
+  }
+  const thingsOf = (st: DrillStep) => (st.scene?.kind === 'things' ? st.scene.things : []);
+  const cardOf = (title: string, l: typeof l1) => {
+    const c = l.ideas.find((x) => x.title === title)!;
+    if (c.scene?.kind !== 'things') throw new Error(`no cards on ${title}`);
+    return c;
+  };
+
+  /** "If face-down card 3 is not a triangle, the sentence is false.": true for every filling it talks about. */
+  function checkClaim(text: string, s: Stmt, row: readonly Thing[], want: boolean) {
+    const m = text.match(/^If face-down card (\d) is (not )?(?:an? )?(.+?), the sentence is (true|false)\./);
+    if (!m) throw new Error(`no claim: ${text}`);
+    const at = Number(m[1]) - 1;
+    expect(row[at].hidden, text).toBe(true);
+    expect(m[4] === 'true', text).toBe(want);
+    const d = descOf(m[3]);
+    let met = 0;
+    eachFilling(row, (cards) => {
+      if (refFits(cards[at], d) === !!m[2]) return;
+      met++;
+      expect(refHolds(s, cards), text).toBe(want);
+    });
+    expect(met, text).toBeGreaterThan(0);
+  }
+
+  /** "Card 2 is small, not big.": a card you can see, read back from the words. */
+  function checkSeen(text: string, row: readonly Thing[]) {
+    const m = text.match(/^Card (\d) is ([^.,]+)(?:, not ([^.]+))?\./);
+    if (!m) throw new Error(`no card named: ${text}`);
+    const c = row[Number(m[1]) - 1];
+    expect(c.hidden, text).toBeFalsy();
+    expect(refFits(c, descOf(m[2])), text).toBe(true);
+    if (m[3]) expect(refFits(c, descOf(m[3])), text).toBe(false);
+  }
+
+  // ---------- lesson 2 ----------
+
+  it('lesson 2 Do: on the cards of “Can’t tell yet” (yellow shown), the learner marks a true, a false and a can’t-tell sentence', () => {
+    const st = l2.drill![0];
+    expect(st.scene).toBe(cardOf('Can’t tell yet', l2).scene);
+    const row = thingsOf(st);
+    expect(row).toEqual(L2_EXAMPLES.cant);
+    const got = st.rows.map((r) => {
+      const s = readSentence(r.label);
+      const [m] = r.marks;
+      expect(m.answer, r.label).toBe(refVerdict(s, row));
+      expect(m.options.map((o) => o.label)).toEqual(['True', 'False', 'Can’t tell']);
+      return [unquote(r.label), m.answer, !!m.given];
+    });
+    expect(got).toEqual([
+      ['There is a yellow card.', 'cant', true],
+      ['There is a square.', 'true', false],
+      ['Every card is big.', 'false', false],
+      ['There is a triangle.', 'cant', false],
+    ]);
+    expectNamedMismatch(st);
+  });
+
+  it('lesson 2 Do: the handoff’s twin. One red card and one face-down card: “Every card is red” is Can’t tell, and the face-down card is why', () => {
+    const st = l2.drill![1];
+    const settled = cardOf('Sometimes you can tell', l2).scene as { things: Thing[] };
+    // One piece changed: card 3 (the blue square) is taken away.
+    expect(st.twin).toMatch(/Card 3, the blue square, is gone/);
+    expect(thingsOf(st)).toEqual(settled.things.slice(0, 2));
+    expect(thingsOf(st)).toEqual(L2_TWIN);
+    expect(refHolds({ t: 'every', d: { color: 'red' } }, settled.things.filter((t) => !t.hidden))).toBe(false);
+    const [shown, mine] = st.rows;
+    expect(shown.marks.every((m) => m.given)).toBe(true);
+    expect([unquote(shown.label), shown.marks[0].answer]).toEqual(['There is a red card.', 'true']);
+    expect(mine.marks.some((m) => m.given)).toBe(false);
+    expect([unquote(mine.label), mine.marks[0].answer]).toEqual(['Every card is red.', 'cant']);
+    expect(refVerdict(readSentence(mine.label), L2_TWIN)).toBe('cant');
+    // On the full board of the card, the blue card made the same sentence false.
+    expect(refVerdict(readSentence(mine.label), settled.things)).toBe('false');
+    expect(mine.marks[0].why.true).toContain('face-down card 2');
+    expectNamedMismatch(st);
+  });
+
+  it('lesson 2 Do: every message for a wrong mark is true on the board (the card you can see, or the face-down card that decides it)', () => {
+    let claims = 0;
+    for (const st of l2.drill!) {
+      const row = thingsOf(st);
+      for (const r of st.rows) {
+        const s = readSentence(r.label);
+        const [m] = r.marks;
+        for (const o of wrongOptions(m)) {
+          const why = m.why[o];
+          expect(why, r.label).toContain(`“${unquote(r.label).replace(/\.$/, '')}”`);
+          if (m.answer === 'cant') {
+            checkClaim(why, s, row, o === 'false');
+            expect(why).toMatch(/You can’t tell yet\.$/);
+          } else {
+            checkSeen(why, row);
+            expect(why).toContain(`is ${m.answer}`);
+          }
+          claims++;
+        }
+      }
+      expect(tap(st).length).toBeLessThanOrEqual(12);
+    }
+    expect(claims).toBe(12);
+  });
+
+  /** Every lesson 2 item a player can meet: practice, the check, the Arcade and the new examples after a miss. */
+  const l2Items = (() => {
+    const out: ChooseItem[] = [];
+    for (let seed = 1; seed <= 120; seed++) {
+      const practice = l2.practice(createRng(seed)).map(choose);
+      out.push(...practice, ...stop1.check!(createRng(seed)).filter((i) => i.lesson === 's1.l2').map(choose));
+      for (const s of [seed, seed + 1000, seed + 2000]) {
+        const a = stop1.practice!(createRng(s));
+        if (a.lesson === 's1.l2') out.push(choose(a));
+      }
+      for (const it of practice) out.push(...freshCheckSet(stop1, it, seed, [], 1).map(choose));
+    }
+    return out;
+  })();
+
+  it('lesson 2 Quiz: only “There is …” and “Every card is …” sentences, in practice, the check, the Arcade and new examples', () => {
+    const forms = new Set<string>();
+    for (const it of l2Items) {
+      const text = rowSentence(it);
+      expect(text, it.prompt).toMatch(/^(There is an? [a-z ]+|Every card is (an? )?[a-z]+)\.$/);
+      const s = readSentence(text);
+      expect(it.answer, text).toBe(refVerdict(s, it.scene?.kind === 'things' ? it.scene.things : []));
+      forms.add(`${s.t}:${Object.keys((s as { d: Desc }).d).sort().join('+')}`);
+    }
+    // Both families, with a color, a shape, or all three features.
+    for (const f of ['some:color', 'some:shape', 'some:color+shape+size', 'every:color', 'every:shape']) expect(forms, f).toContain(f);
+    expect(l2Items.length).toBeGreaterThan(900);
+  });
+
+  it('lesson 2 Quiz: every pack has a can’t-tell trap first, tagged for the pass rule; a right Can’t tell is needed to pass', () => {
+    expect(l2.pass).toEqual({ firstTry: 3, include: [{ tag: 'cant-tell', label: 'a right “Can’t tell”' }] });
+    for (let seed = 1; seed <= 100; seed++) {
+      const items = l2.practice(createRng(seed)).map(choose);
+      expect(items[0].answer).toBe('cant');
+      expect(items[0].conflict).toBe(true);
+      for (const it of items) expect(it.tags).toEqual([it.answer === 'cant' ? 'cant-tell' : 'settled']);
+      // Three first-try answers that are all settled do not pass; one of them a Can't tell does.
+      const settledOnly = items.filter((it) => it.answer !== 'cant').map(() => ({ clean: true, tags: ['settled'] }));
+      expect(passState(l2.pass, settledOnly).met).toBe(false);
+      expect(passState(l2.pass, items.slice(0, 3).map((it) => ({ clean: true, tags: it.tags! }))).met).toBe(true);
+    }
+  });
+
+  it('lesson 2 hints: one way to fill the face-down cards, already checked (a real case from the item’s own teaching)', () => {
+    let against = 0;
+    for (let seed = 1; seed <= 80; seed++) {
+      for (const it of l2.practice(createRng(seed)).map(choose)) {
+        const c = it.hintCase!;
+        expect(it.teach!.cases).toContainEqual(c);
+        expect(c.things!.length).toBe((it.scene as { things: Thing[] }).things.length);
+        expect(c.truths!.length).toBe(1);
+        const s = readSentence(rowSentence(it));
+        const row = (it.scene as { things: Thing[] }).things;
+        if (it.answer === 'cant') {
+          // The filling that goes against what the cards you can see suggest.
+          expect(c.truths![0].value).toBe(!refHolds(s, row.filter((t) => !t.hidden)));
+          against++;
+        } else {
+          expect(c.truths![0].value).toBe(it.answer === 'true');
+        }
+        const words = [it.hint!, ...caseText(c)].join('\n');
+        expect(fkGrade(words), words).toBeLessThanOrEqual(READING.maxGrade);
+      }
+    }
+    expect(against).toBeGreaterThan(80);
+  });
+
+  // ---------- lesson 3 ----------
+
+  const r3 = createRng(707);
+  const FAR_ROWS = [...SMALL_ROWS, ...Array.from({ length: 600 }, () => randCards(r3, 3, 7))];
+  const exactNot = (a: Stmt, b: Stmt) => FAR_ROWS.every((row) => refHolds(a, row) !== refHolds(b, row));
+
+  it('lesson 3 Do: the cards of “The every trap,” then the tie cards; every mark recomputed from the words', () => {
+    expect(l3.drill!.length).toBe(2);
+    const [every, tie] = l3.drill!;
+    expect(every.scene).toBe(cardOf('The every trap', l3).scene);
+    expect(tie.scene).toBe(cardOf('More, a tie, and at least as many', l3).scene);
+    expect(thingsOf(every)).toEqual(L3_EXAMPLE);
+    expect(thingsOf(tie)).toEqual(L3_TIE);
+    const seen: string[][] = [];
+    for (const st of l3.drill!) {
+      const cards = thingsOf(st);
+      st.rows.forEach((r, i) => {
+        // The first row is shown, the second is the learner's.
+        expect(r.marks.every((m) => m.given)).toBe(i === 0);
+        expect(r.marks.some((m) => m.given)).toBe(i === 0);
+        const s = readSentence(r.label);
+        const [pick, mS, mN] = r.marks;
+        const opts = pick.options.map((o) => [o.id, readSentence(o.label)] as const);
+        const nots = opts.filter(([, x]) => exactNot(s, x));
+        // Exactly one option is the NOT, and it is the answer.
+        expect(nots.map(([id]) => id), r.label).toEqual([pick.answer]);
+        const v = refHolds(s, cards);
+        expect(mS.answer).toBe(String(v));
+        expect(mN.answer).toBe(String(refHolds(nots[0][1], cards)));
+        expect(mN.answer).toBe(String(!v));
+        // Each wrong NOT agrees with the statement on these cards: the board shows why it is wrong.
+        for (const [id, w] of opts) {
+          if (id === pick.answer) continue;
+          expect(refHolds(w, cards), `${r.label} / ${id}`).toBe(v);
+          const why = pick.why[id];
+          expect(why).toContain(`“${unquote(r.label).replace(/\.$/, '')}” is ${v} here`);
+          expect(why).toContain(`is ${v} here too`);
+          expect(why).toMatch(/A statement and its NOT never agree\.$/);
+        }
+        seen.push([unquote(r.label), pick.options.find((o) => o.id === pick.answer)!.label, mS.answer, mN.answer]);
+      });
+      expectNamedMismatch(st);
+      expect(tap(st).length).toBeLessThanOrEqual(12);
+    }
+    expect(seen).toEqual([
+      ['Every card is red.', 'At least one card is not red.', 'false', 'true'],
+      ['Every card is big.', 'At least one card is not big.', 'false', 'true'],
+      ['There are more red cards than yellow cards.', 'There are at least as many yellow cards as red cards.', 'false', 'true'],
+      ['At least three cards are red.', 'Fewer than three cards are red.', 'true', 'false'],
+    ]);
+    // The handoff's sample: the NOT of “Every … is red” is not “Every … is blue.” Here the statement is false and
+    // its NOT is true, and “Every card is blue” is false too.
+    const shown = every.rows[0].marks[0];
+    expect(shown.options.map((o) => o.label)).toContain('Every card is blue.');
+    // The counting trap: with exactly 3 red cards, “At most three” is true together with “At least three.”
+    const trap = tie.rows[1].marks[0];
+    expect(trap.options.map((o) => o.label)).toContain('At most three cards are red.');
+    expect(refHolds(readSentence('At most three cards are red.'), L3_TIE)).toBe(true);
+  });
+
+  /** Every lesson 3 item a player can meet. */
+  const l3Items = (() => {
+    const out: ChooseItem[] = [];
+    for (let seed = 1; seed <= 120; seed++) {
+      const practice = l3.practice(createRng(seed)).map(choose);
+      out.push(...practice, ...stop1.check!(createRng(seed)).filter((i) => i.lesson === 's1.l3').map(choose));
+      for (const s of [seed, seed + 1000, seed + 2000]) {
+        const a = stop1.practice!(createRng(s));
+        if (a.lesson === 's1.l3') out.push(choose(a));
+      }
+      for (const it of practice) out.push(...freshCheckSet(stop1, it, seed, [], 1).map(choose));
+    }
+    return out;
+  })();
+  const NOUN = '(?:cards?|balloons?|shirts?|cars?|dragons?|potions?|gems?)';
+  const COLOR = '(?:red|blue|yellow)';
+  /** The NOT flips the cards and the board taught: every, there is, more, exactly, at least. */
+  const TAUGHT = [
+    new RegExp(`^Every ${NOUN} is ${COLOR}\\.$`),
+    /^Every card is an? (circle|square|triangle)\.$/,
+    new RegExp(`^There is an? ${COLOR} ${NOUN}\\.$`),
+    new RegExp(`^There are more ${COLOR} ${NOUN} than ${COLOR} ${NOUN}\\.$`),
+    new RegExp(`^Exactly (one|two|three) ${NOUN} (is|are) ${COLOR}\\.$`),
+    /^At least (two|three) cards are (circles|squares|triangles)\.$/,
+  ];
+
+  it('lesson 3 Quiz: only the NOT flips the cards and the board taught, in practice, the check, the Arcade and new examples', () => {
+    const hit = new Set<number>();
+    for (const it of l3Items) {
+      const line = (it.scene as { lines: string[] }).lines[0].match(/“(.+)”/)![1];
+      const k = TAUGHT.findIndex((re) => re.test(line));
+      expect(k, `${it.id}: ${line}`).toBeGreaterThanOrEqual(0);
+      hit.add(k);
+      expect(['s1.not-every', 's1.not-some', 's1.not-more', 's1.not-exactly', 's1.not-at-least']).toContain(it.skill);
+    }
+    expect(hit.size).toBe(TAUGHT.length);
+    expect(l3Items.length).toBeGreaterThan(1000);
+  });
+
+  it('lesson 3 Quiz: every pack has a counting trap (every, more, exactly or at least), and the pass rule needs one', () => {
+    expect(l3.pass).toEqual({ firstTry: 3, include: [{ tag: 'counting-trap', label: 'a counting trap (every, more, exactly or at least)' }] });
+    for (let seed = 1; seed <= 100; seed++) {
+      const items = l3.practice(createRng(seed)).map(choose);
+      // "Every" and "at least" in every set: the twins of the two boards.
+      expect(items.map((it) => it.skill).slice(0, 4)).toEqual(['s1.not-every', 's1.not-some', 's1.not-more', 's1.not-at-least']);
+      expect(['s1.not-every', 's1.not-exactly']).toContain(items[4].skill);
+      for (const it of items) expect(it.tags!.includes('counting-trap')).toBe(it.skill !== 's1.not-some');
+      // Three first-try NOTs of "there is" alone would not pass.
+      expect(passState(l3.pass, [1, 2, 3].map(() => ({ clean: true, tags: items[1].tags! }))).met).toBe(false);
+      expect(passState(l3.pass, items.slice(0, 3).map((it) => ({ clean: true, tags: it.tags! }))).met).toBe(true);
+    }
+  });
+
+  it('lesson 3 hints: one row already checked, where the classic mistake agrees with the statement', () => {
+    for (let seed = 1; seed <= 80; seed++) {
+      for (const it of l3.practice(createRng(seed)).map(choose)) {
+        const c = it.hintCase!;
+        expect(it.hint).toMatch(/^Here is one row, already checked\./);
+        expect(it.teach!.cases).toContainEqual(c);
+        const [whose, not] = c.truths!;
+        expect(not.who).toBe('The NOT answer');
+        expect(not.value).toBe(!whose.value);
+        const words = [it.hint!, ...caseText(c)].join('\n');
+        expect(fkGrade(words), words).toBeLessThanOrEqual(READING.maxGrade);
+        expect(longestSentence(words).words).toBeLessThanOrEqual(READING.maxSentenceWords);
+      }
+    }
+  });
+
+  it('lesson 3 See: “A quick trick” is not a shortcut past the check. It ends on the check, and every claim it makes holds on every small row', () => {
+    const card = l3.ideas.find((c) => c.title === 'A quick trick')!;
+    const claims = card.body.flatMap((p) => [...p.matchAll(/If (a|no) card is red, “([^”]+)” is (true|false), and “([^”]+)” is (true|false)\./g)]);
+    // One claim for a row with a red card, one for a row without: both kinds of row.
+    expect(claims.map((m) => m[1])).toEqual(['a', 'no']);
+    expect(card.body.join(' ')).toMatch(/They never agree\.$/);
+    for (const [, which, a, va, b, vb] of claims) {
+      const [sa, sb] = [readSentence(`${a}.`), readSentence(`${b}.`)];
+      const rows = SMALL_ROWS.filter((row) => row.some((c) => c.color === 'red') === (which === 'a'));
+      expect(rows.length).toBeGreaterThan(100);
+      for (const row of rows) {
+        expect(refHolds(sa, row), `${a} on ${JSON.stringify(row)}`).toBe(va === 'true');
+        expect(refHolds(sb, row), `${b} on ${JSON.stringify(row)}`).toBe(vb === 'true');
+      }
+    }
+    // The card's two sentences are a statement and its exact NOT, apart from the engine too.
+    const [, , a, , b] = claims[0];
+    expect(SMALL_ROWS.every((row) => refHolds(readSentence(`${a}.`), row) !== refHolds(readSentence(`${b}.`), row))).toBe(true);
+  });
+
+  // ---------- all three ----------
+
+  it('each pass group is in every planned pack (300 seeds), so the rule can always be met inside the planned tries', () => {
+    for (const l of [l1, l2, l3]) {
+      const groups = l.pass?.include ?? [];
+      expect(groups.length, l.id).toBeGreaterThan(0);
+      for (let seed = 1; seed <= 300; seed++) {
+        const items = l.practice(createRng(seed));
+        for (const g of groups) expect(items.some((it) => it.tags?.includes(g.tag)), `${l.id} seed ${seed}: ${g.tag}`).toBe(true);
+        // Answering the planned tries right on the first try meets the rule.
+        expect(passState(l.pass, items.map((it) => ({ clean: true, tags: it.tags ?? [] }))).met, `${l.id} seed ${seed}`).toBe(true);
+      }
+    }
+  });
+
+  it('a learner who only taps Next does not pass; one who marks the board and then answers three twins can', () => {
+    for (const l of [l1, l2, l3]) {
+      expect(l.drill!.length, l.id).toBeGreaterThan(0);
+      // Reading the cards marks nothing on the board and answers nothing.
+      for (const st of l.drill!) expect(checkDrill(st, {}).done, `${l.id} ${st.id}`).toBe(false);
+      expect(passState(l.pass, []).met, l.id).toBe(false);
+      // Marking every board right, then three right answers of the lesson's own quiz, meets the rule.
+      for (const st of l.drill!) expect(checkDrill(st, right(st)).done, `${l.id} ${st.id}`).toBe(true);
+      for (let seed = 1; seed <= 20; seed++) {
+        const items = l.practice(createRng(seed));
+        expect(passState(l.pass, items.slice(0, 3).map((it) => ({ clean: true, tags: it.tags ?? [] }))).met, `${l.id} seed ${seed}`).toBe(true);
+        // A hint on one of them means it was not on their own: not yet.
+        const hinted = items.slice(0, 3).map((it, i) => ({ clean: i !== 1, tags: it.tags ?? [] }));
+        expect(passState(l.pass, hinted).met, `${l.id} seed ${seed} with a hint`).toBe(false);
+      }
+    }
   });
 });

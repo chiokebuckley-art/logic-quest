@@ -14,15 +14,18 @@ import { READING, fkGrade, longestSentence } from '../../engine/readability';
 import { createRng } from '../../engine/rng';
 import * as saves from '../../engine/save/save';
 import type {
-  AssignItem, ChooseItem, IdeaCard, Item, LessonDef, MultiItem, OrderItem, Rng, Scene, StopDef, TapAllItem, Thing,
+  AssignItem, ChooseItem, DrillStep, IdeaCard, Item, LessonDef, MultiItem, OrderItem, Rng, Scene, StopDef, TapAllItem, Thing,
 } from '../../engine/types';
 import { AssignGrid, AssignToggles, assignReady, assignValues, cellKey, cycleCell, markWord, nextMark, pickValue, solvedMarks, ticksIn, type Marks } from '../components/AssignView';
 import { CheckResult } from '../components/CheckResult';
+import { DrillBoard } from '../components/DrillBoard';
+import { L4_DRILL, stop1 } from '../../content/stop1';
+import { STOPS } from '../../content/stops';
 import { CHECK_LABEL, CheckRunner, itemSeconds, timeNote } from '../components/CheckRunner';
 import type { AnswerRecord } from '../components/contracts';
 import { IdeaCards } from '../components/IdeaCards';
-import { ItemView, answerFor, canSubmitFor, clueNames, liveClueStates, placeName, removeAt, removeName, waitNoteFor } from '../components/ItemView';
-import { LessonRecap, LessonRunner } from '../components/LessonRunner';
+import { ItemView, answerFor, canSubmitFor, clueNames, liveClueStates, placeName, removeAt, removeName, rightTitle, waitNoteFor } from '../components/ItemView';
+import { LessonRecap, LessonRunner, lessonStages } from '../components/LessonRunner';
 import { MultiView, chosenNote } from '../components/MultiView';
 import { NotebookRunner, cleanFix, fixMessage } from '../components/NotebookRunner';
 import { PracticeRunner } from '../components/PracticeRunner';
@@ -35,6 +38,7 @@ import { NOTEBOOK_INTRO, NotebookList, NotebookScreen, notebookGroups } from '..
 import { ProgressScreen } from '../screens/ProgressScreen';
 import { canSpeak, itemSpeech, sceneSpeech, speak, speechChunks, thingName, spoken } from '../speech';
 import { StoreProvider } from '../store';
+import { LessonScreen } from '../screens/LessonScreen';
 
 // ---------- helpers ----------
 
@@ -550,6 +554,136 @@ describe('LessonRunner', () => {
     expect(text).toContain('Done');
     const last = render(h(LessonRecap, { stop, lesson: lesson2, tries: 3, firstTry: 3, onDone: noop })).text;
     expect(last).toContain('That was the last lesson in Stop 9.');
+  });
+});
+
+describe('See -> Do -> Quiz (skill-drill handoff)', () => {
+  const l4 = stop1.lessons[3];
+  const props = { stop: stop1, lesson: l4, seed: 5, readAloud: false, onAnswer: noop, onComplete: noop, onExit: noop };
+
+  it('the guided board: the Silver row shown, the Gold row the learner’s to tap, no “which chest?” buttons', () => {
+    const { html, text } = render(h(DrillBoard, { step: L4_DRILL, readAloud: true, onDone: noop }));
+    expect(text).toContain('Mark a case');
+    expect(text).toContain('Shown');
+    expect(text).toContain('Pretend the treasure is in the Silver chest.');
+    expect(text).toContain('Your turn');
+    expect(text).toContain('Pretend the treasure is in the Gold chest.');
+    // The Silver row is text, not buttons; the Gold row has 3 signs x 2 + 4 counts + keep/reject = 12 radios.
+    expect(count(html, 'role="radio"')).toBe(12);
+    expect(count(html, 'aria-checked="true"')).toBe(0);
+    expect(text).toContain('Check my marks');
+    expect(text).not.toMatch(/Which chest/);
+    expect(html).toContain('aria-label="Read the board aloud"');
+    expect(text).toContain('That makes 1 true sign. This fits the rule. Keep the Silver chest.');
+  });
+
+  it('a grid board: shown boxes are pictures, the learner’s boxes are buttons (the handoff’s Mia and Leo)', () => {
+    const yn = [{ id: 'yes', label: 'Yes' }, { id: 'no', label: 'No' }];
+    const grid: DrillStep = {
+      id: 'g', title: 'Mark the grid', body: ['Leo does not have the apple.'], columns: ['apple', 'bread'], caption: 'Snacks', done: 'Right.',
+      rows: [
+        { id: 'mia', label: 'Mia', marks: [{ id: 'mia-apple', label: 'apple', options: yn, answer: 'yes', given: true, why: {} }, { id: 'mia-bread', label: 'bread', options: yn, answer: 'no', given: true, why: {} }] },
+        { id: 'leo', label: 'Leo', marks: [{ id: 'leo-apple', label: 'apple', options: yn, answer: 'no', why: { yes: 'The clue says Leo does not have the apple.' } }, { id: 'leo-bread', label: 'bread', options: yn, answer: 'yes', why: { no: 'One box is left in Leo’s row. It gets the check.' } }] },
+      ],
+    };
+    const { html, text } = render(h(DrillBoard, { step: grid, readAloud: false, onDone: noop }));
+    expect(html).toContain('<table');
+    expect(text).toContain('Snacks');
+    expect(html).toContain('aria-label="Mia – apple: check, shown"');
+    expect(html).toContain('aria-label="Mia – bread: cross, shown"');
+    expect(count(html, '<button type="button" class="play-cell"')).toBe(2);
+    expect(html).toContain('aria-label="Leo – apple: blank"');
+    expect(text).toContain('Tap a box once for');
+  });
+
+  it('a deck board: each card drawn beside its Fits / Not buttons', () => {
+    const fn = [{ id: 'fit', label: 'Fits' }, { id: 'not', label: 'Not' }];
+    const deck: DrillStep = {
+      id: 'd', title: 'Mark the cards', body: ['Now the rule is NOT blue.'], done: 'Right.',
+      rows: [{ id: 'not-blue', label: 'NOT blue', marks: [
+        { id: 'e1', label: 'Big red circle', thing: card('e1', 'big', 'red', 'circle'), options: fn, answer: 'fit', why: { not: 'The big red circle is not blue, so it fits “NOT blue.”' } },
+        { id: 'e2', label: 'Small blue square', thing: card('e2', 'small', 'blue', 'square'), options: fn, answer: 'not', why: { fit: 'The small blue square is blue, so “NOT blue” leaves it out.' } },
+      ] }],
+    };
+    const { html, text } = render(h(DrillBoard, { step: deck, readAloud: false, onDone: noop }));
+    expect(count(html, 'play-drill-thing')).toBe(2);
+    expect(count(html, 'role="radio"')).toBe(4);
+    expect(text).toContain('Big red circle');
+  });
+
+  it('boards come after the last card, unless a board names the card it follows (Stop 5 lesson 1: well, swim, others)', () => {
+    expect(lessonStages(l4)).toEqual([{ kind: 'cards', from: 0, to: 3 }, { kind: 'board', j: 0 }]);
+    const s5l1 = STOPS.find((s) => s.n === 5)!.lessons[0];
+    const stages = lessonStages(s5l1);
+    expect(stages.map((st) => st.kind)).toEqual(['cards', 'board', 'cards', 'board', 'cards', 'board']);
+    for (const st of stages) if (st.kind === 'board') expect(s5l1.ideas[(stages[stages.indexOf(st) - 1] as { to: number }).to].scene).toBe(s5l1.drill![st.j].scene);
+  });
+
+  it('the new pictures: a fact banner, “the break” inside its box, a line of people with each clue marked', () => {
+    const well = render(h(SceneView, { scene: STOPS.find((s) => s.n === 5)!.lessons[0].drill![0].scene! })).text;
+    expect(well).toContain('What is true The well is full.');
+    const four = STOPS.find((s) => s.n === 6)!.lessons[0].ideas.find((c) => c.scene?.kind === 'grid')!.scene!;
+    const g = render(h(SceneView, { scene: four }));
+    expect(count(g.html, 'play-cell-label')).toBe(1);
+    expect(g.text).toContain('the break');
+    const chain = STOPS.find((s) => s.n === 3)!.lessons[0].ideas.find((c) => c.title === 'Follow the chain')!.scene!;
+    const c = render(h(SceneView, { scene: chain }));
+    expect(c.text).toContain('Tallest Ava Ben Cal Shortest');
+    expect(count(c.html, '(this clue holds)')).toBe(2);
+  });
+
+  it('a twin board says what changed; a shown sentence answer lists the other options crossed out', () => {
+    const s1 = STOPS.find((s) => s.n === 1)!;
+    const twin = s1.lessons[1].drill!.find((d) => d.twin)!;
+    expect(render(h(DrillBoard, { step: twin, readAloud: false, onDone: noop })).text).toContain(`What changed ${twin.twin}`);
+    const not = render(h(DrillBoard, { step: s1.lessons[2].drill![0], readAloud: false, onDone: noop }));
+    expect(not.html).toContain('aria-label="Not these"');
+    expect(not.html).toContain('<s>No card is red.</s>');
+  });
+
+  it('opens on the key ideas; their last button leads to the board, not the quiz', () => {
+    expect(render(h(LessonRunner, props)).text).toContain('Three chests');
+    // A copy with only the worked-example card, so its button (the last card's) shows.
+    const { text } = render(h(LessonRunner, { ...props, lesson: { ...l4, ideas: [l4.ideas[3]] } }));
+    expect(text).toContain('An example');
+    expect(text).toContain('Now you do it');
+    expect(text).toContain('Next you do it: mark a case. Then 4 puzzles.');
+    expect(text).not.toContain('Try it');
+  });
+
+  it('a lesson left before its board was marked (an older save) shows the board first', () => {
+    const { text } = render(h(LessonRunner, { ...props, start: { next: 2, firstTry: 1 } }));
+    expect(text).toContain('Mark a case');
+    expect(text).toContain('Check my marks');
+    expect(text).not.toContain('Try 3 of 4');
+  });
+
+  it('a lesson left after its board picks up at the same try', () => {
+    const { text } = render(h(LessonRunner, { ...props, start: { next: 2, firstTry: 1, drilled: true, results: [{ clean: true, tags: [] }, { clean: false, tags: [] }] } }));
+    expect(text).toContain('Try 3 of 4');
+    expect(text).toContain('Welcome back.');
+    expect(text).toContain('To finish: 3 right on the first try. You have 1.');
+  });
+
+  it('the first quiz waits for its case marks: no answer buttons until every cave is marked (learn mode only)', () => {
+    const cave = l4.practice(createRng(5))[0];
+    const learn = render(h(ItemView, { item: cave, mode: 'learn', onDone: noop, readAloud: false }));
+    expect(learn.text).toContain('First, mark the cases');
+    expect(learn.text).toContain('Check each cave');
+    expect(learn.html).not.toContain('play-choices');
+    expect(learn.text).toContain('Check my marks');
+    expect(learn.text).not.toMatch(/\bHint\b/);
+    const check = render(h(ItemView, { item: cave, mode: 'check', onDone: noop, readAloud: false }));
+    expect(check.html).toContain('play-choices');
+    expect(check.text).not.toContain('First, mark the cases');
+  });
+
+  it('the recap of a lesson not passed yet says what is still needed, and never says “Lesson done”', () => {
+    const { text } = render(h(LessonRecap, { stop: stop1, lesson: l4, tries: 4, firstTry: 2, passed: false, onDone: noop }));
+    expect(text).toContain('Not done yet');
+    expect(text).not.toContain('Lesson done');
+    expect(text).toContain('To finish this lesson, get 3 right on the first try.');
+    expect(text).toContain('Leave for now');
   });
 });
 
@@ -1317,10 +1451,70 @@ describe('reading level of the play screens', () => {
       h(NotebookList, { notebook: {}, today, stops: [stop], onFix: noop }),
       h(NotebookRunner, { cards: [], stops: [stop], seed: 1, readAloud: false, onFix: () => false, onExit: noop }),
       h(RepairCard, { ready: 3, onOpen: noop }),
+      h(DrillBoard, { step: L4_DRILL, readAloud: true, onDone: noop }),
+      h(LessonRecap, { stop: stop1, lesson: stop1.lessons[3], tries: 4, firstTry: 2, passed: false, onDone: noop }),
+      h(ItemView, { item: stop1.lessons[3].practice(createRng(2))[0], mode: 'learn', onDone: noop, readAloud: true }),
     ];
     const text = screens.map((el) => render(el).lines).join('\n');
     expect(fkGrade(text)).toBeLessThanOrEqual(READING.maxGrade);
     const long = longestSentence(text);
     expect(long.words, long.sentence).toBeLessThanOrEqual(READING.maxSentenceWords);
+  });
+});
+
+/** A browser-free store with one player and the given save changes. */
+function storeWith(change: (d: saves.SaveData) => void) {
+  const mem = new Map<string, string>();
+  const kv: saves.KV = { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => { mem.set(k, v); }, removeItem: (k) => { mem.delete(k); } };
+  const { reg, player } = saves.addPlayer({ players: [] }, 'Sam', saves.COLORS[0], 1, 0.5);
+  const data = saves.newSave();
+  change(data);
+  saves.saveRegistry(kv, reg);
+  saves.writeSave(kv, player.id, data);
+  return kv;
+}
+
+describe('lesson screen: resuming, redoing, lessons in order (skill-drill review)', () => {
+  const lessonRoute = (lessonId: string, from: 'stop' | 'check' = 'stop') => ({ name: 'lesson' as const, stopId: 's1', lessonId, from });
+
+  it('a run saved before this version (no answers kept) starts the lesson fresh, at its key ideas', () => {
+    const kv = storeWith((d) => { d.stops.s1 = { lessonsDone: ['s1.l1', 's1.l2', 's1.l3'], attempts: 0 }; d.lessonRun = { stopId: 's1', lessonId: 's1.l4', seed: 5, next: 2, firstTry: 2 }; });
+    const { text } = render(h(StoreProvider, { kv, children: h(LessonScreen, { route: lessonRoute('s1.l4') }) }));
+    expect(text).toContain('Three chests');
+    expect(text).not.toContain('Welcome back');
+  });
+
+  it('a run of this version picks up at its try', () => {
+    const kv = storeWith((d) => {
+      d.stops.s1 = { lessonsDone: ['s1.l1', 's1.l2', 's1.l3'], attempts: 0 };
+      d.drilled = ['s1.l4'];
+      d.lessonRun = { stopId: 's1', lessonId: 's1.l4', seed: 5, next: 2, firstTry: 1, drilled: true, results: [{ clean: true, tags: [] }, { clean: false, tags: [] }] };
+    });
+    expect(render(h(StoreProvider, { kv, children: h(LessonScreen, { route: lessonRoute('s1.l4') }) })).text).toContain('Welcome back. You are on try 3 of 4.');
+  });
+
+  it('“Learn this again” after a check starts fresh, even with a run of that lesson saved', () => {
+    const kv = storeWith((d) => {
+      d.stops.s1 = { lessonsDone: ['s1.l1', 's1.l2', 's1.l3', 's1.l4'], attempts: 1 };
+      d.lessonRun = { stopId: 's1', lessonId: 's1.l4', seed: 5, next: 2, firstTry: 2, drilled: true, results: [{ clean: true, tags: [] }, { clean: true, tags: [] }] };
+    });
+    const { text } = render(h(StoreProvider, { kv, children: h(LessonScreen, { route: lessonRoute('s1.l4', 'check') }) }));
+    expect(text).toContain('Three chests');
+    expect(text).not.toContain('Welcome back');
+  });
+
+  it('a later lesson waits for the one before (its boards marked, or done)', () => {
+    const kv = storeWith((d) => { d.stops.s1 = { lessonsDone: ['s1.l1', 's1.l2'], attempts: 0 }; });
+    const { text } = render(h(StoreProvider, { kv, children: h(LessonScreen, { route: lessonRoute('s1.l4') }) }));
+    expect(text).toContain('Treasure signs opens when you have done Lesson 3, The NOT flip.');
+    expect(text).toContain('Go to Lesson 3');
+  });
+
+  it('a recap with no more quiz items offers to start the lesson again; a hint makes a right answer “Right, with a hint.”', () => {
+    const { text } = render(h(LessonRecap, { stop: stop1, lesson: stop1.lessons[3], tries: 60, firstTry: 2, passed: false, onDone: noop, onRestart: noop }));
+    expect(text).toContain('Start the lesson again');
+    expect(text).toContain('Start it again with new puzzles.');
+    expect(rightTitle('first', 0, true)).toBe('Right, with a hint.');
+    expect(rightTitle('first', 0, false)).toBe('Right, first try.');
   });
 });

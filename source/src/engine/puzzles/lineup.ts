@@ -16,7 +16,7 @@
  */
 import { clueHolds } from '../grade';
 import { syncWhyWrong } from '../teach';
-import type { Choice, ChoiceFeedback, ChooseItem, LineClue, OrderItem, Rng, Teach, TeachCase, Truth } from '../types';
+import type { Choice, ChoiceFeedback, ChooseItem, DrillMark, DrillOption, DrillRow, LineClue, OrderItem, Rng, Scene, Teach, TeachCase, Truth } from '../types';
 
 export type ClueType = LineClue['t'];
 export type SkinId = 'race' | 'brooms' | 'height' | 'dragons' | 'line' | 'robots' | 'letters';
@@ -117,6 +117,16 @@ export interface Skin {
 
 const ALL_TYPES: readonly ClueType[] = ['before', 'rightBefore', 'nextTo', 'notNextTo', 'between', 'first', 'last', 'notFirst', 'notLast', 'place'];
 const RANKED_TYPES: readonly ClueType[] = ['before', 'first', 'last', 'notFirst', 'notLast', 'place'];
+
+/**
+ * The clue types the Stop 3 lessons teach, each on a key-idea card and a guided board: chains of "before" (lesson
+ * 1), "right before" (lesson 2), not first / not last, next to and between (lesson 3), and the clues that name a
+ * spot (first, last, a place: lesson 4). "Not next to" is taught nowhere, so no lesson, check or Arcade item uses it.
+ */
+export const TAUGHT_TYPES: readonly ClueType[] = ALL_TYPES.filter((t) => t !== 'notNextTo');
+
+/** Keep only the clue types allowed (all of them when `only` is not given). */
+const allowed = (types: readonly ClueType[], only?: readonly ClueType[]): readonly ClueType[] => (only ? types.filter((t) => only.includes(t)) : types);
 
 const PEOPLE = ['Ava', 'Ben', 'Cal', 'Dee', 'Eli', 'Fay', 'Gus', 'Hana', 'Jin', 'Kofi', 'Lena', 'Mo', 'Nia', 'Omar', 'Pia', 'Raj', 'Sol', 'Tia', 'Uma', 'Vic', 'Wes', 'Zoe'];
 
@@ -663,7 +673,8 @@ export function statusSimpler(skin: Skin, used: readonly string[], status: Statu
     clues = t === 'rightBefore' ? [before(x, y)] : [before(x, z)];
     stmt = t === 'rightBefore' ? rightBefore(x, y) : before(y, x);
   } else if (status === 'must') {
-    clues = t === 'before' ? [rightBefore(x, y)] : [{ t: 'first', a: x }, { t: 'last', a: z }];
+    // Only "before" and "right before" clues: lesson 2 teaches no clue that names a spot.
+    clues = t === 'before' ? [rightBefore(x, y)] : [before(x, y), before(y, z)];
     stmt = t === 'before' ? before(x, y) : rightBefore(x, y);
   } else {
     clues = t === 'before' ? [before(y, x)] : [rightBefore(x, z)];
@@ -697,7 +708,9 @@ export function spotSimpler(skin: Skin, used: readonly string[], focus: SpotFocu
   let q: { where: string } | { who: number };
   switch (focus) {
     case 'ends': clues = [{ t: 'notFirst', a: b }, { t: 'notLast', a: b }]; q = { where: b }; break;
-    case 'nextTo': clues = forced ? [{ t: 'first', a }, { t: 'nextTo', a, b }] : [{ t: 'nextTo', a, b }]; q = { where: forced ? b : a }; break;
+    // Decided: the pair next to each other leaves an end for c, and "not first" picks the last one. Lesson 3 teaches
+    // no clue that names a spot (first, last), so the example uses none.
+    case 'nextTo': clues = forced ? [{ t: 'nextTo', a, b }, { t: 'notFirst', a: c }] : [{ t: 'nextTo', a, b }]; q = { where: forced ? c : a }; break;
     case 'notNextTo': clues = [{ t: 'notNextTo', a, b: c }]; q = forced ? { where: b } : { who: 1 }; break;
     case 'between': clues = [{ t: 'between', a: b, b: a, c }]; q = forced ? { where: b } : { who: 1 }; break;
   }
@@ -885,6 +898,11 @@ export function chainPuzzle(rng: Rng, o: ChainOpts): Built<ChooseItem> & { ask: 
       remember: ['Cross out anyone a clue rules out. Then count who is left.', 'Ask: “Could a different order that fits the clues put someone else there?”'],
       simpler: chainSimpler(skin, cast.ids, ask, answer === CANT).text,
     };
+    // The hint shows one try already checked: someone a clue crosses out (never a person who could be the
+    // answer), with every clue marked true or false.
+    const outId = cast.ids.filter((id) => !ends.includes(id))
+      .sort((a, b) => brokenBy(clues, tryAt(a)).length - brokenBy(clues, tryAt(b)).length)[0];
+    const outLine = tryAt(outId);
     const item: ChooseItem = {
       kind: 'choose',
       id: o.id,
@@ -897,8 +915,10 @@ export function chainPuzzle(rng: Rng, o: ChainOpts): Built<ChooseItem> & { ask: 
       answer,
       feedback,
       explain,
-      hint: `Cross out ${cross}. How many are left?`,
+      hint: `Here is one try, checked for you. Cross out ${cross}. How many are left?`,
+      hintCase: lineCase(t, outLine, [], `${tryNote(t, outLine, at(outId), say(skin, 'could', nm(outId), spotObj))} So cross out ${nm(outId)}.`, clues.map((_, i) => i)),
       teach,
+      tags: [answer === CANT ? 'cant-tell' : 'decided', `ask-${ask}`],
       ...(answer === CANT ? { conflict: true } : {}),
     };
     syncWhyWrong(item);
@@ -968,6 +988,8 @@ export interface StatusOpts {
   /** "Before" in a clue, "right before" in the sentence: only might be true. */
   conflict?: boolean;
   n?: number;
+  /** Only clues of these types (lesson 2 teaches "before" and "right before"). Default: also first and last. */
+  types?: readonly ClueType[];
 }
 
 /** The sentence judged in lesson 2. */
@@ -995,13 +1017,13 @@ export function statusPuzzle(rng: Rng, o: StatusOpts): Built<ChooseItem> & { stm
       const [a, b] = [order[i], order[j]];
       clues = [{ t: 'before', a, b }];
       if (n === 4 || rng.chance(0.4)) {
-        const extra = rng.pick(trueClues(order, ['before', 'first', 'last']).filter((c) => clueKey(c) !== `before:${a},${b}`));
+        const extra = rng.pick(trueClues(order, allowed(['before', 'first', 'last'], o.types)).filter((c) => clueKey(c) !== `before:${a},${b}`));
         clues = rng.shuffle([...clues, extra]);
       }
       stmt = { t: 'rightBefore', a, b };
     } else {
       const k = n === 3 ? rng.int(1, 2) : rng.int(2, 3);
-      clues = weightedShuffle(rng, trueClues(order, ['before', 'rightBefore', 'first', 'last']), (c) => (c.t === 'first' || c.t === 'last' ? 1 : 3)).slice(0, k);
+      clues = weightedShuffle(rng, trueClues(order, allowed(['before', 'rightBefore', 'first', 'last'], o.types)), (c) => (c.t === 'first' || c.t === 'last' ? 1 : 3)).slice(0, k);
       const keys = new Set(clues.map(clueKey));
       const stmts: Stmt[] = [];
       for (const a of cast.ids) for (const b of cast.ids) if (a !== b) stmts.push({ t: 'before', a, b }, { t: 'rightBefore', a, b });
@@ -1157,6 +1179,12 @@ export function statusPuzzle(rng: Rng, o: StatusOpts): Built<ChooseItem> & { stm
       ],
       simpler: statusSimpler(skin, cast.ids, status, stmt.t).text,
     };
+    const trap = misread && status === 'might';
+    // The hint shows one order already checked, every clue and the sentence marked, and never the answer's case
+    // (often only one order fits, and showing it would give the answer away). Must: the nearest order that makes
+    // the sentence false, which breaks a clue. Can't: the nearest that makes it true, which breaks a clue. Might:
+    // an order that fits; for the "before" trap, the one with someone in between, as on the lesson's board.
+    const hintLine = status === 'must' ? tryFor(false) : status === 'cant' ? tryFor(true) : trap ? no[0] : yes[0];
     const item: ChooseItem = {
       kind: 'choose',
       id: o.id,
@@ -1170,9 +1198,12 @@ export function statusPuzzle(rng: Rng, o: StatusOpts): Built<ChooseItem> & { stm
       answer: status,
       feedback,
       explain,
-      hint: 'Try to build one order that fits the clues and makes the sentence false. Then try one that makes it true.',
+      // It never says how many orders fit: often just one does.
+      hint: 'Here is one order, checked for you. Check other orders the same way. Is the sentence true in every order that fits, in some, or in none?',
+      hintCase: lineCase(t, hintLine, [said(hintLine)], caseNote(hintLine), clues.map((_, i) => i)),
       teach,
-      ...(misread && status === 'might' ? { conflict: true } : {}),
+      tags: [status, ...(trap ? ['before-trap'] : [])],
+      ...(trap ? { conflict: true } : {}),
     };
     syncWhyWrong(item);
     return { item, ids: cast.ids, order, clues, stmt, status };
@@ -1191,6 +1222,10 @@ export interface SpotOpts {
   conflict?: 'ends' | 'between';
   q?: 'where' | 'who';
   n?: number;
+  /** Only clues of these types (default: every spot type, "not next to", first and last included). */
+  types?: readonly ClueType[];
+  /** The item must be about this kind of clue (its hardest focus clue): a twin of one guided board. */
+  focus?: SpotFocus;
 }
 
 const FOCUS = new Set<ClueType>(['notFirst', 'notLast', 'nextTo', 'notNextTo', 'between']);
@@ -1215,7 +1250,7 @@ export function spotPuzzle(rng: Rng, o: SpotOpts): Built<ChooseItem> & { q: 'whe
     let q: 'where' | 'who';
     let x = '';
     let k = 0;
-    const types = SPOT_TYPES.filter((t) => skin.types.includes(t));
+    const types = allowed(SPOT_TYPES, o.types).filter((t) => skin.types.includes(t));
     if (o.conflict === 'ends') {
       x = order[rng.int(1, 2)];
       clues = [{ t: 'notFirst', a: x }, { t: 'notLast', a: x }];
@@ -1301,6 +1336,7 @@ export function spotPuzzle(rng: Rng, o: SpotOpts): Built<ChooseItem> & { q: 'whe
       : [pick(['between']), pick(['nextTo', 'notNextTo']), pick(['notFirst', 'notLast'])].find((i) => i >= 0)!;
     const fc = clues[fi];
     const focus: SpotFocus = fc.t === 'between' ? 'between' : fc.t === 'nextTo' ? 'nextTo' : fc.t === 'notNextTo' ? 'notNextTo' : 'ends';
+    if (o.focus && focus !== o.focus) continue;
     const skill = focus === 'between' ? 's3.between' : focus === 'ends' ? 's3.not-first-last' : 's3.next-to';
 
     const t: Talk = { skin, nm, clues, texts };
@@ -1400,6 +1436,13 @@ export function spotPuzzle(rng: Rng, o: SpotOpts): Built<ChooseItem> & { q: 'whe
       remember: [SPOT_REMEMBER[focus], where ? 'Ask: “Is more than one spot still left?”' : `Ask: “${cap(CONJ[skin.verb].could.replace(/^could/, 'could anyone else'))} ${spotObj}?”`],
       simpler: spotSimpler(skin, cast.ids, focus, forced).text,
     };
+    // The hint shows one try already checked, with every clue marked: a spot (or a name) the clues cross out, so
+    // never the answer. When every value still fits, one that could be the answer.
+    const out = cands.find((v) => !options.includes(v)) ?? cands[0];
+    const outLine = tryAt(out);
+    const outNote = brokenBy(clues, outLine).length
+      ? `${tryNote(t, outLine, sayAt('is', out), sayAt('could', out))} So ${sayAt('cant', out)}.`
+      : tryNote(t, outLine, sayAt('is', out), sayAt('could', out));
     const item: ChooseItem = {
       kind: 'choose',
       id: o.id,
@@ -1413,7 +1456,9 @@ export function spotPuzzle(rng: Rng, o: SpotOpts): Built<ChooseItem> & { q: 'whe
       feedback,
       explain,
       hint,
+      hintCase: lineCase(t, outLine, [], outNote, clues.map((_, i) => i)),
       teach,
+      tags: [forced ? 'decided' : 'cant-tell', focus, q],
       ...(o.conflict ? { conflict: true } : {}),
     };
     syncWhyWrong(item);
@@ -1428,6 +1473,8 @@ export interface BuildOpts {
   id: string;
   skin: SkinId;
   n: number;
+  /** Only clues of these types (default: every type the skin can say). */
+  types?: readonly ClueType[];
 }
 
 /**
@@ -1461,7 +1508,7 @@ export function buildPuzzle(rng: Rng, o: BuildOpts): Built<OrderItem> {
   for (let tries = 0; tries < 2000; tries++) {
     const cast = makeCast(rng, skin, n);
     const order = rng.shuffle(cast.ids);
-    const clues = forceClues(rng, order, skin.types);
+    const clues = forceClues(rng, order, allowed(skin.types, o.types));
     if (clues.length < 2 || clues.length > n + 1) continue;
     if (!clues.some((c) => RELATIONAL.has(c.t))) continue;
     if (clues.filter((c) => c.t === 'place' || c.t === 'first' || c.t === 'last').length > 2) continue;
@@ -1509,9 +1556,11 @@ export function buildPuzzle(rng: Rng, o: BuildOpts): Built<OrderItem> {
       firstLabel: skin.firstLabel,
       lastLabel: skin.lastLabel,
       explain: `${anchor >= 0 ? `Start with ${quoteEnd(texts[anchor])} ` : ''}Only one order keeps every clue true: ${orderText(skin, cast, order)}.`,
-      hint: anchor >= 0
+      hint: `Here is one line, checked clue by clue. ${anchor >= 0
         ? 'Start with the clue that names an exact spot. Then place the rest one by one.'
-        : `Find who ${CONJ[skin.verb].must} ${skin.spot(1, n, true)}. Then place the rest one by one.`,
+        : `Find who ${CONJ[skin.verb].must} ${skin.spot(1, n, true)}. Then place the rest one by one.`}`,
+      // The names in the order the pool shows them (never the answer), tested clue by clue.
+      hintCase: lineCase(t, names, [], `${cap(clueNums(brokenBy(clues, names)))} ${isAre(brokenBy(clues, names).length)} false here. So this line does not fit.`, clues.map((_, i) => i)),
       teach,
     };
     return { item, ids: cast.ids, order, clues };
@@ -1525,6 +1574,8 @@ export interface ExtraOpts {
   id: string;
   skin: SkinId;
   n?: number;
+  /** Only clues of these types, the spare one too (default: every type the skin can say). */
+  types?: readonly ClueType[];
 }
 
 /**
@@ -1537,10 +1588,11 @@ export function extraCluePuzzle(rng: Rng, o: ExtraOpts): Built<ChooseItem> & { e
     const n = o.n ?? rng.pick([3, 4, 4]);
     const cast = makeCast(rng, skin, n);
     const order = rng.shuffle(cast.ids);
-    const core = forceClues(rng, order, skin.types);
+    const types = allowed(skin.types, o.types);
+    const core = forceClues(rng, order, types);
     if (core.length < 2 || core.length > 4) continue;
     const keys = new Set(core.map(clueKey));
-    const extras = weightedShuffle(rng, trueClues(order, skin.types).filter((c) => !keys.has(clueKey(c))), (c) => (c.t === 'before' ? 4 : 1));
+    const extras = weightedShuffle(rng, trueClues(order, types).filter((c) => !keys.has(clueKey(c))), (c) => (c.t === 'before' ? 4 : 1));
     const extra = extras.find((r) => {
       const all = [...core, r];
       return core.every((m) => fits(cast.ids, all.filter((x) => x !== m)).length > 1);
@@ -1603,11 +1655,404 @@ export function extraCluePuzzle(rng: Rng, o: ExtraOpts): Built<ChooseItem> & { e
       answer: clueId(spare),
       feedback,
       explain: `Cover up ${quoteEnd(texts[idx])} The other clues still give just one order: ${ow(order)}. So that clue tells you nothing new.`,
-      hint: 'Cover up one clue at a time. Do the rest still give just one order?',
+      hint: 'Here is one clue, covered for you. Cover up each other clue the same way. Do the rest still give just one order?',
+      // A needed clue covered (never the answer): the second order that fits, with every clue marked.
+      hintCase: (() => {
+        const i = clues.findIndex((_, j) => j !== idx);
+        const alt = altFor(i);
+        return lineCase(t, alt, [], `With clue ${i + 1} covered, this order fits too. So clue ${i + 1} is needed.`, clues.map((_, j) => j));
+      })(),
       teach,
     };
     syncWhyWrong(item);
     return { item, ids: cast.ids, order, clues, extra: idx };
   }
   throw new Error('extraCluePuzzle: no puzzle found');
+}
+
+// ---------- the Do step: guided boards ----------
+//
+// A board is a small line-up with fixed names: the clues on a key-idea card (the See), or a twin of them with one
+// piece changed. The learner marks it by taps: who goes in each spot, whether each clue is true for a line, keep or
+// cross out a try, must / might / can't, which other order fits when a clue is covered. Every right mark is worked
+// out here from every order that fits (fits, clueHolds, killers), and every message for a wrong mark says what the
+// clue or sentence says and where the people stand in that line.
+
+/** A small fixed line-up for a key-idea card and its guided board. Ids are lower-case names: 'ava'. */
+export interface LineBoard {
+  skin: SkinId;
+  ids: readonly string[];
+  clues: readonly LineClue[];
+}
+
+/** A board name from its id: 'ava' -> 'Ava'. */
+export const boardName = (id: string) => cap(id);
+
+/** The board's clues in its skin's words, in order. */
+export const boardTexts = (b: LineBoard): string[] => b.clues.map((c) => clueText(SKINS[b.skin], c, b.ids.length, boardName));
+
+/** The board as a scene: its numbered clue list. A key-idea card and its guided board share it. */
+export const boardScene = (b: LineBoard): Scene => ({ kind: 'clues', clues: boardTexts(b) });
+
+/** A worked example: the board's clues, one line of its people (first to last), and each clue marked for that line. */
+export const lineScene = (b: LineBoard, order: readonly string[]): Scene => ({
+  kind: 'clues',
+  clues: boardTexts(b),
+  marks: b.clues.map((c) => (clueHolds(c, order) ? 'ok' : 'broken')),
+  line: { names: order.map(boardName), first: SKINS[b.skin].firstLabel, last: SKINS[b.skin].lastLabel },
+});
+
+/** Every order of the board's people where all its clues hold. */
+export const boardFits = (b: LineBoard): string[][] => fits(b.ids, b.clues);
+
+/** "Ava, Ben, Cal", or "Ava, Ben, Cal (tallest first)". */
+export const boardLine = (b: LineBoard, order: readonly string[]) => orderWords(SKINS[b.skin], boardName, order);
+
+/** The people no clue names. */
+export const unnamed = (b: LineBoard) => b.ids.filter((id) => !b.clues.some((c) => mentions(c, id)));
+
+const TRUE_FALSE: DrillOption[] = [{ id: 'true', label: 'True' }, { id: 'false', label: 'False' }];
+const KEEP_CROSS: DrillOption[] = [{ id: 'keep', label: 'Keep' }, { id: 'reject', label: 'Cross out' }];
+const FITS_NOT: DrillOption[] = [{ id: 'fit', label: 'Fits' }, { id: 'not', label: 'Does not fit' }];
+const NEEDED: DrillOption[] = [{ id: 'yes', label: 'Needed' }, { id: 'no', label: 'Not needed' }];
+const tf = (v: boolean) => (v ? 'true' : 'false');
+
+/** Quoted clues as a list that ends a sentence: “A” and “B.” */
+const quoteList = (texts: readonly string[]) => joinNames(texts.map((x, i) => (i === texts.length - 1 ? quoteEnd(x) : quote(x))));
+
+/** "Cal finished between Ava and Ben." or "No one finished between Ava and Ben." */
+function betweenFact(skin: Skin, p: readonly string[], a: string, b: string): string {
+  const [i, j] = [p.indexOf(a), p.indexOf(b)].sort((x, y) => x - y);
+  const mid = p.slice(i + 1, j).map(boardName);
+  const where = `between ${boardName(a)} and ${boardName(b)}`;
+  if (!mid.length) return `No one ${skin.verb === 'finish' ? 'finished' : 'is'} ${where}.`;
+  return `${joinNames(mid)} ${skin.verb === 'finish' ? 'finished' : isAre(mid.length)} ${where}.`;
+}
+
+/** Where the people a clue names stand in a line, in the skin's words: "Eli finished first." */
+function clueFacts(b: LineBoard, c: LineClue, p: readonly string[]): string {
+  const skin = SKINS[b.skin];
+  const named = [c.a, ...('b' in c ? [c.b] : []), ...('c' in c ? [c.c] : [])].sort((x, y) => p.indexOf(x) - p.indexOf(y));
+  const at = named.map((id) => say(skin, 'is', boardName(id), skin.spot(p.indexOf(id) + 1, p.length, true)));
+  const s = `${cap(joinNames(at))}.`;
+  return c.t === 'rightBefore' || c.t === 'nextTo' || c.t === 'notNextTo' ? `${s} ${betweenFact(skin, p, c.a, c.b)}` : s;
+}
+
+/** A clue or sentence marked true or false for a line. Its message for the wrong mark: what it says, and where the people stand. */
+function truthMark(b: LineBoard, id: string, label: string, ref: string, text: string, c: LineClue, p: readonly string[], given: boolean): DrillMark {
+  const v = clueHolds(c, p);
+  return {
+    id,
+    label,
+    options: TRUE_FALSE,
+    answer: tf(v),
+    ...(given ? { given: true } : {}),
+    why: { [tf(!v)]: `In ${boardLine(b, p)}, ${ref} is ${tf(v)}. It says, ${quoteEnd(text)} ${clueFacts(b, c, p)}` },
+  };
+}
+
+/** Why no line passing `test` fits: the one clue each such line makes false, else that none keeps every clue true. */
+function ruledOut(b: LineBoard, test: (p: string[]) => boolean, placed: string, cant: string): string {
+  const ks = killers(b.ids, b.clues, test);
+  return ks.length === 1
+    ? `The clue ${quote(boardTexts(b)[ks[0]])} is false whenever ${placed}. So ${cant}.`
+    : `No order where ${placed} keeps every clue true. So ${cant}.`;
+}
+
+export interface BoardRowOpts {
+  id: string;
+  /** Shown already marked: the worked case. */
+  given?: boolean;
+}
+
+/**
+ * One line on a board: each clue true or false for it (clues, default on), each extra sentence true or false
+ * (sentences), and whether it fits (decide: the word for it, 'line' or 'order').
+ */
+export function lineRow(
+  b: LineBoard,
+  order: readonly string[],
+  o: BoardRowOpts & { label?: string; clues?: boolean; sentences?: readonly LineClue[]; decide?: 'line' | 'order' },
+): DrillRow {
+  const skin = SKINS[b.skin];
+  const texts = boardTexts(b);
+  const given = !!o.given;
+  const marks: DrillMark[] = [];
+  if (o.clues ?? true) {
+    b.clues.forEach((c, i) => marks.push(truthMark(b, `${o.id}-c${i + 1}`, `Clue ${i + 1}: ${quoteEnd(texts[i])}`, `clue ${i + 1}`, texts[i], c, order, given)));
+  }
+  const said = (o.sentences ?? []).map((s) => ({ s, text: clueText(skin, s, b.ids.length, boardName) }));
+  said.forEach(({ s, text }, i) => marks.push(truthMark(b, `${o.id}-s${i + 1}`, quoteEnd(text), 'the sentence', text, s, order, given)));
+  const notes = said.map(({ s, text }) => `${quote(text)} is ${tf(clueHolds(s, order))} here.`);
+  // "Right before" is false while "before" is true: someone stands between the two names. Say who.
+  const gap = said.find(({ s }) => s.t === 'rightBefore' && !clueHolds(s, order) && clueHolds({ t: 'before', a: s.a, b: s.b }, order));
+  if (gap && gap.s.t === 'rightBefore') notes.unshift(betweenFact(skin, order, gap.s.a, gap.s.b));
+  if (o.decide) {
+    const what = o.decide;
+    const br = brokenBy(b.clues, order);
+    marks.push({
+      id: `${o.id}-fit`,
+      label: `Does this ${what} fit?`,
+      options: FITS_NOT,
+      answer: br.length ? 'not' : 'fit',
+      ...(given ? { given: true } : {}),
+      why: br.length
+        ? { fit: `In ${boardLine(b, order)}, ${clueNums(br)} ${isAre(br.length)} false. ${what === 'order' ? 'An' : 'A'} ${what} fits only when every clue is true.` }
+        : { not: `In ${boardLine(b, order)}, ${clueNums(b.clues.map((_, i) => i))} ${isAre(b.clues.length)} true. So this ${what} fits.` },
+    });
+    notes.push(br.length ? `${cap(clueNums(br))} ${isAre(br.length)} false. This ${what} does not fit.` : `Every clue is true. This ${what} fits.`);
+  }
+  return { id: o.id, label: o.label ?? `${skin.lineLabel}: ${boardLine(b, order)}.`, marks, note: notes.join(' ') };
+}
+
+/** "Try Eli first" in a race; "Try Ava in spot 1" otherwise. */
+function tryWords(b: LineBoard, x: string, k: number): string {
+  const skin = SKINS[b.skin];
+  return skin.verb === 'finish' ? `Try ${boardName(x)} ${skin.spot(k, b.ids.length, true)}` : `Try ${boardName(x)} in spot ${k}`;
+}
+
+/**
+ * Try one name in one spot, the method of "Try each spot": a line with x in spot k, each clue true or false there,
+ * then keep the try or cross it out. The line is one that fits when there is one. Otherwise it is the nearest try,
+ * and it makes a clue false, as every line with x in spot k does.
+ */
+export function trialRow(b: LineBoard, x: string, k: number, o: BoardRowOpts): DrillRow {
+  const skin = SKINS[b.skin];
+  const texts = boardTexts(b);
+  const given = !!o.given;
+  const X = boardName(x);
+  const spot = skin.spot(k, b.ids.length, true);
+  const test = (p: string[]) => p[k - 1] === x;
+  const line = closest(b.ids, b.clues, test, b.ids);
+  const br = brokenBy(b.clues, line);
+  const marks = b.clues.map((c, i) => truthMark(b, `${o.id}-c${i + 1}`, `Clue ${i + 1}: ${quoteEnd(texts[i])}`, `clue ${i + 1}`, texts[i], c, line, given));
+  const at = say(skin, 'is', X, spot);
+  const ks = killers(b.ids, b.clues, test);
+  marks.push({
+    id: `${o.id}-keep`,
+    label: 'Keep or cross out?',
+    options: KEEP_CROSS,
+    answer: br.length ? 'reject' : 'keep',
+    ...(given ? { given: true } : {}),
+    why: br.length
+      ? { keep: ks.length === 1 ? `Every order where ${at} makes clue ${ks[0] + 1} false. So cross out this try.` : `No order where ${at} keeps every clue true. So cross out this try.` }
+      : { reject: `Every clue is true here. So ${say(skin, 'could', X, spot)}. Keep this try.` },
+  });
+  const note = br.length
+    ? `${cap(clueNums(br))} ${isAre(br.length)} false here. So ${say(skin, 'cant', X, spot)}.`
+    : `Every clue is true here. So ${say(skin, 'could', X, spot)}.`;
+  return { id: o.id, label: `${tryWords(b, x, k)}, as in ${boardLine(b, line)}.`, marks, note };
+}
+
+/** "In what place did Eli finish?": one spot when the clues decide it, else Can't tell. */
+export function whereMark(b: LineBoard, x: string, id: string): DrillMark {
+  const skin = SKINS[b.skin];
+  const n = b.ids.length;
+  const fit = boardFits(b);
+  const X = boardName(x);
+  const good = spotsOf(fit, x);
+  const answer = good.length === 1 ? `p${good[0]}` : CANT;
+  const spot = (j: number) => skin.spot(j, n, true);
+  const lineAt = (j: number) => fit.find((p) => p.indexOf(x) === j - 1)!;
+  const why: Record<string, string> = {};
+  for (let j = 1; j <= n; j++) {
+    if (`p${j}` === answer) continue;
+    if (good.includes(j)) {
+      const other = good.find((g) => g !== j)!;
+      why[`p${j}`] = `${cap(say(skin, 'could', X, spot(j)))}, as in ${boardLine(b, lineAt(j))}. But ${say(skin, 'could', X, spot(other))} too, as in ${boardLine(b, lineAt(other))}. So you can’t tell.`;
+    } else {
+      why[`p${j}`] = ruledOut(b, (p) => p.indexOf(x) === j - 1, say(skin, 'is', X, spot(j)), say(skin, 'cant', X, spot(j)));
+    }
+  }
+  if (answer !== CANT) why[CANT] = `You can tell. ${X} in any other spot makes a clue false. So ${say(skin, 'must', X, spot(good[0]))}.`;
+  const options = [...ORDINALS.slice(0, n).map((w, i) => ({ id: `p${i + 1}`, label: cap(w) })), CANT_TELL];
+  return { id, label: skin.where(X), options, answer, why };
+}
+
+/** "Who finished second?" or "Who is the tallest?": one name when the clues decide it, else Can't tell. */
+export function whoMark(b: LineBoard, k: number, id: string): DrillMark {
+  const skin = SKINS[b.skin];
+  const fit = boardFits(b);
+  const spot = skin.spot(k, b.ids.length, true);
+  const good = whoCanBeAt(fit, k);
+  const answer = good.length === 1 ? good[0] : CANT;
+  const lineWith = (x: string) => fit.find((p) => p[k - 1] === x)!;
+  const why: Record<string, string> = {};
+  for (const x of b.ids) {
+    if (x === answer) continue;
+    const X = boardName(x);
+    if (good.includes(x)) {
+      const y = good.find((g) => g !== x)!;
+      why[x] = `${cap(say(skin, 'could', X, spot))}, as in ${boardLine(b, lineWith(x))}. But ${say(skin, 'could', boardName(y), spot)} too, as in ${boardLine(b, lineWith(y))}. So you can’t tell.`;
+    } else {
+      why[x] = ruledOut(b, (p) => p[k - 1] === x, say(skin, 'is', X, spot), say(skin, 'cant', X, spot));
+    }
+  }
+  if (answer !== CANT) why[CANT] = `You can tell. The clues rule out everyone but ${boardName(answer)}. So ${say(skin, 'must', boardName(answer), spot)}.`;
+  return { id, label: `${skin.who} ${CONJ[skin.verb].is} ${spot}?`, options: [...b.ids.map((x) => ({ id: x, label: boardName(x) })), CANT_TELL], answer, why };
+}
+
+/** The skin's question about two names. */
+const PAIR_ASK: Record<SkinId, (a: string, b: string) => string> = {
+  race: (a, b) => `Who finished sooner, ${a} or ${b}?`,
+  brooms: (a, b) => `Which wizard finished sooner, ${a} or ${b}?`,
+  height: (a, b) => `Who is taller, ${a} or ${b}?`,
+  dragons: (a, b) => `Which dragon has longer wings, ${a} or ${b}?`,
+  line: (a, b) => `Who is closer to the front, ${a} or ${b}?`,
+  robots: (a, b) => `Which robot is closer to the front, ${a} or ${b}?`,
+  letters: (a, b) => `Which letter is further left, ${a} or ${b}?`,
+};
+
+/** "Who is taller, Cal or Ava?": a name when every order that fits agrees, else Can't tell. */
+export function compareMark(b: LineBoard, x: string, y: string, id: string): DrillMark {
+  const skin = SKINS[b.skin];
+  const fit = boardFits(b);
+  const texts = boardTexts(b);
+  const [X, Y] = [boardName(x), boardName(y)];
+  const xFirst = fit.filter((p) => p.indexOf(x) < p.indexOf(y));
+  const yFirst = fit.filter((p) => p.indexOf(y) < p.indexOf(x));
+  const answer = !yFirst.length ? x : !xFirst.length ? y : CANT;
+  const why: Record<string, string> = {};
+  if (answer === CANT) {
+    const close = b.clues.some((c) => mentions(c, x) && mentions(c, y)) ? 'So you can’t tell.' : `No clue compares ${X} and ${Y}.`;
+    why[x] = `In ${boardLine(b, xFirst[0])}, ${skin.before(X, Y)}. But in ${boardLine(b, yFirst[0])}, ${skin.before(Y, X)}. ${close}`;
+    why[y] = `In ${boardLine(b, yFirst[0])}, ${skin.before(Y, X)}. But in ${boardLine(b, xFirst[0])}, ${skin.before(X, Y)}. ${close}`;
+  } else {
+    const [w, l] = answer === x ? [x, y] : [y, x];
+    const path = chainPath(b.ids, b.clues, w, l);
+    const used = path ? [...new Set(path.map((e) => e.clue))] : [];
+    const reason = !path
+      ? `In every order that fits, ${skin.before(boardName(w), boardName(l))}.`
+      : used.length === 1
+        ? `The clue says ${quoteEnd(texts[used[0]])}`
+        : `The clues say ${quoteList(used.map((i) => texts[i]))} So ${skin.before(boardName(w), boardName(l))}.`;
+    why[l] = reason;
+    why[CANT] = `You can tell. ${reason}`;
+  }
+  return { id, label: PAIR_ASK[b.skin](X, Y), options: [{ id: x, label: X }, { id: y, label: Y }, CANT_TELL], answer, why };
+}
+
+/** "Ava, then Ben, then Cal. So Ava is taller than Cal too." */
+function placeNote(b: LineBoard, order: readonly string[]): string {
+  const skin = SKINS[b.skin];
+  const line = `${order.map(boardName).join(', then ')}.`;
+  const [f, l] = [order[0], order[order.length - 1]];
+  const chain = b.clues.every((c) => c.t === 'before') && !b.clues.some((c) => clueKey(c) === `before:${f},${l}`);
+  return chain ? `${line} So ${skin.before(boardName(f), boardName(l))} too.` : `${line} Every clue is true for this line.`;
+}
+
+/** Place everyone: one mark per spot, with a name in each. The board's clues must leave exactly one order. */
+export function placeRow(b: LineBoard, o: BoardRowOpts & { label: string }): DrillRow {
+  const skin = SKINS[b.skin];
+  const n = b.ids.length;
+  const fit = boardFits(b);
+  if (fit.length !== 1) throw new Error('placeRow: the clues must leave exactly one order');
+  const order = fit[0];
+  const texts = boardTexts(b);
+  const marks: DrillMark[] = order.map((who, i) => {
+    const spot = skin.spot(i + 1, n, true);
+    const why: Record<string, string> = {};
+    for (const x of b.ids) {
+      if (x === who) continue;
+      const X = boardName(x);
+      const test = (p: string[]) => p[i] === x;
+      why[x] = killers(b.ids, b.clues, test).length === 1
+        ? ruledOut(b, test, say(skin, 'is', X, spot), say(skin, 'cant', X, spot))
+        : `${cap(say(skin, 'is', X, skin.spot(order.indexOf(x) + 1, n, true)))}, not ${spot}. The clues say ${quoteList(texts)}`;
+    }
+    return { id: `${o.id}-${i + 1}`, label: cap(spot), options: b.ids.map((x) => ({ id: x, label: boardName(x) })), answer: who, ...(o.given ? { given: true } : {}), why };
+  });
+  return { id: o.id, label: o.label, marks, note: placeNote(b, order) };
+}
+
+/** Must, might or can't a sentence be true, over every order that fits the board's clues. */
+export function statusMark(b: LineBoard, stmt: LineClue, id: string): DrillMark {
+  const skin = SKINS[b.skin];
+  const fit = boardFits(b);
+  const text = clueText(skin, stmt, b.ids.length, boardName);
+  const status = statusOf(fit, stmt);
+  const yes = fit.filter((p) => clueHolds(stmt, p));
+  const no = fit.filter((p) => !clueHolds(stmt, p));
+  const every = fit.length === 1 ? 'the only order that fits' : fit.length === 2 ? 'each of the two orders that fit' : `all ${numWord(fit.length)} orders that fit`;
+  const q = quote(text);
+  const why: Record<string, string> = {};
+  if (status === 'must') {
+    why.might = `${q} is true in ${every}. It is never false, so it must be true.`;
+    why.cant = `${q} is true in ${every}. So it must be true.`;
+  } else if (status === 'cant') {
+    why.must = `${q} is false in ${every}. So it can’t be true.`;
+    why.might = `${q} is false in ${every}. It is never true, so it can’t be true.`;
+  } else {
+    const gap = stmt.t === 'rightBefore' && clueHolds({ t: 'before', a: stmt.a, b: stmt.b }, no[0]) ? ` ${betweenFact(skin, no[0], stmt.a, stmt.b)}` : '';
+    // A board with one clue says "the clue", not "every clue".
+    const allTrue = b.clues.length === 1 ? 'the clue is true' : 'every clue is true';
+    why.must = `In ${boardLine(b, no[0])}, ${allTrue}, but ${q} is false.${gap} So it does not have to be true.`;
+    why.cant = `In ${boardLine(b, yes[0])}, ${allTrue}, and ${q} is true too. So it can be true.`;
+  }
+  return { id, label: quoteEnd(text), options: STATUS_CHOICES, answer: status, why };
+}
+
+/** Sentences to judge over every order that fits: must, might or can't. */
+export function statusRow(b: LineBoard, stmts: readonly LineClue[], o: { id: string }): DrillRow {
+  const n = boardFits(b).length;
+  return {
+    id: o.id,
+    label: `${cap(numWord(n))} ${n === 1 ? 'order fits' : 'orders fit'} the ${b.clues.length === 1 ? 'clue' : 'clues'}. Is each sentence true in all of them, in some, or in none?`,
+    marks: stmts.map((s, i) => statusMark(b, s, `${o.id}-${i + 1}`)),
+  };
+}
+
+const orderId = (p: readonly string[]) => `o-${p.join('-')}`;
+
+/** For each clue: the other order that fits once it is covered, or null when none does. */
+function coverAlts(b: LineBoard): (string[] | null)[] {
+  const fit = boardFits(b);
+  if (fit.length !== 1) throw new Error('coverRow: the clues must leave exactly one order');
+  return b.clues.map((_, i) => {
+    const alts = fits(b.ids, b.clues.filter((_, j) => j !== i)).filter((p) => p.join() !== fit[0].join());
+    if (alts.length > 1) throw new Error('coverRow: more than one other order fits');
+    return alts[0] ?? null;
+  });
+}
+
+/** Cover up one clue: which other order fits the rest (if any), and is the clue needed? */
+export function coverRow(b: LineBoard, i: number, o: BoardRowOpts): DrillRow {
+  const texts = boardTexts(b);
+  const only = boardFits(b)[0];
+  const alts = coverAlts(b);
+  const alt = alts[i];
+  const k = i + 1;
+  const g = o.given ? { given: true } : {};
+  const listed = alts.filter((p): p is string[] => !!p).filter((p, j, all) => all.findIndex((q) => q.join() === p.join()) === j);
+  const options: DrillOption[] = [...listed.map((p) => ({ id: orderId(p), label: p.map(boardName).join(', ') })), { id: 'none', label: 'No other order' }];
+  const answer = alt ? orderId(alt) : 'none';
+  const why: Record<string, string> = {};
+  for (const opt of options) {
+    if (opt.id === answer) continue;
+    if (opt.id === 'none') {
+      why.none = `With clue ${k} covered, ${boardLine(b, alt!)} fits too. Every other clue is true there.`;
+    } else {
+      const p = listed.find((q) => orderId(q) === opt.id)!;
+      const br = b.clues.flatMap((c, j) => (j !== i && !clueHolds(c, p) ? [j] : []));
+      why[opt.id] = `With clue ${k} covered, ${boardLine(b, p)} still makes ${clueNums(br)} false.`;
+    }
+  }
+  return {
+    id: o.id,
+    label: `Cover up clue ${k}: ${quoteEnd(texts[i])}`,
+    marks: [
+      { id: `${o.id}-other`, label: 'Which other order fits the other clues?', options, answer, ...g, why },
+      {
+        id: `${o.id}-need`,
+        label: `Is clue ${k} needed?`,
+        options: NEEDED,
+        answer: alt ? 'yes' : 'no',
+        ...g,
+        why: alt
+          ? { no: `Without clue ${k}, ${boardLine(b, alt)} fits too. So clue ${k} is needed.` }
+          : { yes: `Without clue ${k}, only ${boardLine(b, only)} still fits. So clue ${k} is not needed.` },
+      },
+    ],
+    note: alt ? `With clue ${k} covered, ${boardLine(b, alt)} fits too. So clue ${k} is needed.` : `With clue ${k} covered, only ${boardLine(b, only)} still fits. So clue ${k} is not needed.`,
+  };
 }

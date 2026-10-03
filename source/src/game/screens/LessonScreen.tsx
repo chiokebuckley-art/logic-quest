@@ -1,6 +1,8 @@
 /** Hosts one lesson: key-idea cards, then guided tries. */
 import { useState } from 'react';
+import { lessonWaitsFor } from '../../engine/drill';
 import { seedFor } from '../../engine/journey/mastery';
+import { MAX_RUN } from '../../engine/save/save';
 import { stopById } from '../../content/stops';
 import { useStore, type Route } from '../store';
 import { LessonRunner } from '../components/LessonRunner';
@@ -13,10 +15,17 @@ export function LessonScreen({ route }: { route: LessonRoute }) {
   const lesson = stop?.lessons.find((l) => l.id === route.lessonId);
   // A lesson left partway (a refresh, a closed app) picks up at the same try with the same questions.
   // Otherwise a new seed on every visit, so a repeated lesson brings new tries.
-  const [run] = useState(() => (save?.lessonRun && save.lessonRun.lessonId === route.lessonId && save.lessonRun.stopId === route.stopId ? save.lessonRun : null));
-  const [seed] = useState(() =>
-    run ? run.seed : seedFor(player?.id ?? 'guest', route.lessonId, save?.stops[route.stopId]?.lessonsDone.length ?? 0, Date.now()),
-  );
+  // Not resumed: "Learn this again" after a check (a fresh redo, with its key ideas and boards), a run saved before
+  // this version (no answers kept, and its items have changed), or a run that has used up its quiz items.
+  const [run, setRun] = useState(() => {
+    const r = save?.lessonRun;
+    if (!r || r.lessonId !== route.lessonId || r.stopId !== route.stopId || route.from === 'check') return null;
+    if (r.next > 0 && !r.results) return null;
+    if (r.next >= MAX_RUN) return null;
+    return r;
+  });
+  const newSeed = () => seedFor(player?.id ?? 'guest', route.lessonId, save?.stops[route.stopId]?.lessonsDone.length ?? 0, Date.now());
+  const [seed, setSeed] = useState(() => (run ? run.seed : newSeed()));
 
   const last = state.lastCheck && state.lastCheck.stopId === route.stopId ? state.lastCheck : null;
   const resultRoute: Route | null = route.from === 'check' && last ? { name: 'check', stopId: last.stopId, kind: last.kind, result: true } : null;
@@ -52,6 +61,24 @@ export function LessonScreen({ route }: { route: LessonRoute }) {
     );
   }
 
+  // Lessons open in teaching order (from the Library or a search too): the lesson before must be done, or its
+  // guided boards marked, first.
+  const waits = lessonWaitsFor(stop, lesson.id, save.stops[stop.id]?.lessonsDone ?? [], save.drilled ?? []);
+  if (waits) {
+    const n = stop.lessons.indexOf(waits) + 1;
+    return (
+      <div className="page">
+        <p className="soft-text">
+          {lesson.title} opens when you have done Lesson {n}, {waits.title}. Its key ideas and the board you mark come first.
+        </p>
+        <button type="button" className="btn primary" onClick={() => actions.navigate({ name: 'lesson', stopId: stop.id, lessonId: waits.id, from: route.from })}>
+          Go to Lesson {n}
+        </button>
+        <button type="button" className="btn ghost" onClick={() => actions.navigate(back())}>Back</button>
+      </div>
+    );
+  }
+
   return (
     <div className="page-play">
       <LessonRunner
@@ -61,8 +88,14 @@ export function LessonScreen({ route }: { route: LessonRoute }) {
         seed={seed}
         readAloud={save.settings.readAloud}
         onAnswer={(r) => actions.recordAnswer(r)}
-        start={run ? { next: run.next, firstTry: run.firstTry } : undefined}
-        onProgress={(next, firstTry) => actions.setLessonRun({ stopId: stop.id, lessonId: lesson.id, seed, next, firstTry })}
+        start={run ? { next: run.next, firstTry: run.firstTry, drilled: run.drilled, results: run.results, missed: run.missed } : undefined}
+        onRestart={() => {
+          actions.setLessonRun(null);
+          setRun(null);
+          setSeed(newSeed() + 1);
+        }}
+        onProgress={(p) => actions.setLessonRun({ stopId: stop.id, lessonId: lesson.id, seed, ...p })}
+        onDrilled={() => actions.markDrilled(lesson.id)}
         onComplete={() => {
           actions.completeLesson(stop.id, lesson.id);
           actions.navigate(afterDone(lesson.id));

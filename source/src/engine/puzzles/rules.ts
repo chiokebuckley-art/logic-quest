@@ -11,7 +11,7 @@
  *   - a missed NOT, and brackets skipped (so a NOT lands on the wrong part).
  * It also builds card sets and "guess the rule" puzzles. All randomness comes from the Rng passed in.
  */
-import type { Color, Rng, Shape, Size, Thing } from '../types';
+import type { Color, DrillMark, DrillRow, Rng, Shape, Size, Thing } from '../types';
 
 // ---------- features and cards ----------
 
@@ -334,20 +334,30 @@ export interface RuleGuessOptions {
   maxCards: number;
   /** Most marks a distractor may get wrong (at least 1). */
   maxMisses?: number;
+  /** Where the wrong rules come from (default RULE_POOL). A lesson passes only the rules it has taught. */
+  pool?: readonly Formula[];
+  /** A fixed deck, dealt in a new order (ids c1..cn), instead of drawing new cards. minCards and maxCards are then unused. */
+  deck?: readonly Card[];
+}
+
+/** The cards of a deck in a new order, face up, with ids c1..cn. */
+export function shuffledDeck(rng: Rng, deck: readonly Card[]): Thing[] {
+  return rng.shuffle(deck).map((c, i) => ({ id: `c${i + 1}`, shape: c.shape, color: c.color, size: c.size }));
 }
 
 /**
  * A rule machine let some cards through and stopped others. Picks a target rule and a card set where
- * the target has at least two yes and two no marks, then picks distractors from RULE_POOL that get
- * 1..maxMisses marks wrong (rules that share a feature with the target first). For a two-part target,
- * the cards also show that each part matters (neither part alone fits every mark).
+ * the target has at least two yes and two no marks, then picks distractors from the pool (RULE_POOL unless
+ * given) that get 1..maxMisses marks wrong (rules that share a feature with the target first). For a two-part
+ * target, the cards also show that each part matters (neither part alone fits every mark).
  */
 export function makeRuleGuess(rng: Rng, targets: readonly Formula[], opts: RuleGuessOptions): RuleGuess {
   const maxMisses = opts.maxMisses ?? 2;
+  const pool = opts.pool ?? RULE_POOL;
   for (let tries = 0; tries < 400; tries++) {
     const target = rng.pick(targets);
-    const n = rng.int(opts.minCards, opts.maxCards);
-    const things = drawThings(rng, n);
+    const n = opts.deck ? opts.deck.length : rng.int(opts.minCards, opts.maxCards);
+    const things = opts.deck ? shuffledDeck(rng, opts.deck) : drawThings(rng, n);
     const yes = things.filter((t) => evaluate(target, t)).length;
     if (yes < 2 || n - yes < 2) continue;
     // Each part of a two-part rule must matter: neither part alone may explain every mark.
@@ -355,7 +365,7 @@ export function makeRuleGuess(rng: Rng, targets: readonly Formula[], opts: RuleG
     if (parts.some((p) => things.every((t) => evaluate(p, t) === evaluate(target, t)))) continue;
     const own = mentions(target);
     const scored = rng
-      .shuffle(RULE_POOL)
+      .shuffle(pool)
       .filter((g) => render(g) !== render(target))
       .map((g) => ({
         g,
@@ -381,4 +391,115 @@ export function makeRuleGuess(rng: Rng, targets: readonly Formula[], opts: RuleG
     return { target, distractors: picked, things: marked, ruledOutBy };
   }
   throw new Error('could not build a rule guess');
+}
+
+// ---------- twins: the same deck, a new rule of the same family ----------
+
+/** Every pair of features of different kinds, in reading order: a color, then a shape, then a size ('red AND big'). */
+export const FEATURE_PAIRS: readonly [Feature, Feature][] = (() => {
+  const order: readonly FeatureKind[] = ['color', 'shape', 'size'];
+  const out: [Feature, Feature][] = [];
+  order.forEach((k1, i) => order.slice(i + 1).forEach((k2) => featuresOf(k1).forEach((a) => featuresOf(k2).forEach((b) => out.push([a, b])))));
+  return out;
+})();
+
+/** The four kinds of card for two parts: both parts, the first only, the second only, no part. */
+export const fourWays = (A: Formula, B: Formula): Formula[] => [and(A, B), and(A, not(B)), and(not(A), B), and(not(A), not(B))];
+
+/** Does the deck show every way two parts can go (a card for each of the four kinds)? */
+export const showsEveryWay = (A: Formula, B: Formula, deck: readonly Card[]): boolean =>
+  fourWays(A, B).every((q) => deck.some((c) => evaluate(q, c)));
+
+/** Which cards of a deck fit, as a key ('101101'). Two rules with the same key mark the deck the same way. */
+export const fitKey = (f: Formula, deck: readonly Card[]): string => deck.map((c) => (evaluate(f, c) ? '1' : '0')).join('');
+
+/**
+ * Twin rules for a first quiz on a worked example's deck: the candidates that fit at least `minFit` cards and
+ * leave out at least `minOut`, and that mark the deck differently from every rule in `avoid` (the worked example
+ * and the guided boards), so a twin is never answered by copying marks already shown.
+ */
+export function deckTwins(deck: readonly Card[], candidates: readonly Formula[], avoid: readonly Formula[], o: { minFit?: number; minOut?: number } = {}): Formula[] {
+  const seen = new Set(avoid.map((f) => fitKey(f, deck)));
+  return candidates.filter((f) => {
+    const n = deck.filter((c) => evaluate(f, c)).length;
+    return n >= (o.minFit ?? 1) && deck.length - n >= (o.minOut ?? 1) && !seen.has(fitKey(f, deck)) && !avoid.some((g) => sameMeaning(f, g));
+  });
+}
+
+// ---------- the Do step: mark a deck ----------
+//
+// A guided board on a row of cards (the worked example's deck): the learner marks each card Fits or Not for a new
+// rule of the same family, and for a rule machine also keeps the rule or rules it out. Every right mark comes from
+// evaluate() and the machine's marks; the words for a wrong mark come from the caller and say what the card is and
+// what the rule needs.
+
+export const FITS_OR_NOT: readonly { id: 'fit' | 'not'; label: string }[] = [{ id: 'fit', label: 'Fits' }, { id: 'not', label: 'Not' }];
+export const KEEP_OR_RULE_OUT: readonly { id: 'keep' | 'reject'; label: string }[] = [{ id: 'keep', label: 'Keep' }, { id: 'reject', label: 'Rule out' }];
+
+/** Why one card fits a rule, or why it does not, in plain words. */
+export type CardWords = (rule: Formula, card: Card) => string;
+
+export interface DeckRowOptions {
+  /** Row id; each mark's id is `<row id>-<card id>`. */
+  id: string;
+  /** "Rule: NOT blue" */
+  label: string;
+  /** Shown already marked (the worked case). */
+  given?: boolean;
+  /** Shown under the row once it is marked right. */
+  note?: string;
+  /** Draw each card with its machine mark (✓ or ✗), for a rule machine's deck. Default: the bare card. */
+  withMarks?: boolean;
+}
+
+const capFirst = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/** One rule on a deck, as a row of marks: each card Fits or Not, computed by evaluate(). */
+export function deckRow(rule: Formula, things: readonly Thing[], words: CardWords, o: DeckRowOptions): DrillRow {
+  const marks: DrillMark[] = things.map((t) => {
+    const fits = evaluate(rule, t);
+    const thing: Thing = { id: t.id, shape: t.shape, color: t.color, size: t.size, ...(o.withMarks && t.mark ? { mark: t.mark } : {}) };
+    return {
+      id: `${o.id}-${t.id}`,
+      label: capFirst(cardName(t)),
+      options: FITS_OR_NOT.map((x) => ({ ...x })),
+      answer: fits ? 'fit' : 'not',
+      ...(o.given ? { given: true } : {}),
+      thing,
+      why: { [fits ? 'not' : 'fit']: words(rule, t) },
+    };
+  });
+  return { id: o.id, label: o.label, marks, ...(o.note ? { note: o.note } : {}) };
+}
+
+/** The first card whose machine mark the rule gets wrong (a yes card it does not fit, or a no card it fits), or null. */
+export function firstMismatch(rule: Formula, things: readonly Thing[]): Thing | null {
+  if (things.some((t) => !t.mark)) throw new Error('every card needs its machine mark');
+  return things.find((t) => evaluate(rule, t) !== (t.mark === 'yes')) ?? null;
+}
+
+export interface RuleTestWords {
+  card: CardWords;
+  /** Every mark matches: why ruling the rule out is wrong. */
+  keep(rule: Formula): string;
+  /** A mark does not match: why keeping the rule is wrong, naming that card. */
+  ruleOut(rule: Formula, card: Thing): string;
+}
+
+/**
+ * Test one rule against a rule machine's marks: each card Fits or Not (the card drawn with its mark), then Keep
+ * (every mark matches) or Rule out (at least one card's mark does not), computed from the marks.
+ */
+export function ruleTestRow(rule: Formula, things: readonly Thing[], words: RuleTestWords, o: Omit<DeckRowOptions, 'withMarks'>): DrillRow {
+  const row = deckRow(rule, things, words.card, { ...o, withMarks: true });
+  const miss = firstMismatch(rule, things);
+  row.marks.push({
+    id: `${o.id}-decide`,
+    label: 'Keep or rule out?',
+    options: KEEP_OR_RULE_OUT.map((x) => ({ ...x })),
+    answer: miss ? 'reject' : 'keep',
+    ...(o.given ? { given: true } : {}),
+    why: miss ? { keep: words.ruleOut(rule, miss) } : { reject: words.keep(rule) },
+  });
+  return row;
 }

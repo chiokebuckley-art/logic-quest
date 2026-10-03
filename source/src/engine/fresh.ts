@@ -37,7 +37,8 @@ export function freshCheckSet(stop: StopDef, item: Item, seed: number, avoid: re
   if (lesson) {
     for (let i = 0; i < 80; i++) {
       for (const x of lesson.practice(createRng(seed + i * 104729))) {
-        if (seen.has(looks(x))) continue;
+        // Never the lesson's scaffolded first quiz: it is the same board every time.
+        if (x.workFirst || x.fixed || seen.has(looks(x))) continue;
         if (x.skill === item.skill) return tag([x]);
         fallback ??= x;
       }

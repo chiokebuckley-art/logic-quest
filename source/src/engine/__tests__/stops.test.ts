@@ -3,17 +3,81 @@
  */
 import { describe, expect, it } from 'vitest';
 import { STOPS } from '../../content/stops';
+import { checkDrill, marksToTap } from '../drill';
 import { claimTrue, clueHolds, gridClueHolds } from '../grade';
 import { READING, fkGrade, longestSentence } from '../readability';
 import { createRng } from '../rng';
 import { feedbackText, teachStrings } from '../teach';
-import type { AssignItem, Item, StopDef, TeachCase } from '../types';
+import type { AssignItem, DrillStep, Item, LessonDef, Scene, StopDef, TeachCase } from '../types';
 
 /**
  * Every wrong-answer route meets the wrong-answer handoff (v1.0): each item has Item.teach, and each wrong choice of
  * a choose item has its own ChoiceFeedback. This holds for every lesson of every built stop.
  */
 const coverageFor = (_lessonId: string) => true;
+
+/**
+ * Every lesson of every built stop is See -> Do -> Quiz (the skill-drill handoff, 2 Oct 2026): guided boards
+ * (LessonDef.drill) the learner marks by taps before any quiz, a marked case in every practice hint, and Do text
+ * at the reading level.
+ */
+const drillFor = (_lessonId: string) => true;
+
+/** Shape rules for a guided board. `board`: the scenes it may show as the same board (the worked examples). */
+function drillProblems(step: DrillStep, boards: readonly string[], where: string): string[] {
+  const out: string[] = [];
+  if (!step.title.trim()) out.push(`${where}: no title`);
+  if (!step.body.length || !step.body.join('').trim()) out.push(`${where}: no instructions`);
+  if (!step.done.trim()) out.push(`${where}: nothing said when the marks are right`);
+  if (!step.rows.length) out.push(`${where}: no rows`);
+  const tap = marksToTap(step);
+  if (!tap.length) out.push(`${where}: nothing for the learner to mark`);
+  const ids = new Set<string>();
+  for (const r of step.rows) {
+    if (!r.label.trim()) out.push(`${where}: a row without a label`);
+    if (!r.marks.length) out.push(`${where} ${r.id}: a row without marks`);
+    for (const m of r.marks) {
+      if (ids.has(m.id)) out.push(`${where}: mark id ${m.id} twice`);
+      ids.add(m.id);
+      if (!m.label.trim()) out.push(`${where} ${m.id}: no label`);
+      if (m.options.length < 2) out.push(`${where} ${m.id}: fewer than two options`);
+      if (new Set(m.options.map((o) => o.id)).size !== m.options.length) out.push(`${where} ${m.id}: repeated option ids`);
+      if (!m.options.some((o) => o.id === m.answer)) out.push(`${where} ${m.id}: the answer is not an option`);
+      if (!m.given) for (const o of m.options) if (o.id !== m.answer && !m.why[o.id]?.trim()) out.push(`${where} ${m.id}: no words for a wrong “${o.label}”`);
+    }
+  }
+  if (step.columns) {
+    for (const r of step.rows) if (r.marks.length !== step.columns.length) out.push(`${where} ${r.id}: ${r.marks.length} boxes for ${step.columns.length} columns`);
+    for (const m of step.rows.flatMap((r) => r.marks)) if (!m.options.every((o) => o.id === 'yes' || o.id === 'no')) out.push(`${where} ${m.id}: a grid box takes only yes and no`);
+  }
+  // The same board as a worked example, or a twin that says what it changed.
+  if (step.scene && !boards.includes(JSON.stringify(step.scene)) && !step.twin?.trim()) out.push(`${where}: not a worked example's board, and no twin note`);
+  // A grid board drawn only as its tap grid: its columns, rows and shown boxes are a card's grid picture.
+  if (step.columns && !step.scene && !step.twin?.trim()) {
+    const grids = boards.map((b) => JSON.parse(b) as Scene).filter((s): s is Extract<Scene, { kind: 'grid' }> => s.kind === 'grid');
+    const same = grids.some((g) =>
+      JSON.stringify(g.cols.map((c) => c.label)) === JSON.stringify(step.columns) &&
+      step.rows.every((r) => {
+        const gr = g.rows.find((x) => x.label === r.label);
+        return !!gr && r.marks.every((m, k) => !m.given || g.marks[gr.id]?.[g.cols[k].id] === m.answer);
+      }));
+    if (!same) out.push(`${where}: a grid board whose rows, columns and shown boxes match no card's grid, and no twin note`);
+  }
+  if (!checkDrill(step, Object.fromEntries(tap.map((m) => [m.id, m.answer]))).done) out.push(`${where}: the right marks do not pass`);
+  return out;
+}
+
+/** Every player-facing string of a guided board. */
+const drillText = (step: DrillStep): string[] => [
+  step.title,
+  ...step.body,
+  step.done,
+  step.twin ?? '',
+  ...step.rows.flatMap((r) => [r.label, r.note ?? '', ...r.marks.flatMap((m) => [m.label, ...Object.values(m.why)])]),
+];
+
+/** The See boards of a lesson: every key-idea card's scene. */
+const seeBoards = (l: LessonDef) => l.ideas.filter((c) => c.scene).map((c) => JSON.stringify(c.scene));
 
 /** Shape rules for a worked case card. */
 function caseProblems(c: TeachCase, where: string): string[] {
@@ -184,9 +248,9 @@ function prose(items: Item[]): string {
 }
 
 describe.each(built.map((s) => [s.n, s] as const))('stop %i', (_n, stop) => {
-  it('has 3-6 lessons with 3-6 key-idea cards each', () => {
+  it('has 3-7 lessons with 3-6 key-idea cards each', () => {
     expect(stop.lessons.length).toBeGreaterThanOrEqual(3);
-    expect(stop.lessons.length).toBeLessThanOrEqual(6);
+    expect(stop.lessons.length).toBeLessThanOrEqual(7);
     stop.lessons.forEach((l, i) => {
       expect(l.id).toBe(`s${stop.n}.l${i + 1}`);
       expect(l.ideas.length, l.id).toBeGreaterThanOrEqual(3);
@@ -247,6 +311,43 @@ describe.each(built.map((s) => [s.n, s] as const))('stop %i', (_n, stop) => {
     }
     const check = prose([1, 2, 3].flatMap((s) => stop.check!(createRng(s))));
     expect(fkGrade(check), 'check grade').toBeLessThanOrEqual(READING.maxGrade);
+  });
+});
+
+describe.each(built.map((s) => [s.n, s] as const))('stop %i: See -> Do -> Quiz', (_n, stop) => {
+  it('guided boards come before the quiz: computed marks, words for every wrong mark, the worked example’s board', () => {
+    for (const l of stop.lessons) {
+      if (!drillFor(l.id)) continue;
+      expect(l.drill?.length ?? 0, `${l.id} has guided boards`).toBeGreaterThan(0);
+      l.drill!.forEach((st, j) => expect(drillProblems(st, seeBoards(l), `${l.id} board ${j + 1}`)).toEqual([]));
+      // A board placed right after a card (afterCard) is that card's board, so the Do sits next to its See.
+      for (const st of l.drill!) {
+        if (st.afterCard === undefined || st.twin) continue;
+        expect(JSON.stringify(l.ideas[st.afterCard]?.scene), `${st.id} after card ${st.afterCard + 1}`).toBe(JSON.stringify(st.scene));
+      }
+      const text = l.drill!.flatMap(drillText).filter(Boolean).join('\n');
+      expect(fkGrade(text), `${l.id} boards grade`).toBeLessThanOrEqual(READING.maxGrade);
+      const long = longestSentence(text);
+      expect(long.words, `${l.id} boards: "${long.sentence}"`).toBeLessThanOrEqual(READING.maxSentenceWords);
+    }
+  });
+
+  it('every hint shows a marked case; a scaffolded first quiz is marked on its own board; each pass group is in every pack', () => {
+    for (const l of stop.lessons) {
+      if (!drillFor(l.id)) continue;
+      for (let seed = 1; seed <= 20; seed++) {
+        const items = l.practice(createRng(seed));
+        for (const it of items) {
+          if (it.hint) expect(it.hintCase, `${it.id}: the hint shows a marked case`).toBeDefined();
+          if (it.workFirst) {
+            expect(drillProblems(it.workFirst, it.scene ? [JSON.stringify(it.scene)] : [], `${it.id} work`)).toEqual([]);
+            const long = longestSentence(drillText(it.workFirst).join('\n'));
+            expect(long.words, `${it.id} work: "${long.sentence}"`).toBeLessThanOrEqual(READING.maxSentenceWords);
+          }
+        }
+        for (const g of l.pass?.include ?? []) expect(items.some((it) => it.tags?.includes(g.tag)), `${l.id} seed ${seed} has ${g.tag}`).toBe(true);
+      }
+    }
   });
 });
 

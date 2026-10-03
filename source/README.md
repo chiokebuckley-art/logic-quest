@@ -1,5 +1,23 @@
 # LOGIC QUEST
 
+**v0.4.1 — Teach before the quiz:** every lesson in Stops 1–6 is now See, Do, Quiz.
+
+- **See.** The key ideas end on one case already marked on its board: the Gold, Silver and Bronze chests, a deck of
+  cards marked fits or not, Ava, Ben and Cal standing in line, a grid with one row filled, the four boxes of a rule
+  with “the break” marked.
+- **Do.** Before any quiz, you mark a new case yourself on that same board, by taps: true or false, fits or not, a
+  check or a cross, a count, keep or reject. “Check my marks” names the first mark that is off, in plain words. A
+  wrong mark stays until you change it.
+- **Quiz.** Only puzzles of the kind the lesson just taught. Kinds no card and board taught were moved out (for
+  example, Treasure signs now uses only “Exactly one sign is true”, starting with the frozen Ice, Fire and Moss caves).
+  Every hint shows one case already marked.
+- **Three new sign lessons** in Stop 1, each See, Do, Quiz: “Every sign is false”, “Exactly two signs are true” and
+  “The owner’s sign”. Stop 1 now has seven lessons.
+- **Passing.** A lesson is done only after its boards are marked right and 3 answers are right on the first try with no
+  hint. Tapping Next through the cards never passes. More puzzles come until you get there, and lessons open in
+  order.
+- Each stop's worksheet is in [`docs/audit/drill-stopN.md`](docs/audit/).
+
 **v0.4.0 — One page per stop, five tabs:** the app is reorganised so each thing lives in one place.
 
 - **Home · Journey · Arcade · Library · Me.** Home says the one next thing: the Next-up card with one gold button,
@@ -51,7 +69,8 @@ events, age paths, reasoning prompts and saved bridge badges. See [docs/PATTERN_
 
 **v0.1.0 — Foundation:** the first three Journey stops, all playable:
 
-- **True or False?** Statements; true, false or can't tell; the NOT flip; treasure signs.
+- **True or False?** Statements; true, false or can't tell; the NOT flip; treasure signs, with one lesson for
+  each sign rule.
 - **NOT, AND, OR.** Each one on its own, then brackets, and guess the rule.
 - **Line Up.** Chains, before vs right before, not first / next to / between, build the line, and which clue
   wasn't needed.
@@ -88,7 +107,8 @@ npm run dev        # http://localhost:5192
 
 - **The Journey** has 12 stops, in first-principles order, from "True or False?" to "Clues & Chances". The
   plan for all of them is in [`../docs/logic-quest-plan.md`](../docs/logic-quest-plan.md).
-- **Learn first.** Every lesson opens with short key-idea cards, which can be read aloud. Then come 3–5 tries
+- **Learn first: See, Do, Quiz.** Every lesson opens with short key-idea cards, which can be read aloud, ending on a
+  worked case. Then you mark a case yourself on the same board. Then come 3–5 tries
   with instant feedback. A miss opens the explanation at once: what the answer means, exactly where it fails, and
   why the right answer works. Then "Try this question again", then new examples on the same idea, on your own.
 - **Show what you know.** The stop check opens after every lesson is done. It passes only when every answer is

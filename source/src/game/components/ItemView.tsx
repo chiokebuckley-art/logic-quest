@@ -14,9 +14,11 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import type { KeyboardEvent, ReactElement, Ref } from 'react';
 import { clueHolds, grade } from '../../engine/grade';
+import { caseText } from '../../engine/teach';
 import type { Answer, Item, LineClue, OrderItem } from '../../engine/types';
 import { explanationFor, type ExplanationModel } from '../explanation';
-import { ExplanationPanel } from './ExplanationPanel';
+import { DrillBoard } from './DrillBoard';
+import { CaseCard, ExplanationPanel } from './ExplanationPanel';
 import { itemSpeech } from '../speech';
 import { AssignGrid, AssignToggles, assignReady, assignValues, type Marks } from './AssignView';
 import type { AnswerRecord, ItemViewProps } from './contracts';
@@ -213,7 +215,7 @@ function TimerBar({ left, limit }: { left: number; limit: number }) {
 export function rightTitle(stage: 'first' | 'fresh', misses: number, hint: boolean): string {
   if (misses > 0) return 'Right.';
   if (stage === 'fresh') return hint ? 'Right.' : 'Right, on your own.';
-  return 'Right, first try.';
+  return hint ? 'Right, with a hint.' : 'Right, first try.';
 }
 
 type Phase = 'answer' | 'right' | 'explained';
@@ -234,6 +236,8 @@ export interface ItemViewExtraProps {
   afterHelpLabel?: string;
   /** Fresh stage: also offer "Move on for now" after a miss. */
   canMoveOn?: boolean;
+  /** Learn mode: called at the first wrong Check, before the item is finished (so a host can save the miss). */
+  onMiss?(): void;
 }
 
 /** One item. Its state resets whenever the item changes. */
@@ -241,7 +245,7 @@ export function ItemView(props: ItemViewProps & ItemViewExtraProps) {
   return <ItemRun key={props.item.id} {...props} />;
 }
 
-function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, nextLabel = 'Next', autoFocus = true, stage = 'first', afterHelpLabel = nextLabel, canMoveOn = false }: ItemViewProps & ItemViewExtraProps) {
+function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, nextLabel = 'Next', autoFocus = true, stage = 'first', afterHelpLabel = nextLabel, canMoveOn = false, onMiss }: ItemViewProps & ItemViewExtraProps) {
   const learn = mode === 'learn';
   const uid = useId().replace(/[^A-Za-z0-9_-]/g, '');
   const promptId = `${uid}-prompt`;
@@ -257,6 +261,8 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
   const [phase, setPhase] = useState<Phase>('answer');
   const [misses, setMisses] = useState(0);
   const [hintOpen, setHintOpen] = useState(false);
+  /** Learn mode: the item's guided board (workFirst) is marked right, so the answer buttons can show. */
+  const [workDone, setWorkDone] = useState(() => !learn || !item.workFirst);
   /** The explanation of the latest wrong answer. Kept for "Review the explanation" during a retry. */
   const [explained, setExplained] = useState<ExplanationModel | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -356,12 +362,13 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
     if (g.correct) {
       solvedMs.current = Date.now() - startedAt;
       setPhase('right');
-      setLive(misses === 0 ? (stage === 'fresh' && !help.current.hint ? 'Right, on your own.' : 'Right, first try.') : 'Right.');
+      setLive(rightTitle(stage, misses, help.current.hint));
     } else {
       // Teach at once: no second wrong guess before the explanation.
       const m = explanationFor(item, answer);
       if (m.gap && !help.current.gap) help.current.gap = m.gap;
       setExplained(m);
+      if (misses === 0) onMiss?.();
       setMisses((n) => n + 1);
       setPhase('explained');
       setLive(`Not yet. ${m.title}`);
@@ -580,7 +587,15 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
     <section className="play-item" aria-labelledby={promptId}>
       <div className="play-item-top">
         <span className="play-kicker">{kicker ?? (learn ? 'Your turn' : 'Question')}</span>
-        {readAloud && <ReadAloudButton text={() => itemSpeech(item)} />}
+        {readAloud && (
+          <ReadAloudButton
+            text={() => {
+              // While the item's own board is up, its answer buttons are not on screen yet: read the question only.
+              const lines = item.workFirst && !workDone ? itemSpeech({ ...item, kind: 'choose', choices: [] } as Item).filter((l) => l !== 'Your choices are:') : itemSpeech(item);
+              return hintOpen && item.hint ? [...lines, `Hint: ${item.hint}`, ...(item.hintCase ? caseText(item.hintCase) : [])] : lines;
+            }}
+          />
+        )}
       </div>
 
       {timed && <TimerBar left={left} limit={timeLimit as number} />}
@@ -591,9 +606,24 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
 
       {item.scene && !sceneInControls && <SceneView scene={item.scene} clueState={clueState} />}
 
-      {controls}
+      {learn && item.workFirst && !workDone ? (
+        <DrillBoard
+          step={item.workFirst}
+          embedded
+          readAloud={readAloud}
+          kicker="First, mark the cases"
+          doneLabel="Now answer the question"
+          autoFocus={false}
+          onDone={() => {
+            setWorkDone(true);
+            requestAnimationFrame(() => promptRef.current?.focus());
+          }}
+        />
+      ) : (
+        controls
+      )}
 
-      {learn && phase === 'answer' && (
+      {learn && phase === 'answer' && workDone && (
         <>
           {explained && (
             <button type="button" className="play-btn play-btn--ghost play-btn--small play-review-toggle" aria-expanded={reviewOpen} onClick={() => setReviewOpen((o) => !o)}>
@@ -604,7 +634,14 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
           {hintOpen && item.hint && (
             <div id={hintId} className="play-hint">
               <PlayIcon name="bulb" size={18} />
-              <span>{item.hint}</span>
+              <div>
+                <span>{item.hint}</span>
+                {item.hintCase && (
+                  <div className="play-hint-case">
+                    <CaseCard c={item.hintCase} />
+                  </div>
+                )}
+              </div>
             </div>
           )}
           <div className="play-actions">

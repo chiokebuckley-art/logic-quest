@@ -130,7 +130,7 @@ export function SceneView({ scene, clueState, labelId }: SceneViewProps) {
           <div className="play-clues-title" aria-hidden="true">Clues</div>
           <ol className="play-clue-list" aria-label="Clues">
             {scene.clues.map((c, i) => {
-              const st = clueState?.[i] ?? null;
+              const st = clueState?.[i] ?? scene.marks?.[i] ?? null;
               return (
                 <li key={i} className={`play-clue${st ? ` play-clue--${st}` : ''}`}>
                   <span className="play-clue-n">
@@ -149,6 +149,17 @@ export function SceneView({ scene, clueState, labelId }: SceneViewProps) {
               );
             })}
           </ol>
+          {scene.line && (
+            <div className="play-line">
+              <span className="play-line-end">{scene.line.first}</span>
+              <ol className="play-line-names" aria-label={`The line, from ${scene.line.first.toLowerCase()} to ${scene.line.last.toLowerCase()}`}>
+                {scene.line.names.map((n, k) => (
+                  <li key={k} className="play-line-name">{n}</li>
+                ))}
+              </ol>
+              <span className="play-line-end">{scene.line.last}</span>
+            </div>
+          )}
         </div>
       );
     case 'text':
@@ -163,6 +174,11 @@ export function SceneView({ scene, clueState, labelId }: SceneViewProps) {
       return (
         <div className="play-scene play-speakers" id={labelId}>
           {scene.rule && <RuleBanner rule={scene.rule} />}
+          {scene.fact && (
+            <p className="play-fact">
+              <span className="play-fact-tag">What is true</span> {scene.fact}
+            </p>
+          )}
           <ul className="play-speaker-list" aria-label="Who says what">
             {scene.speakers.map((sp, i) => (
               <SpeakerCard key={sp.id} name={sp.name} says={sp.says} index={i} />
@@ -197,12 +213,14 @@ function GridPicture({ scene, labelId }: { scene: GridScene; labelId?: string })
               <th scope="row">{r.label}</th>
               {scene.cols.map((c) => {
                 const m = scene.marks[r.id]?.[c.id];
+                const label = scene.labels?.[r.id]?.[c.id];
                 return (
                   <td key={c.id}>
-                    <span className={`play-cell play-cell--pic${m ? ` play-cell--${m}` : ''}`}>
+                    <span className={`play-cell play-cell--pic${m ? ` play-cell--${m}` : ''}${label ? ' has-label' : ''}`}>
                       {m === 'yes' && <PlayIcon name="check" size={20} />}
                       {m === 'no' && <PlayIcon name="cross" size={18} />}
                       <span className="play-sr">{m === 'yes' ? 'yes' : m === 'no' ? 'no' : 'blank'}</span>
+                      {label && <span className="play-cell-label">{label}</span>}
                     </span>
                   </td>
                 );

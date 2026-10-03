@@ -44,14 +44,35 @@ export type Tally = [number, number];
 export type HelpTally = [number, number, number, number, number];
 export const MAX_GAPS = 50;
 
-/** A lesson left partway: its practice seed, the next try (0-based) and the first-try wins so far. */
+/** One answered quiz item of a lesson run: right on the first try with no hint (clean), and its tags. */
+export interface RunResult {
+  clean: boolean;
+  tags: string[];
+}
+
+/**
+ * A lesson left partway: its practice seed, the next try (0-based), the first-try wins so far, whether the guided
+ * boards were marked, and each quiz answer (the pass rule reads them, and extra items are rebuilt from them).
+ */
 export interface LessonRun {
   stopId: string;
   lessonId: string;
   seed: number;
   next: number;
   firstTry: number;
+  drilled?: boolean;
+  results?: RunResult[];
+  /** A try whose first answer was wrong before the run was left: it cannot count as a first try on resume. */
+  missed?: number;
 }
+
+/** The learner marked a lesson's guided boards right. */
+export function markDrilled(save: SaveData, lessonId: string): SaveData {
+  return save.drilled.includes(lessonId) ? save : { ...save, drilled: [...save.drilled, lessonId] };
+}
+
+/** The longest lesson run kept: planned tries plus extra items until the pass rule is met. */
+export const MAX_RUN = 60;
 
 export interface SaveData {
   patternBridge: BridgeProgress;
@@ -74,6 +95,11 @@ export interface SaveData {
   gaps: string[];
   /** The lesson in progress, so a refresh or a closed app picks up at the same try with the same questions. */
   lessonRun: LessonRun | null;
+  /**
+   * Lessons whose guided boards (the Do step) the learner marked right, by lesson id. A lesson with boards is done
+   * only after this. Top level, so an older copy of the app carries it through untouched.
+   */
+  drilled: string[];
 }
 
 export interface KV {
@@ -85,7 +111,7 @@ export interface KV {
 export const DEFAULT_SETTINGS: Settings = { timer: true, readAloud: true, reduceMotion: false };
 
 export function newSave(now = Date.now()): SaveData {
-  return { patternBridge: freshBridge(), game: 'logic-quest', v: SAVE_VERSION, savedAt: now, stops: {}, stats: {}, active: {}, settings: { ...DEFAULT_SETTINGS }, notebook: {}, fixedCount: 0, help: {}, gaps: [], lessonRun: null };
+  return { patternBridge: freshBridge(), game: 'logic-quest', v: SAVE_VERSION, savedAt: now, stops: {}, stats: {}, active: {}, settings: { ...DEFAULT_SETTINGS }, notebook: {}, fixedCount: 0, help: {}, gaps: [], lessonRun: null, drilled: [] };
 }
 
 /** Skill tags look like 's2.or-both'. Anything else in an imported save is dropped (it would also break the CSV). */
@@ -172,9 +198,19 @@ export function parseSave(raw: unknown): SaveData | null {
   if (isObj(raw.lessonRun)) {
     const r = raw.lessonRun;
     if (typeof r.stopId === 'string' && /^s\d{1,2}$/.test(r.stopId) && typeof r.lessonId === 'string' && /^s\d{1,2}\.l\d{1,2}$/.test(r.lessonId) && r.lessonId.startsWith(`${r.stopId}.`) && typeof r.seed === 'number' && Number.isFinite(r.seed)) {
-      s.lessonRun = { stopId: r.stopId, lessonId: r.lessonId, seed: Math.trunc(r.seed), next: num(r.next, 0, 20), firstTry: num(r.firstTry, 0, 20) };
+      const run: LessonRun = { stopId: r.stopId, lessonId: r.lessonId, seed: Math.trunc(r.seed), next: num(r.next, 0, MAX_RUN), firstTry: num(r.firstTry, 0, MAX_RUN) };
+      if (r.drilled === true) run.drilled = true;
+      if (typeof r.missed === 'number' && Number.isInteger(r.missed) && r.missed >= 0 && r.missed < MAX_RUN) run.missed = r.missed;
+      if (Array.isArray(r.results)) {
+        run.results = r.results
+          .filter((x): x is { clean: boolean; tags?: unknown } => isObj(x) && typeof x.clean === 'boolean')
+          .slice(0, MAX_RUN)
+          .map((x) => ({ clean: x.clean, tags: strs(x.tags, 8).map((t) => t.slice(0, 40)) }));
+      }
+      s.lessonRun = run;
     }
   }
+  if (Array.isArray(raw.drilled)) s.drilled = [...new Set(strs(raw.drilled, 400).filter((id) => /^s\d{1,2}\.l\d{1,2}$/.test(id)))];
   if (Array.isArray(raw.gaps)) s.gaps = [...new Set(raw.gaps.filter((g): g is string => typeof g === 'string' && /^s\d{1,2}\.[\w.:-]{1,120}$/.test(g)))].slice(-MAX_GAPS);
   if (isObj(raw.settings)) {
     const st = raw.settings;

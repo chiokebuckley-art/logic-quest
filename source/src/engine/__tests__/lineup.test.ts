@@ -7,7 +7,8 @@
  * message quotes and every smallest example is checked against its own computation.
  */
 import { describe, expect, it } from 'vitest';
-import { stop3 } from '../../content/stop3';
+import { L1_DRILL, L2_DRILL, L2_TYPES, L3_DRILL, L3_FIRST_TYPES, L3_TYPES, L4_DRILL, L4_FIRST_TYPES, L5_DRILL, stop3 } from '../../content/stop3';
+import { checkDrill, drillSpeech, marksToTap, passState } from '../drill';
 import { freshCheckSet, looks } from '../fresh';
 import { clueHolds, grade } from '../grade';
 import {
@@ -16,6 +17,8 @@ import {
   ORDINALS,
   SKINS,
   SKIN_IDS,
+  TAUGHT_TYPES,
+  type ClueType,
   buildPuzzle,
   buildSimpler,
   chainPuzzle,
@@ -34,11 +37,11 @@ import {
   type SpotFocus,
   type Status,
 } from '../puzzles/lineup';
-import { sentences, words } from '../readability';
+import { READING, fkGrade, longestSentence, sentences, words } from '../readability';
 import { createRng } from '../rng';
-import { feedbackText, teachStrings } from '../teach';
+import { caseText, feedbackText, teachStrings } from '../teach';
 import { explanationFor, explanationSpeech } from '../../game/explanation';
-import type { ChooseItem, Item, LineClue, TeachCase } from '../types';
+import type { ChooseItem, DrillMark, DrillRow, DrillStep, Item, LineClue, TeachCase } from '../types';
 
 const SEEDS = 300;
 
@@ -1209,5 +1212,526 @@ describe('broken-clue feedback', () => {
       'Clue 4: In your line, D is third, not last.',
     ]);
     expect(fb(['b', 'a', 'd', 'c']).split('\n')[1]).toBe('Clue 1: In your line, A is second, not first.');
+  });
+});
+
+// ---------- See -> Do -> Quiz (the skill-drill handoff, 2 Oct 2026) ----------
+//
+// The guided boards are re-solved here from the words on them: each clue is read back from its sentence
+// (readBoardClue, as signs.test reads a sign), and every mark is worked out again with `holds`, the evaluator
+// written in this file, apart from the engine's clueHolds.
+
+/** Reads a board clue (race or heights) back from its words. */
+function readBoardClue(text: string): LineClue {
+  const id = (s: string) => s.toLowerCase();
+  let m: RegExpExecArray | null;
+  if ((m = /^(\w+) finished right before (\w+)\.$/.exec(text))) return { t: 'rightBefore', a: id(m[1]), b: id(m[2]) };
+  if ((m = /^(\w+) finished somewhere between (\w+) and (\w+)\.$/.exec(text))) return { t: 'between', a: id(m[1]), b: id(m[2]), c: id(m[3]) };
+  if ((m = /^(\w+) finished before (\w+)\.$/.exec(text))) return { t: 'before', a: id(m[1]), b: id(m[2]) };
+  if ((m = /^(\w+) is taller than (\w+)\.$/.exec(text))) return { t: 'before', a: id(m[1]), b: id(m[2]) };
+  if ((m = /^No one finished between (\w+) and (\w+)\.$/.exec(text))) return { t: 'nextTo', a: id(m[1]), b: id(m[2]) };
+  if ((m = /^(\w+) did not finish (first|last)\.$/.exec(text))) return m[2] === 'first' ? { t: 'notFirst', a: id(m[1]) } : { t: 'notLast', a: id(m[1]) };
+  if ((m = /^(\w+) finished (first|last)\.$/.exec(text))) return m[2] === 'first' ? { t: 'first', a: id(m[1]) } : { t: 'last', a: id(m[1]) };
+  throw new Error(`cannot read board clue: ${text}`);
+}
+
+/** Every quoted sentence in a text, with its full stop. */
+const quotesIn = (s: string) => [...s.matchAll(/“([^”]+)”/g)].map((m) => (/[.?]$/.test(m[1]) ? m[1] : `${m[1]}.`));
+const capName = (id: string) => id.charAt(0).toUpperCase() + id.slice(1);
+/** The line a row label ends on: "Finish order: Ava, Cal, Ben." or "Try Eli first, as in Eli, Fay, Gus." */
+function lineIn(label: string): string[] | null {
+  const m = /((?:[A-Z][a-z]*, )+[A-Z][a-z]*)(?: \([a-z ]+\))?\.$/.exec(label);
+  return m ? m[1].split(', ').map((s) => s.toLowerCase()) : null;
+}
+/** "The tallest", "Second", "last" -> the spot number. */
+function spotK(word: string, n: number): number {
+  const w = word.toLowerCase().replace(/^the /, '');
+  if (w === 'tallest' || w === 'first') return 1;
+  if (w === 'shortest' || w === 'last') return n;
+  const m = /^(second|third|fourth)(?: tallest)?$/.exec(w);
+  if (!m) throw new Error(`unknown spot: ${word}`);
+  return ['second', 'third', 'fourth'].indexOf(m[1]) + 2;
+}
+
+interface BoardCtx {
+  ids: string[];
+  clues: LineClue[];
+}
+
+/** The people and clues a row is about: the board's, unless its label quotes other clues or adds a runner. */
+function rowCtx(board: BoardCtx, row: DrillRow, more: Record<string, string[]>): BoardCtx {
+  const card = /^On the card: (.+)$/.exec(row.label);
+  if (card) return { ids: board.ids, clues: quotesIn(card[1]).map(readBoardClue) };
+  const left = /Only clue \d+ is left: (.+)$/.exec(row.label);
+  if (left) return { ids: board.ids, clues: quotesIn(left[1]).map(readBoardClue) };
+  const added = /^Now add a clue: “(.+)”$/.exec(row.label);
+  if (added) return { ids: board.ids, clues: [...board.clues, readBoardClue(added[1])] };
+  return { ids: more[row.id] ?? board.ids, clues: board.clues };
+}
+
+/** The right mark, worked out from the words alone. */
+function expectedMark(ctx: BoardCtx, row: DrillRow, m: DrillMark): string {
+  const { ids, clues } = ctx;
+  const fit = fitHolds(ids, clues);
+  const line = lineIn(row.label);
+  let x: RegExpExecArray | null;
+  if ((x = /^Clue (\d+): “(.+)”$/.exec(m.label))) {
+    const c = readBoardClue(x[2]);
+    expect(c, 'the label quotes the board’s own clue').toEqual(clues[Number(x[1]) - 1]);
+    return String(holds(c, line!));
+  }
+  if (m.label === 'Keep or cross out?') {
+    const t = /^Try (\w+) (\w+),/.exec(row.label)!;
+    const who = t[1].toLowerCase();
+    const k = spotK(t[2], ids.length);
+    expect(line![k - 1], row.label).toBe(who);
+    return fit.some((p) => p[k - 1] === who) ? 'keep' : 'reject';
+  }
+  if (/^Does this (line|order) fit\?$/.test(m.label)) return brokenHolds(clues, line!).length ? 'not' : 'fit';
+  if ((x = /^“(.+)”$/.exec(m.label))) {
+    const s = readBoardClue(x[1]);
+    if (line) return String(holds(s, line));
+    const yes = fit.filter((p) => holds(s, p)).length;
+    return yes === fit.length ? 'must' : yes === 0 ? 'cant' : 'might';
+  }
+  if ((x = /^Who is taller, (\w+) or (\w+)\?$/.exec(m.label))) {
+    const [a, b] = [x[1].toLowerCase(), x[2].toLowerCase()];
+    const aFirst = fit.filter((p) => p.indexOf(a) < p.indexOf(b)).length;
+    return aFirst === fit.length ? a : aFirst === 0 ? b : CANT;
+  }
+  if ((x = /^Who (?:is|finished) (?:the )?(\w+)\?$/.exec(m.label))) {
+    const k = spotK(x[1], ids.length);
+    const at = [...new Set(fit.map((p) => p[k - 1]))];
+    return at.length === 1 ? at[0] : CANT;
+  }
+  if ((x = /^In what place did (\w+) finish\?$/.exec(m.label))) {
+    const who = x[1].toLowerCase();
+    const at = [...new Set(fit.map((p) => p.indexOf(who) + 1))];
+    return at.length === 1 ? `p${at[0]}` : CANT;
+  }
+  const cover = /^Cover up clue (\d+): “(.+)”$/.exec(row.label);
+  if (cover) {
+    const k = Number(cover[1]) - 1;
+    expect(readBoardClue(cover[2])).toEqual(clues[k]);
+    expect(fit.length).toBe(1);
+    const alts = fitHolds(ids, clues.filter((_, j) => j !== k)).filter((p) => !same(p, fit[0]));
+    expect(alts.length).toBeLessThanOrEqual(1);
+    if (m.label === 'Which other order fits the other clues?') {
+      return alts.length ? m.options.find((o) => o.label === alts[0].map(capName).join(', '))!.id : 'none';
+    }
+    expect(m.label).toBe(`Is clue ${k + 1} needed?`);
+    return alts.length ? 'yes' : 'no';
+  }
+  // A spot to fill: the one order that fits puts someone there.
+  expect(fit.length, `${row.label}: one order fits`).toBe(1);
+  return fit[0][spotK(m.label, ids.length) - 1];
+}
+
+const ABC_IDS = ['ava', 'ben', 'cal'];
+const EFG_IDS = ['eli', 'fay', 'gus'];
+/** Every guided board of Stop 3, with the runners its card names (the clues alone do not name everyone). */
+const DRILLS: { lesson: number; step: DrillStep; ids: string[]; more?: Record<string, string[]> }[] = [
+  { lesson: 0, step: L1_DRILL, ids: ABC_IDS },
+  { lesson: 1, step: L2_DRILL[0], ids: ABC_IDS },
+  { lesson: 1, step: L2_DRILL[1], ids: ABC_IDS },
+  { lesson: 2, step: L3_DRILL[0], ids: EFG_IDS, more: { four: [...EFG_IDS, 'hana'] } },
+  { lesson: 2, step: L3_DRILL[1], ids: ABC_IDS },
+  { lesson: 2, step: L3_DRILL[2], ids: ABC_IDS },
+  { lesson: 3, step: L4_DRILL[0], ids: ABC_IDS },
+  { lesson: 3, step: L4_DRILL[1], ids: ABC_IDS },
+  { lesson: 4, step: L5_DRILL, ids: ABC_IDS },
+];
+const boardClueTexts = (st: DrillStep) => (st.scene?.kind === 'clues' ? st.scene.clues : []);
+const rightPicks = (st: DrillStep) => Object.fromEntries(marksToTap(st).map((m) => [m.id, m.answer]));
+const drillWords = (st: DrillStep) => [st.title, ...st.body, st.done, st.twin ?? '', ...st.rows.flatMap((r) => [r.label, r.note ?? '', ...r.marks.flatMap((m) => [m.label, ...Object.values(m.why)])])].filter(Boolean);
+
+/** Clue sentences in every skin, made into patterns with the names left open: classifies any quiz clue by its words. */
+const PATTERNS = SKIN_IDS.flatMap((s) => {
+  const skin = SKINS[s];
+  const out: { re: RegExp; slots: string[]; clue: LineClue }[] = [];
+  for (const n of [3, 4, 5, 6]) {
+    const cs: LineClue[] = [
+      { t: 'before', a: 'xa', b: 'xb' }, { t: 'rightBefore', a: 'xa', b: 'xb' }, { t: 'nextTo', a: 'xa', b: 'xb' }, { t: 'notNextTo', a: 'xa', b: 'xb' },
+      { t: 'between', a: 'xa', b: 'xb', c: 'xc' }, { t: 'first', a: 'xa' }, { t: 'last', a: 'xa' }, { t: 'notFirst', a: 'xa' }, { t: 'notLast', a: 'xa' },
+      ...Array.from({ length: n - 2 }, (_, i): LineClue => ({ t: 'place', a: 'xa', k: i + 2 })),
+    ];
+    for (const c of cs) {
+      let text: string;
+      try {
+        text = clueText(skin, c, n, (id) => `@${id}@`);
+      } catch {
+        continue;
+      }
+      const slots: string[] = [];
+      const src = text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/@(x[abc])@/g, (_, id: string) => {
+        slots.push(id);
+        return '([A-Z][a-z]*)';
+      });
+      out.push({ re: new RegExp(`^${src}$`), slots, clue: c });
+    }
+  }
+  return out;
+});
+function classify(text: string): LineClue {
+  for (const p of PATTERNS) {
+    const m = p.re.exec(text);
+    if (!m) continue;
+    const map: Record<string, string> = Object.fromEntries(p.slots.map((id, i) => [id, m[i + 1].toLowerCase()]));
+    const f = (v: string) => map[v] ?? v;
+    const c = p.clue;
+    return { ...c, a: f(c.a), ...('b' in c ? { b: f(c.b) } : {}), ...('c' in c ? { c: f(c.c) } : {}) } as LineClue;
+  }
+  throw new Error(`cannot classify clue: ${text}`);
+}
+const itemClues = (it: Item): LineClue[] => (it.kind === 'order' ? it.clues : it.scene?.kind === 'clues' ? it.scene.clues.map(classify) : []);
+/** The names a prompt's opening sentence lists: "Raj, Sol and Uma compared their heights." */
+function settingNames(prompt: string): string[] {
+  const m = /^(?:The (?:young wizards|dragons|robots|letters) )?((?:[A-Z][a-z]*, )*[A-Z][a-z]* and [A-Z][a-z]*) /.exec(prompt);
+  if (!m) throw new Error(`no names in: ${prompt}`);
+  return m[1].split(/, | and /).map((s) => s.toLowerCase());
+}
+const namesOf = (it: Item) => (it.kind === 'order' ? it.names.map((c) => c.id) : settingNames(it.prompt));
+/** The clue kinds each lesson's quiz, check items, Arcade items and new examples may use: the kinds its lessons teach. */
+const ALLOWED: Record<string, readonly ClueType[]> = { 's3.l1': ['before'], 's3.l2': L2_TYPES, 's3.l3': L3_TYPES, 's3.l4': TAUGHT_TYPES, 's3.l5': TAUGHT_TYPES };
+
+describe('stop 3: See -> Do -> Quiz (skill-drill handoff)', () => {
+  it('each lesson’s boards are the ones listed here, phone-sized, and only right marks pass (tapping Next alone does not)', () => {
+    stop3.lessons.forEach((l, i) => expect(l.drill, l.id).toEqual(DRILLS.filter((d) => d.lesson === i).map((d) => d.step)));
+    for (const d of DRILLS) {
+      const tap = marksToTap(d.step);
+      expect(tap.length, d.step.id).toBeGreaterThan(0);
+      expect(tap.length, `${d.step.id}: about 12 taps or fewer`).toBeLessThanOrEqual(12);
+      expect(checkDrill(d.step, {}).done).toBe(false);
+      expect(checkDrill(d.step, rightPicks(d.step)).done).toBe(true);
+      // Nothing is filled in for the learner: a wrong mark stays wrong until it is changed.
+      const [first] = tap;
+      const bad = first.options.find((o) => o.id !== first.answer)!.id;
+      expect(checkDrill(d.step, { ...rightPicks(d.step), [first.id]: bad }).wrong).toEqual([first.id]);
+    }
+  });
+
+  it('See: each board is a card’s own board, or a twin that changes one clue and says so; each card marks its case in words that check out', () => {
+    for (const d of DRILLS) {
+      const cards = stop3.lessons[d.lesson].ideas.filter((c) => c.scene?.kind === 'clues');
+      const mine = boardClueTexts(d.step);
+      const sameBoard = cards.some((c) => JSON.stringify(c.scene) === JSON.stringify(d.step.scene));
+      if (!sameBoard) {
+        const twinOf = cards.find((c) => c.scene?.kind === 'clues' && c.scene.clues.length === mine.length && c.scene.clues.filter((t) => !mine.includes(t)).length === 1);
+        expect(twinOf, `${d.step.id} is a twin of a card’s board`).toBeDefined();
+        const old = twinOf!.scene!.kind === 'clues' ? twinOf!.scene!.clues.find((t) => !mine.includes(t))! : '';
+        const now = mine.find((t) => !(twinOf!.scene!.kind === 'clues' && twinOf!.scene!.clues.includes(t)))!;
+        // The twin note names the clue that changed, and what it is now.
+        expect(quotesIn(d.step.twin!)).toEqual([old, now]);
+      } else {
+        expect(d.step.twin).toBeUndefined();
+      }
+    }
+    const [l1, l2, l3, l4, l5] = stop3.lessons;
+    const clues = (title: string, l: typeof l1) => {
+      const c = l.ideas.find((x) => x.title === title)!;
+      return c.scene!.kind === 'clues' ? c.scene!.clues.map(readBoardClue) : [];
+    };
+    const body = (title: string, l: typeof l1) => l.ideas.find((x) => x.title === title)!.body.join(' ');
+    // Lesson 1: the chain stands in one line, Ava, Ben, Cal; with no clue on Ava and Cal, either can be tallest.
+    expect(fitHolds(ABC_IDS, clues('Follow the chain', l1))).toEqual([['ava', 'ben', 'cal']]);
+    expect(body('Follow the chain', l1)).toContain('Tallest first, the line is Ava, Ben, Cal.');
+    expect([...new Set(fitHolds(ABC_IDS, clues('When you can’t tell', l1)).map((p) => p[0]))].sort()).toEqual(['ava', 'cal']);
+    // Lesson 2: Ava, Ben, Cal fits “right before” (no one between).
+    expect(body('Right before', l2)).toContain('The order Ava, Ben, Cal fits this clue.');
+    expect(brokenHolds(clues('Right before', l2), ['ava', 'ben', 'cal'])).toEqual([]);
+    // Lesson 3: the orders each card names fit, or do not, as it says.
+    const next = clues('Next to', l3);
+    expect(body('Next to', l3)).toContain('The order Ava, Ben, Cal fits. So does Ben, Ava, Cal.');
+    expect([['ava', 'ben', 'cal'], ['ben', 'ava', 'cal']].every((p) => !brokenHolds(next, p).length)).toBe(true);
+    expect(body('Next to', l3)).toContain('The order Ava, Cal, Ben does not fit.');
+    expect(brokenHolds(next, ['ava', 'cal', 'ben'])).toEqual([0]);
+    expect(fitHolds(ABC_IDS, clues('Between', l3)).map((p) => p.join())).toEqual(['ava,cal,ben', 'ben,cal,ava']);
+    expect(fitHolds(EFG_IDS, clues('Try each spot', l3)).every((p) => p[1] === 'eli')).toBe(true);
+    // Lesson 4: the worked line is the only one, and each clue is true for it.
+    expect(fitHolds(ABC_IDS, clues('A worked example', l4))).toEqual([['ava', 'ben', 'cal']]);
+    // Lesson 5: with clue 3 covered, clues 1 and 2 still give just Ava, Ben, Cal.
+    expect(fitHolds(ABC_IDS, clues('An example', l5).slice(0, 2))).toEqual([['ava', 'ben', 'cal']]);
+  });
+
+  it('Do: every mark on every board is worked out again from the words on the board', () => {
+    let checked = 0;
+    for (const d of DRILLS) {
+      const board: BoardCtx = { ids: d.ids, clues: boardClueTexts(d.step).map(readBoardClue) };
+      for (const row of d.step.rows) {
+        const ctx = rowCtx(board, row, d.more ?? {});
+        for (const m of row.marks) {
+          expect(m.answer, `${d.step.id} ${m.id} (${m.label})`).toBe(expectedMark(ctx, row, m));
+          checked++;
+        }
+      }
+    }
+    expect(checked).toBe(70);
+    // The shown case is the one its card already finished; the learner's rows are new cases.
+    expect(L2_DRILL[0].rows[0].label).toBe('Finish order: Ava, Cal, Ben.');
+    expect(L3_DRILL.map((st) => st.rows[0].label)).toEqual(['Try Eli second, as in Fay, Eli, Gus.', 'Try Cal second, as in Ava, Cal, Ben.', 'Try Ava first, as in Ava, Cal, Ben.']);
+    expect(L4_DRILL[0].rows[0].label).toBe('Finish order: Ava, Ben, Cal.');
+    expect(L5_DRILL.rows[0].label).toBe('Cover up clue 3: “Ava is taller than Cal.”');
+    for (const d of DRILLS) {
+      for (const row of d.step.rows) {
+        const given = row.marks.filter((m) => m.given).length;
+        expect(given === 0 || given === row.marks.length, `${d.step.id} ${row.id}: a row is shown or the learner’s`).toBe(true);
+      }
+    }
+  });
+
+  it('Do (the handoff’s Stop 3 sample): place Cal, then Ava, then Ben; then with only “Cal is taller than Ava,” Ava or Ben is Can’t tell', () => {
+    const [card, chain, nochain] = L1_DRILL.rows;
+    expect(L1_DRILL.scene).toEqual({ kind: 'clues', clues: ['Cal is taller than Ava.', 'Ava is taller than Ben.'] });
+    expect(card.marks.every((m) => m.given)).toBe(true);
+    expect(card.marks.map((m) => m.answer)).toEqual(['ava', 'ben', 'cal']);
+    expect(chain.marks.some((m) => m.given)).toBe(false);
+    expect(chain.marks.map((m) => [m.label, m.answer])).toEqual([['The tallest', 'cal'], ['The second tallest', 'ava'], ['The shortest', 'ben']]);
+    expect(nochain.label).toBe('Take away clue 2, “Ava is taller than Ben.” Only clue 1 is left: “Cal is taller than Ava.”');
+    const ask = (label: string) => nochain.marks.find((m) => m.label === label)!;
+    // The compared pair is placed; the pair no clue compares is Can't tell.
+    expect(ask('Who is taller, Cal or Ava?').answer).toBe('cal');
+    expect(ask('Who is taller, Ava or Ben?').answer).toBe(CANT);
+    expect(ask('Who is taller, Ava or Ben?').why.ava).toMatch(/No clue compares Ava and Ben\.$/);
+    expect(ask('Who is the tallest?').answer).toBe(CANT);
+    // A wrong tap is named in plain words, and nothing else is filled in.
+    const wrong = checkDrill(L1_DRILL, { ...rightPicks(L1_DRILL), 'chain-1': 'ava' });
+    expect(wrong.done).toBe(false);
+    expect(wrong.message).toBe('The clue “Cal is taller than Ava” is false whenever Ava is the tallest. So Ava can’t be the tallest.');
+    // No question asks for the card's answer again: the board has no "Which order?" button.
+    expect(JSON.stringify(L1_DRILL)).not.toMatch(/Which order/);
+  });
+
+  it('Do: every wrong tap gets its own words: the first mismatch, about this board, at the reading level', () => {
+    for (const d of DRILLS) {
+      const right = rightPicks(d.step);
+      const onBoard = new Set([...boardClueTexts(d.step), ...d.step.rows.flatMap((r) => [...quotesIn(r.label), ...r.marks.flatMap((m) => quotesIn(m.label))])]);
+      for (const m of marksToTap(d.step)) {
+        for (const o of m.options) {
+          if (o.id === m.answer) continue;
+          const w = m.why[o.id];
+          expect(w, `${d.step.id} ${m.id}: words for “${o.label}”`).toBeTruthy();
+          expect(checkDrill(d.step, { ...right, [m.id]: o.id }).message).toBe(w);
+          expect(w).not.toMatch(/Look at the board again|\bWrong\b|['"]/);
+          // It is about this board: it names someone on it, or a clue by its number.
+          expect(/\b(Ava|Ben|Cal|Eli|Fay|Gus|Hana)\b|\b[Cc]lue \d/.test(w), w).toBe(true);
+          // Every sentence it quotes is on the board.
+          for (const q of quotesIn(w)) expect(onBoard.has(q), `${d.step.id} ${m.id}: “${q}”`).toBe(true);
+          for (const s of sentences(w)) expect(words(s).length, s).toBeLessThanOrEqual(READING.maxSentenceWords);
+          // No vague words without naming what they point at.
+          expect(w).not.toMatch(/\bboth\b|that row|the opposite/i);
+        }
+      }
+    }
+    stop3.lessons.forEach((l) => {
+      const text = (l.drill ?? []).flatMap(drillWords).join('\n');
+      expect(fkGrade(text), l.id).toBeLessThanOrEqual(READING.maxGrade);
+      expect(longestSentence(text).words, longestSentence(text).sentence).toBeLessThanOrEqual(READING.maxSentenceWords);
+      expect(text).not.toMatch(/['"]/);
+    });
+  });
+
+  it('Quiz: practice, the check, the Arcade and new examples use only the clue kinds the lessons teach (never “not next to”)', () => {
+    const seen = new Set<string>();
+    const ok = (it: Item, where: string) => {
+      for (const c of itemClues(it)) {
+        expect(ALLOWED[it.lesson], `${where} ${it.id} (${it.lesson}) uses a ${c.t} clue`).toContain(c.t);
+        seen.add(`${it.lesson}:${c.t}`);
+      }
+    };
+    for (let seed = 1; seed <= 60; seed++) {
+      for (const l of stop3.lessons) {
+        for (const it of l.practice(createRng(seed))) {
+          ok(it, `practice seed ${seed}`);
+          if (seed <= 15) for (const x of freshCheckSet(stop3, it, seed, [], 1)) ok(x, `new example seed ${seed}`);
+        }
+      }
+      for (const it of stop3.check!(createRng(seed))) ok(it, `check seed ${seed}`);
+    }
+    for (let seed = 1; seed <= 300; seed++) ok(stop3.practice!(createRng(seed)), `arcade seed ${seed}`);
+    // The kinds that are taught still come up.
+    for (const k of ['s3.l2:rightBefore', 's3.l3:nextTo', 's3.l3:between', 's3.l3:notFirst', 's3.l4:first', 's3.l4:between', 's3.l5:before']) expect(seen.has(k), k).toBe(true);
+  });
+
+  it('Quiz try 1 is a twin of the board in a new skin, and every set keeps to the lesson’s rule family', () => {
+    for (let seed = 1; seed <= 60; seed++) {
+      const [p1, p2, p3, p4, p5] = stop3.lessons.map((l) => l.practice(createRng(seed)));
+      const tags = (xs: Item[]) => xs.flatMap((x) => x.tags ?? []);
+      // Lesson 1: a new chain that decides who is first, three people, not heights; then a non-chain (Can't tell).
+      expect(p1[0].tags).toEqual(['decided', 'ask-first']);
+      expect(namesOf(p1[0]).length).toBe(3);
+      expect(p1[0].prompt).not.toMatch(/compared their heights/);
+      expect(p1[1].tags).toEqual(['cant-tell', 'ask-first']);
+      expect(namesOf(p1[1]).length).toBe(3);
+      expect(tags(p1).filter((t) => t === 'cant-tell').length).toBe(2);
+      // Lesson 2: a “before” clue and a “right before” sentence, three people, not a race.
+      expect(p2[0].tags).toContain('before-trap');
+      expect(p2[0].conflict).toBe(true);
+      expect(namesOf(p2[0]).length).toBe(3);
+      expect(p2[0].prompt).not.toMatch(/ran a race/);
+      expect(p2.slice(1).map((x) => (x.kind === 'choose' ? x.answer : '')).sort()).toEqual(expect.arrayContaining(['cant', 'must']));
+      // Lesson 3: where is someone, three people, decided, only "not first" and "not last" clues; then next to and between.
+      expect(p3[0].tags).toEqual(['decided', 'ends', 'where']);
+      expect(namesOf(p3[0]).length).toBe(3);
+      for (const c of itemClues(p3[0])) expect(L3_FIRST_TYPES).toContain(c.t);
+      for (const t of ['cant-tell', 'nextTo', 'between']) expect(tags(p3), `seed ${seed} ${t}`).toContain(t);
+      // Lesson 4: three people with the board's kinds of clue, then four and five.
+      expect(p4.map((x) => (x.kind === 'order' ? x.names.length : 0))).toEqual([3, 4, 5]);
+      for (const c of itemClues(p4[0])) expect(L4_FIRST_TYPES).toContain(c.t);
+      expect(p4[0].prompt).not.toMatch(/ran a race/);
+      // Lesson 5: the card's case in a new skin: three people, "before" clues only.
+      expect(namesOf(p5[0]).length).toBe(3);
+      expect(itemClues(p5[0]).every((c) => c.t === 'before')).toBe(true);
+      expect(p5[0].prompt).not.toMatch(/compared their heights/);
+      for (const xs of [p1, p2, p3, p4, p5]) for (const x of xs) expect(x.workFirst).toBeUndefined();
+    }
+  });
+
+  it('Pass: each lesson’s include group is in every planned set, and three first-try answers without it do not pass', () => {
+    const [l1, l2, l3] = stop3.lessons;
+    expect(l1.pass).toEqual({ firstTry: 3, include: [{ tag: 'cant-tell', label: 'a can’t-tell puzzle' }] });
+    expect(l2.pass?.include?.map((g) => g.tag)).toEqual(['before-trap']);
+    expect(l3.pass?.include?.map((g) => g.tag)).toEqual(['cant-tell']);
+    expect(stop3.lessons[3].pass).toBeUndefined();
+    expect(stop3.lessons[4].pass).toBeUndefined();
+    for (let seed = 1; seed <= 60; seed++) {
+      for (const l of stop3.lessons) for (const g of l.pass?.include ?? []) expect(l.practice(createRng(seed)).some((x) => x.tags?.includes(g.tag)), `${l.id} seed ${seed}`).toBe(true);
+    }
+    const decided = { clean: true, tags: ['decided'] };
+    expect(passState(l1.pass, [decided, decided, decided]).met).toBe(false);
+    expect(passState(l1.pass, [decided, decided, { clean: true, tags: ['cant-tell'] }]).met).toBe(true);
+    expect(passState(l2.pass, [{ clean: true, tags: ['must'] }, { clean: true, tags: ['cant'] }, { clean: true, tags: ['might'] }]).met).toBe(false);
+    expect(passState(l2.pass, [{ clean: true, tags: ['might', 'before-trap'] }, { clean: true, tags: ['cant'] }, { clean: true, tags: ['must'] }]).met).toBe(true);
+  });
+
+  it('Hint: every quiz hint shows one try already checked, every clue marked, and never the answer’s case', () => {
+    for (const l of stop3.lessons) {
+      const text = [1, 2, 3, 4, 5].flatMap((s) => l.practice(createRng(s))).flatMap((it) => [it.hint ?? '', ...(it.hintCase ? caseText(it.hintCase) : [])]).join('\n');
+      expect(fkGrade(text), `${l.id} hints`).toBeLessThanOrEqual(READING.maxGrade);
+      expect(text).not.toMatch(/['"]|\bboth\b|that row|the opposite/i);
+    }
+    for (let seed = 1; seed <= 40; seed++) {
+      for (const l of stop3.lessons) {
+        for (const it of l.practice(createRng(seed))) {
+          expect(it.hint, it.id).toBeTruthy();
+          const c = it.hintCase!;
+          expect(c, `${l.id} ${it.id}`).toBeDefined();
+          const m = /^([A-Z][a-z ]+): ((?:[A-Za-z]+, )+[A-Za-z]+)\.$/.exec(c.label)!;
+          expect(m, c.label).not.toBeNull();
+          const line = m[2].split(', ').map((s) => s.toLowerCase());
+          expect([...line].sort()).toEqual([...namesOf(it)].sort());
+          const clues = itemClues(it);
+          const texts = it.scene?.kind === 'clues' ? it.scene.clues : [];
+          // Every clue is listed, in order, marked as it is for that line.
+          const clueTruths = c.truths!.filter((t) => t.who.startsWith('Clue '));
+          expect(clueTruths.map((t) => t.who)).toEqual(texts.map((x, i) => `Clue ${i + 1}, “${x.replace(/\.$/, '')}”`));
+          clueTruths.forEach((t, i) => expect(t.value, `${it.id} ${t.who}`).toBe(holds(clues[i], line)));
+          const broken = brokenHolds(clues, line);
+          expect(c.note).toBeTruthy();
+          for (const s of [it.hint!, ...caseText(c)]) for (const x of sentences(s)) expect(words(x).length, x).toBeLessThanOrEqual(READING.maxSentenceWords);
+          if (it.kind === 'order') {
+            // Lesson 4: a line that is not the answer, tested clue by clue.
+            expect(same(line, it.answer)).toBe(false);
+            expect(broken.length).toBeGreaterThan(0);
+            continue;
+          }
+          if (it.kind !== 'choose') continue;
+          if (l.id === 's3.l2') {
+            // One order with every clue and the sentence marked, never the answer's case (often only one order
+            // fits). Must: an order that makes the sentence false, and it breaks a clue. Can't: one that makes it
+            // true, and it breaks a clue. Might: an order that fits; for the "before" trap, one with someone in
+            // between, so the sentence is false there.
+            const stmt = classify(/“(.+?)”/.exec(it.prompt)![1]);
+            const said = c.truths!.find((t) => t.who.startsWith('The sentence'))!.value;
+            expect(said).toBe(holds(stmt, line));
+            if (it.answer === 'must' || it.answer === 'cant') {
+              expect(said, `${it.id} ${c.label}`).toBe(it.answer === 'cant');
+              expect(broken.length, `${it.id} ${c.label}`).toBeGreaterThan(0);
+            } else {
+              expect(broken).toEqual([]);
+              if (it.tags!.includes('before-trap')) expect(said, `${it.id} ${c.label}`).toBe(false);
+            }
+            // The hint never says that other orders fit: often none does.
+            expect(it.hint).not.toMatch(/other orders that fit/);
+          } else if (l.id === 's3.l5') {
+            // A needed clue covered: the line breaks only that clue, and it is not the clue that is not needed.
+            const k = Number(/With clue (\d+) covered/.exec(c.note!)![1]) - 1;
+            expect(broken).toEqual([k]);
+            expect(it.choices[k].id).not.toBe(it.answer);
+          } else if (it.answer !== CANT) {
+            // Lessons 1 and 3, decided: a try the clues cross out, so never the answer's case.
+            expect(broken.length, `${it.id} ${c.label}`).toBeGreaterThan(0);
+            if (l.id === 's3.l1') {
+              const who = /So cross out (\w+)\.$/.exec(c.note!)![1].toLowerCase();
+              expect(who).not.toBe(it.answer);
+              expect(line[it.tags!.includes('ask-first') ? 0 : line.length - 1]).toBe(who);
+            }
+          }
+        }
+      }
+    }
+  });
+});
+
+describe('stop 3: review fixes (skill-drill handoff)', () => {
+  it('a twin board says what changed once: in its twin note, which the board draws and reads aloud', () => {
+    const twins = DRILLS.filter((d) => d.step.twin);
+    expect(twins.map((d) => d.step.id)).toEqual(['s3.l1-do', 's3.l4-do2']);
+    for (const d of twins) {
+      expect(d.step.twin, d.step.id).toMatch(/changed\. “.+” is now “.+”$/);
+      expect(d.step.body.join(' '), d.step.id).not.toContain(d.step.twin);
+      expect(drillSpeech(d.step), d.step.id).toContain(d.step.twin);
+    }
+  });
+
+  it('a lesson’s board questions are not all Can’t tell, and no board asks what its card already said', () => {
+    // A learner who taps Can't tell on every question must not get every question right.
+    for (const l of stop3.lessons) {
+      const asks = (l.drill ?? []).flatMap(marksToTap).filter((m) => m.options.some((o) => o.id === CANT));
+      if (asks.length) expect(asks.some((m) => m.answer !== CANT), `${l.id}: every question is Can’t tell`).toBe(true);
+    }
+    // Lesson 3: on the “Next to” and “Between” boards the question is open until one clue is added, and the added
+    // clue decides it. The added clue is a kind lesson 3 uses (“before”).
+    for (const st of [L3_DRILL[1], L3_DRILL[2]]) {
+      const ask = st.rows.find((r) => r.id === 'ask')!;
+      const add = st.rows.find((r) => r.id === 'add')!;
+      expect(ask.marks.map((m) => m.answer)).toEqual([CANT]);
+      expect(add.marks.length).toBe(1);
+      expect(add.marks[0].answer).not.toBe(CANT);
+      expect(L3_TYPES).toContain(readBoardClue(/^Now add a clue: “(.+)”$/.exec(add.label)![1]).t);
+    }
+    // The “Between” card says Cal must be in the middle, so its board never asks where Cal finished.
+    expect(stop3.lessons[2].ideas.find((c) => c.title === 'Between')!.body.join(' ')).toContain('Cal must be in the middle');
+    expect(L3_DRILL[2].rows.flatMap((r) => r.marks).map((m) => m.label)).not.toContain('In what place did Cal finish?');
+  });
+
+  it('“Explain more simply” in lessons 2 and 3 uses only the clue kinds those lessons teach', () => {
+    for (const s of ORDERLY) {
+      for (const focus of ['ends', 'nextTo', 'between'] as SpotFocus[]) {
+        for (const forced of [true, false]) {
+          for (const c of spotSimpler(SKINS[s], [], focus, forced).clues) expect(L3_TYPES, `${s} ${focus} ${forced}`).toContain(c.t);
+        }
+      }
+      for (const status of ['must', 'might', 'cant'] as Status[]) {
+        for (const t of ['before', 'rightBefore'] as const) {
+          for (const c of statusSimpler(SKINS[s], [], status, t).clues) expect(L2_TYPES, `${s} ${status} ${t}`).toContain(c.t);
+        }
+      }
+    }
+  });
+
+  it('lesson 2’s hint never shows the one order that fits (that would give the answer away)', () => {
+    let single = 0;
+    for (let seed = 1; seed <= 200; seed++) {
+      for (const it of stop3.lessons[1].practice(createRng(seed))) {
+        if (it.kind !== 'choose') continue;
+        const ids = namesOf(it);
+        const fit = fitHolds(ids, itemClues(it));
+        if (fit.length !== 1) continue;
+        single++;
+        const line = /: ((?:[A-Za-z]+, )+[A-Za-z]+)\.$/.exec(it.hintCase!.label)![1].toLowerCase().split(', ');
+        expect(same(fit[0], line), `${it.id}: the hint shows the only order that fits`).toBe(false);
+      }
+    }
+    expect(single, 'items where only one order fits').toBeGreaterThan(50);
   });
 });

@@ -12,27 +12,41 @@
  * from the four-row truth table. Skins: everyday, fantasy and abstract (letters and numbers, P and Q).
  * After a wrong answer, each item teaches with the rows of that table in the story's words, and `fresh` gives the
  * same situation in a new story plus its boundary partner (see "new examples after a miss" below).
+ *
+ * Every lesson is taught See -> Do -> Quiz (the skill-drill handoff, 2 Oct 2026). See: a key-idea card marks one case
+ * on its board. Do: the learner marks a new case on that same board by taps (the boards below, built by the engine,
+ * so every mark is computed). Quiz: twins of the same rule family only. Lesson 1 never turns a rule around. Lesson 2
+ * (the converse trap) marks its own rule's four boxes by hand before anything is turned around, since lessons can be
+ * opened in any order. "Which sentence means the same?" offers only the three sentences lesson 4 marks (no odd
+ * rewrites), in practice, the check, the Arcade and new examples alike.
  */
 import {
   CARD_SKINS,
   CONTRA,
   CONVERSE,
+  HAT_BOXES,
   INVERSE,
   L1_SKINS,
   LITS,
   MOVES,
   MOVE_FACT,
   MOVE_TAGS,
+  PET_BOXES,
   REWRITES,
   ROWS,
   SENTENCE_WHO,
   SKINS,
   SKIN_IDS,
+  boxWords,
+  cardDrill,
   cardItem,
   checkerItem,
   condText,
   didBreakItem,
+  factCasesDrill,
+  fourBoxDrill,
   litHolds,
+  meaningDrill,
   meaningGrid,
   moveItem,
   moveRule,
@@ -54,7 +68,7 @@ import {
   type Row,
   type SkinId,
 } from '../engine/puzzles/conditionals';
-import type { Item, LessonDef, Rng, Scene, StopDef } from '../engine/types';
+import type { DrillStep, Item, LessonDef, Rng, Scene, StopDef } from '../engine/types';
 
 const STOP = 6;
 const L1 = 's6.l1';
@@ -112,6 +126,177 @@ function movesScene(): Scene {
   return { kind: 'text', lines: order.map((m) => moveRule(MOVE_FACT[m])) };
 }
 
+// ---------- See and Do: the worked boards, and the boards the learner marks ----------
+//
+// Each board is built by an engine helper (conditionals.ts, "the Do step"), so every mark is computed from the truth
+// table. Each board is the board of a key-idea card (the same scene), or a twin that says what changed.
+
+/** A pet fact in the story's words: pet('Q', 'Rex') is "Rex has four legs". */
+const pet = (l: Lit, name: string) => SKINS.pets.fact(l, name);
+
+/** Lesson 1, See: the lunchroom rule card, and its four boxes with three ✓ and one ✗ (the break, named in the caption). */
+export const L1_RULE = ruleScene('dessert');
+export const L1_SEE = ruleGrid('dessert');
+
+/** Lesson 1, Do: the same four boxes, empty. The learner marks every box; the only ✗ goes on the break. */
+export const L1_DRILL: DrillStep = fourBoxDrill(boxWords('dessert'), {
+  id: 's6.l1-do',
+  title: 'Mark the four boxes',
+  body: [
+    'These are the four boxes from the example, now empty. The rule is the same.',
+    'Mark each box. Put a ✓ if a kid in that box keeps the rule. Put a ✗ if the kid breaks it.',
+  ],
+});
+
+/** Lesson 1, Do again: the handoff's sample. The same four boxes, with a new rule: a red card and a hat. */
+export const L1_TWIN: DrillStep = fourBoxDrill(HAT_BOXES, {
+  id: 's6.l1-do-hat',
+  title: 'A new rule, the same four boxes',
+  body: [`Here is a new rule: “${HAT_BOXES.lines[1]}”`, 'Mark the four boxes again. A ✓ keeps the rule. A ✗ breaks it.'],
+  twin: 'The same four boxes, with a new rule: a red card and a hat.',
+});
+
+/** Lessons 2 and 3, See: the pet rule card, always true in this story. */
+export const PETS_KEPT = ruleScene('pets', true);
+
+/** Lesson 2, See: the pet rule card of “One way only”, where a cat with four legs keeps the rule. */
+export const L2_RULE = ruleScene('pets');
+
+/**
+ * Lesson 2, Do first: the pet rule's four boxes, empty, all the learner's. The handoff puts any rule turned around
+ * (the converse trap) only after the four boxes are marked by hand. Lessons can be opened in any order, so this
+ * lesson marks them itself before its quiz. The board is the “One way only” card's rule card (the same scene).
+ */
+export const L2_BOXES: DrillStep = fourBoxDrill(PET_BOXES, {
+  id: 's6.l2-do-boxes',
+  title: 'Mark the four boxes',
+  body: [
+    'Before you turn this rule around, mark its four boxes.',
+    'Put a ✓ if an animal in that box keeps the rule. Put a ✗ if it breaks the rule.',
+  ],
+});
+
+/** Lesson 2, Do: going backward. Rex has four legs. Rex as a cat is shown (the card's case); the learner marks Rex as a dog. */
+export const L2_BACK: DrillStep = factCasesDrill(
+  'pets',
+  {
+    id: 's6.l2-do-back',
+    title: 'Mark a case: going backward',
+    body: [`${pet('Q', 'Rex')}. That is the THEN part. Two cases fit it.`, 'The case from the example is marked. Mark the other case. Can it happen? Is each sentence true in it?'],
+  },
+  [{ name: 'Rex', fact: 'Q', say: ['P', 'notP'], shown: [rowAt(false, true)], mark: [rowAt(true, true)] }],
+  'status',
+);
+
+/** Lesson 2, Do: going forward. Max is a dog. Max with four legs is shown; the learner marks Max without four legs. */
+export const L2_FWD: DrillStep = factCasesDrill(
+  'pets',
+  {
+    id: 's6.l2-do-fwd',
+    title: 'Mark a case: going forward',
+    body: [`${pet('P', 'Max')}. That is the IF part. Two cases fit it.`, 'One case is marked. Mark the other case the same way.'],
+  },
+  [{ name: 'Max', fact: 'P', say: ['Q', 'notQ'], shown: [rowAt(true, true)], mark: [rowAt(true, false)] }],
+  'status',
+);
+
+/**
+ * Lesson 3, Do: a part happened. Rex is a dog (something follows); Max has four legs (nothing follows). Each pet's
+ * shown case can happen; the learner marks the case that decides it: Rex without four legs can’t happen, and Max
+ * as a cat with four legs can.
+ */
+export const L3_HAPPENED: DrillStep = factCasesDrill(
+  'pets',
+  {
+    id: 's6.l3-do-happened',
+    title: 'Mark the cases: a part happened',
+    body: [`${pet('P', 'Rex')}. ${pet('Q', 'Max')}. One case for each pet is marked, as in the examples.`, 'Mark the other case for each pet. Can it happen? Is the sentence true in it?'],
+  },
+  [
+    { name: 'Rex', fact: 'P', say: ['Q'], shown: [rowAt(true, true)], mark: [rowAt(true, false)] },
+    { name: 'Max', fact: 'Q', say: ['P'], shown: [rowAt(true, true)], mark: [rowAt(false, true)] },
+  ],
+  'follows',
+);
+
+/**
+ * Lesson 3, Do: a part did not happen. Pip does not have four legs (something follows); Coco is not a dog (nothing
+ * follows). The learner marks the case that decides it: Pip as a dog can’t happen, and Coco as a cat with four legs can.
+ */
+export const L3_NOT: DrillStep = factCasesDrill(
+  'pets',
+  {
+    id: 's6.l3-do-not',
+    title: 'Mark the cases: a part did not happen',
+    body: [`${pet('notQ', 'Pip')}. ${pet('notP', 'Coco')}. One case for each pet is marked, as in the examples.`, 'Mark the other case for each pet the same way.'],
+  },
+  [
+    { name: 'Pip', fact: 'notQ', say: ['P'], shown: [rowAt(false, false)], mark: [rowAt(true, false)] },
+    { name: 'Coco', fact: 'notP', say: ['Q'], shown: [rowAt(false, false)], mark: [rowAt(false, true)] },
+  ],
+  'follows',
+);
+
+/** Lesson 4, Do: the example's four cases. The rule's boxes are shown; the learner marks the flip and NOT sentence. */
+export const L4_SAME: DrillStep = meaningDrill(
+  'pets',
+  {
+    id: 's6.l4-do-same',
+    title: 'Test the flip and NOT sentence',
+    body: [
+      'These are the four cases from the example. The rule’s boxes are marked.',
+      `Flip and NOT: “${condText('pets', CONTRA)}” Mark a ✓ if a case keeps it, a ✗ if a case breaks it.`,
+    ],
+  },
+  ['contra'],
+);
+
+/** Lesson 4, Do: the same four cases. The learner marks flip only and NOT only. */
+export const L4_TRAPS: DrillStep = meaningDrill(
+  'pets',
+  {
+    id: 's6.l4-do-traps',
+    title: 'Test flip only and NOT only',
+    body: [
+      'The same four cases. The rule’s boxes are marked.',
+      `Flip only: “${condText('pets', CONVERSE)}”`,
+      `NOT only: “${condText('pets', INVERSE)}”`,
+      'Mark a ✓ if a case keeps the sentence, a ✗ if it breaks it.',
+    ],
+  },
+  ['converse', 'inverse'],
+);
+
+/** Lesson 5, Do: the lunchroom cards. The “Dessert” card is shown checked (the card's case); the learner checks the rest. */
+export const L5_CARDS: DrillStep = cardDrill(
+  'dessert',
+  {
+    id: 's6.l5-do',
+    title: 'Check each card',
+    body: [
+      `These are the lunchroom cards. The “${face('dessert', 'P')}” card is checked, as in the example.`,
+      'For each other card, mark what each back would do to the rule. Then say if you must turn it over.',
+    ],
+  },
+  ['P'],
+  ['notQ', 'Q', 'notP'],
+);
+
+/** Lesson 5, Do again: the letter cards from the example. E is shown checked; the learner checks 7 and 4. */
+export const L5_LETTERS: DrillStep = cardDrill(
+  'letters',
+  {
+    id: 's6.l5-do-letters',
+    title: 'Check the letter cards',
+    body: [
+      `The same job, with letters and numbers. The ${face('letters', 'P')} card is checked.`,
+      `Mark the ${face('letters', 'notQ')} card and the ${face('letters', 'Q')} card the same way.`,
+    ],
+  },
+  ['P'],
+  ['notQ', 'Q'],
+);
+
 // ---------- lessons ----------
 
 const lessons: LessonDef[] = [
@@ -121,7 +306,7 @@ const lessons: LessonDef[] = [
     ideas: [
       {
         title: 'Two parts',
-        scene: ruleScene('dessert'),
+        scene: L1_RULE,
         body: [
           `Some rules have two parts. Here is one: “${ruleText('dessert')}”`,
           `The IF part comes right after the word “if.” Here it is “${part('dessert', 'P')}.”`,
@@ -129,12 +314,13 @@ const lessons: LessonDef[] = [
         ],
       },
       {
+        // See: the four boxes of one rule, already marked. Three ✓, and one ✗ on the break.
         title: 'Four kinds of kids',
-        scene: ruleGrid('dessert'),
+        scene: L1_SEE,
         body: [
           'Every kid at lunch fits in one of four boxes.',
           'Some kids got dessert and some did not. Some ate all the veggies and some left a few.',
-          'Only one box breaks the rule. Look for the ✗.',
+          'Three boxes have a ✓. The one ✗ is the break: a kid who got dessert but left some veggies.',
         ],
       },
       {
@@ -159,14 +345,18 @@ const lessons: LessonDef[] = [
         ],
       },
     ],
+    // Do: the same four boxes, empty; then the handoff's red card and hat rule on the same four boxes.
+    drill: [L1_DRILL, L1_TWIN],
+    // Quiz: only the four boxes, in other stories. "Who broke it?" twice, the box with no IF part and no THEN part
+    // (the conflict: nobody broke the rule), and one box at random. No rule is turned around in this lesson.
     practice: (rng) => {
       const skins = practiceSkins(rng, 4, L1_SKINS);
-      const plan = rng.shuffle(['who', 'who', 'trap', 'did'] as const);
+      const plan = rng.shuffle(['who', 'who', 'neither', 'did'] as const);
       const one = distinctItems();
       return plan.map((p, i) => {
         const skin = skins[i];
         const m = one(() =>
-          p === 'who' ? whoBrokeItem(rng, { skin }) : didBreakItem(rng, { skin, row: p === 'trap' ? { p: false, q: false } : rng.pick(ROWS) }),
+          p === 'who' ? whoBrokeItem(rng, { skin }) : didBreakItem(rng, { skin, row: p === 'neither' ? rowAt(false, false) : rng.pick(ROWS) }),
         );
         return finish(m, `s6-l1-${i + 1}`, L1);
       });
@@ -177,12 +367,14 @@ const lessons: LessonDef[] = [
     title: 'Turning it around',
     ideas: [
       {
+        // See: one case marked on this rule card. A cat with four legs keeps the rule but breaks it turned around.
         title: 'One way only',
-        scene: ruleScene('pets'),
+        scene: L2_RULE,
         body: [
           `Here is a true rule: “${ruleText('pets')}”`,
           `Now turn it around. Swap the IF part and the THEN part. You get “${condText('pets', CONVERSE)}”`,
-          'That one is not true. A cat has four legs, but a cat is not a dog.',
+          `That one is not true. A cat has four legs, but a cat is not a dog. The cat keeps the rule. ${SKINS.pets.onlyAbout}`,
+          'But the cat breaks the turned-around sentence.',
         ],
       },
       {
@@ -193,11 +385,13 @@ const lessons: LessonDef[] = [
         ],
       },
       {
+        // See: one case marked on the board. Rex as a cat keeps the rule, so it can happen, and "Rex is a dog" is false.
         title: 'Could it happen another way?',
+        scene: PETS_KEPT,
         body: [
-          'Rex has four legs. Is Rex a dog? Maybe. But Rex could be a cat.',
-          'When you know only the THEN part, ask: could it happen another way?',
-          'If it could, then you can’t tell if the IF part happened.',
+          `${pet('Q', 'Rex')}. Is Rex a dog? Maybe. But ${SKINS.pets.noIf('Rex')[0]}.`,
+          `That case keeps the rule, so it can happen. In it, “${pet('P', 'Rex')}” is false.`,
+          'When you know only the THEN part, ask: could it happen another way? If it could, then you can’t tell if the IF part happened.',
         ],
       },
       {
@@ -218,6 +412,11 @@ const lessons: LessonDef[] = [
         ],
       },
     ],
+    // Do: the pet rule's four boxes, all marked by hand (the converse trap comes only after them), then the two cases
+    // that fit "Rex has four legs" (backward), then the two that fit "Max is a dog" (forward).
+    drill: [L2_BOXES, L2_BACK, L2_FWD],
+    // Quiz: the same two methods in other stories. Each sentence the quiz can ask (the IF part or NOT the IF part,
+    // the THEN part or NOT the THEN part) is one the boards mark.
     practice: (rng) => {
       const skins = practiceSkins(rng, 4, SKIN_IDS);
       const plan = rng.shuffle([{ fact: 'Q' }, { fact: 'Q' }, { fact: 'P', target: 'Q' }, { fact: 'P' }] as const);
@@ -237,11 +436,13 @@ const lessons: LessonDef[] = [
         ],
       },
       {
+        // See: the cases marked on the board. Rex as a dog with four legs can happen; without four legs, it can’t.
         title: 'The IF part happened',
-        scene: ruleScene('pets', true),
+        scene: PETS_KEPT,
         body: [
-          'Rex is a dog. The rule says dogs have four legs. So Rex has four legs.',
-          'When the IF part happens, the THEN part must happen too.',
+          `${pet('P', 'Rex')}. A dog with four legs keeps the rule, so that case can happen.`,
+          'Could Rex be a dog without four legs? That case breaks the rule. Here the rule is always true, so it can’t happen.',
+          `So ${pet('Q', 'Rex')}. When the IF part happens, the THEN part must happen too.`,
         ],
       },
       {
@@ -268,6 +469,9 @@ const lessons: LessonDef[] = [
         ],
       },
     ],
+    // Do: the four moves on the pet board, two per board: a part happened (Rex, Max), a part did not (Pip, Coco).
+    drill: [L3_HAPPENED, L3_NOT],
+    // Quiz: one of each move, each in another story.
     practice: (rng) => {
       const skins = practiceSkins(rng, 4, SKIN_IDS);
       const moves = rng.shuffle(MOVES);
@@ -318,6 +522,10 @@ const lessons: LessonDef[] = [
         ],
       },
     ],
+    // Do: the example's four cases. Mark the flip and NOT sentence, then flip only and NOT only.
+    drill: [L4_SAME, L4_TRAPS],
+    // Quiz: the same test in other stories, on the three sentences the boards mark. No odd rewrite (NOT in one part
+    // only) is offered: no card or board marks one.
     practice: (rng) => {
       const skins = practiceSkins(rng, 4, SKIN_IDS);
       const plan = rng.shuffle(['pick', 'pick', 'trap', 'same'] as const);
@@ -326,7 +534,7 @@ const lessons: LessonDef[] = [
         const skin = skins[i];
         const m = one(() =>
           p === 'pick'
-            ? samePickItem(rng, { skin })
+            ? samePickItem(rng, { skin, extra: false })
             : sameYesNoItem(rng, { skin, rewrite: p === 'same' ? 'contra' : rng.pick(['converse', 'inverse'] as const) }),
         );
         return finish(m, `s6-l4-${i + 1}`, L4);
@@ -347,10 +555,13 @@ const lessons: LessonDef[] = [
         ],
       },
       {
+        // See: one card marked on the board, back by back, then the turn.
         title: 'The IF card',
+        scene: ruleScene('dessert'),
         body: [
-          `The “${face('dessert', 'P')}” card could have “${face('dessert', 'notQ')}” on the back. That kid broke the rule.`,
-          'So you must turn it over.',
+          `The “${face('dessert', 'P')}” card could have “${face('dessert', 'Q')}” or “${face('dessert', 'notQ')}” on the back.`,
+          `With “${face('dessert', 'Q')},” the rule is kept. With “${face('dessert', 'notQ')},” that kid broke the rule.`,
+          'One back could break the rule. So you must turn this card over.',
         ],
       },
       {
@@ -373,11 +584,14 @@ const lessons: LessonDef[] = [
         body: [
           'Here are four cards: E, K, 4 and 7. Which must you turn over?',
           'Turn over E and 7. E could have an odd number on the back. 7 could have a vowel.',
+          'Skip K. K is not a vowel, so the rule asks nothing of it.',
           'Many grown-ups pick E and 4. The 4 is the trap.',
         ],
       },
     ],
-    // Concrete stories first, then letters and numbers.
+    // Do: the lunchroom cards (the “Dessert” card shown), then the letter cards (E shown; mark 7 and 4).
+    drill: [L5_CARDS, L5_LETTERS],
+    // Quiz: concrete stories first, then letters and numbers.
     practice: (rng) => {
       const next = skinDeck(rng);
       const concrete = CARD_SKINS.filter((s) => SKINS[s].group !== 'abstract');
@@ -407,7 +621,8 @@ function check(rng: Rng): Item[] {
   const pickFirst = rng.chance(0.5);
   const who = () => whoBrokeItem(rng, { skin: next(L1_SKINS) });
   const did = () => didBreakItem(rng, { skin: next(L1_SKINS) });
-  const pick = () => samePickItem(rng, { skin: next(SKIN_IDS) });
+  // Only the three sentences lesson 4 marks: no odd rewrite.
+  const pick = () => samePickItem(rng, { skin: next(SKIN_IDS), extra: false });
   const yesNo = () => sameYesNoItem(rng, { skin: next(SKIN_IDS) });
   const extras = rng.shuffle(['l1', 'l4', 'card'] as const).slice(0, rng.chance(0.5) ? 2 : 1);
   const plan: [string, () => CondMade][] = [[L1, whoFirst ? who : did]];
@@ -425,7 +640,7 @@ const ARCADE: Record<string, (rng: Rng) => CondMade> = {
   [L1]: (rng) => (rng.chance(0.5) ? whoBrokeItem(rng, { skin: rng.pick(L1_SKINS) }) : didBreakItem(rng, { skin: rng.pick(L1_SKINS) })),
   [L2]: (rng) => turnItem(rng, { skin: rng.pick(SKIN_IDS), fact: rng.chance(0.5) ? 'Q' : 'P' }),
   [L3]: (rng) => moveItem(rng, { skin: rng.pick(SKIN_IDS), move: rng.pick(MOVES) }),
-  [L4]: (rng) => (rng.chance(0.5) ? samePickItem(rng, { skin: rng.pick(SKIN_IDS) }) : sameYesNoItem(rng, { skin: rng.pick(SKIN_IDS) })),
+  [L4]: (rng) => (rng.chance(0.5) ? samePickItem(rng, { skin: rng.pick(SKIN_IDS), extra: false }) : sameYesNoItem(rng, { skin: rng.pick(SKIN_IDS) })),
   [L5]: (rng) => (rng.chance(0.6) ? checkerItem(rng, { skin: rng.pick(CARD_SKINS) }) : cardItem(rng, { skin: rng.pick(CARD_SKINS) })),
 };
 
@@ -495,7 +710,7 @@ function fresh(missed: Item, rng: Rng): Item[] {
   const tag = missed.skill.replace(/^s6\./, '');
   const make = (m: CondMade) => finish(m, 'new', missed.lesson);
   if (tag === 'who-broke') return [make(whoBrokeItem(rng, { skin: otherSkin(rng, L1_SKINS, missed) }))];
-  if (tag === 'same-pick') return [make(samePickItem(rng, { skin: otherSkin(rng, SKIN_IDS, missed) }))];
+  if (tag === 'same-pick') return [make(samePickItem(rng, { skin: otherSkin(rng, SKIN_IDS, missed), extra: false }))];
   if (tag === 'checker') return [make(checkerItem(rng, { skin: otherSkin(rng, CARD_SKINS, missed) }))];
   if (tag === 'did-break') {
     const row = askedRow(missed);

@@ -14,8 +14,9 @@
  * Words come from skins: everyday (lunchroom, library, lunchbox, umbrella, wet grass, dogs), fantasy
  * (dragons, wizards, potions) and abstract (letters and numbers, P and Q). Only the rng passed in is used.
  */
+import { YES_NO as BOX_MARKS } from '../drill';
 import { syncWhyWrong } from '../teach';
-import type { Choice, ChoiceFeedback, ChooseItem, MultiItem, Rng, Scene, Teach, TeachCase, Truth } from '../types';
+import type { Choice, ChoiceFeedback, ChooseItem, DrillMark, DrillOption, DrillRow, DrillStep, MultiItem, Rng, Scene, Teach, TeachCase, Truth } from '../types';
 
 // ---------- logic ----------
 
@@ -583,26 +584,37 @@ export function ruleGrid(skin: SkinId): Scene {
   const rows: Choice[] = [{ id: 'P', label: face('P') }, { id: 'notP', label: face('notP') }];
   const cols: Choice[] = [{ id: 'Q', label: face('Q') }, { id: 'notQ', label: face('notQ') }];
   const marks: Record<string, Record<string, 'yes' | 'no'>> = {};
+  const labels: Record<string, Record<string, string>> = {};
+  const breaks: string[] = [];
   for (const r of rows) {
     marks[r.id] = {};
     for (const c of cols) {
       const row = ROWS.find((x) => litHolds(r.id as Lit, x) && litHolds(c.id as Lit, x))!;
       marks[r.id][c.id] = ruleHolds(row) ? 'yes' : 'no';
+      if (!ruleHolds(row)) {
+        breaks.push(`“${r.label}” with “${c.label}.”`);
+        labels[r.id] = { [c.id]: 'the break' };
+      }
     }
   }
-  return { kind: 'grid', rows, cols, marks, caption: '✓ means the rule is kept. ✗ means it is broken.' };
+  if (breaks.length !== 1) throw new Error('ruleGrid: exactly one box breaks the rule');
+  // The one ✗ is labelled "the break" inside its box, and named by its row and column in the caption.
+  return { kind: 'grid', rows, cols, marks, labels, caption: `✓ means the rule is kept. The one ✗ is the break: ${breaks[0]}` };
 }
+
+/** The column names of the lesson 4 grids: the rule and its three rewrites. */
+export const SENTENCE_COLUMNS: readonly [string, string, Cond][] = [
+  ['rule', 'The rule', RULE],
+  ['contra', 'Flip and NOT', CONTRA],
+  ['converse', 'Flip only', CONVERSE],
+  ['inverse', 'NOT only', INVERSE],
+];
 
 /** The rule and its three rewrites, case by case (lesson 4 worked example). */
 export function meaningGrid(skin: SkinId): Scene {
   const s = SKINS[skin];
   const rows: Choice[] = ROWS.map((r) => ({ id: rowKey(r), label: cap(s.kase[rowKey(r)]) }));
-  const sentences: [string, string, Cond][] = [
-    ['rule', 'The rule', RULE],
-    ['contra', 'Flip and NOT', CONTRA],
-    ['converse', 'Flip only', CONVERSE],
-    ['inverse', 'NOT only', INVERSE],
-  ];
+  const sentences = SENTENCE_COLUMNS;
   const cols: Choice[] = sentences.map(([id, label]) => ({ id, label }));
   const marks: Record<string, Record<string, 'yes' | 'no'>> = {};
   for (const r of ROWS) marks[rowKey(r)] = Object.fromEntries(sentences.map(([id, , c]) => [id, condHolds(c, r) ? 'yes' : 'no']));
@@ -827,6 +839,8 @@ export function whoBrokeItem(rng: Rng, opts: { skin: SkinId }): CondMade {
       simpler: rowSteps(skin, l1.says(c), c.row),
     };
   }
+  // The hint checks one case that keeps the rule (the first in the list), never the answer.
+  const shown = cases.find((c) => ruleHolds(c.row))!;
   const item: ChooseCore = {
     kind: 'choose',
     prompt: l1.ask,
@@ -835,7 +849,8 @@ export function whoBrokeItem(rng: Rng, opts: { skin: SkinId }): CondMade {
     answer: rowId(broken[0].row),
     explain: `${sentence(l1.says(broken[0]))} ${IF_ONLY_WAY}`,
     feedback,
-    hint: 'For each one, ask: did the IF part happen? Then ask: did the THEN part happen?',
+    hint: 'Here is one case, checked for you. Check the others the same way.',
+    hintCase: { label: sentence(l1.says(shown)), truths: partTruths(shown.row), note: rowNote(shown.row) },
     teach: l1Teach(skin, opts.skin, cases.map((c) => ({ says: l1.says(c), row: c.row }))),
   };
   syncWhyWrong(item);
@@ -867,6 +882,8 @@ export function didBreakItem(rng: Rng, opts: { skin: SkinId; row?: Row }): CondM
     const who = others.length ? others[k++ % others.length] : name;
     return { says: l1.says({ name: who, row: r, sym }), row: r };
   });
+  // The hint checks another case in the same story: the same IF part, the other THEN part. Never the asked case.
+  const near = cases.find((c) => rowKey(c.row) === rowKey(rowAt(row.p, !row.q)))!;
   const item: ChooseCore = {
     kind: 'choose',
     prompt: `${sentence(says)} ${l1.did(name)}`,
@@ -875,7 +892,8 @@ export function didBreakItem(rng: Rng, opts: { skin: SkinId; row?: Row }): CondM
     answer: broke ? 'yes' : 'no',
     explain: caseReason(skin, row),
     feedback: { [broke ? 'no' : 'yes']: fb },
-    hint: 'First ask: did the IF part happen?',
+    hint: 'Here is a case like this one, checked for you. Check this one the same way.',
+    hintCase: { label: sentence(near.says), truths: partTruths(near.row), note: rowNote(near.row) },
     teach: l1Teach(skin, opts.skin, cases),
   };
   syncWhyWrong(item);
@@ -964,7 +982,10 @@ export function turnItem(rng: Rng, opts: { skin: SkinId; fact: 'P' | 'Q'; target
     answer: status,
     explain,
     feedback,
-    hint: 'Which part of the rule do you know about: the IF part or the THEN part?',
+    hint: 'Here is one case that fits the fact, checked for you. Check the other case the same way.',
+    // Forward: the case that breaks the rule. Backward: the case where the IF part happened too. Either way, one
+    // case that fits the fact, marked; the learner checks the other one.
+    hintCase: kase(fact === 'P' ? rowAt(true, false) : rowAt(true, true)),
     teach: {
       rule: fact === 'P' ? 'A rule like this works forward. When the IF part happens, the THEN part must happen too.' : 'A rule like this does not work backward. The THEN part can happen without the IF part.',
       terms: [...partTerms(opts.skin), CANT_TELL_TERM],
@@ -990,6 +1011,12 @@ export const NOTHING = 'nothing';
 export const NOTHING_LABEL = 'Nothing follows for sure.';
 export const MOVE_TAGS: Record<Move, string> = { mp: 'move-if', mt: 'move-not-then', ac: 'trap-then', da: 'trap-not-if' };
 const litId = (l: Lit) => ({ P: 'p', notP: 'np', Q: 'q', notQ: 'nq' })[l];
+/**
+ * The case a lesson 3 hint shows, marked: one of the two cases that fit the fact, never the one the answer stands
+ * on. When something follows, it is the case that breaks the rule; when nothing follows, either case can happen,
+ * and the hint shows the one that tempts (the IF part happened too, or the THEN part did not happen either).
+ */
+const MOVE_HINT_ROW: Record<Move, Row> = { mp: rowAt(true, false), mt: rowAt(true, false), ac: rowAt(true, true), da: rowAt(false, false) };
 const MOVE_REMEMBER: Record<Move, string> = {
   mp: 'The IF part happened, so the THEN part did too.',
   mt: 'The THEN part did not happen, so the IF part did not either.',
@@ -1085,7 +1112,8 @@ export function moveItem(rng: Rng, opts: { skin: SkinId; move: Move }): CondMade
     answer,
     explain,
     feedback,
-    hint: 'Is the fact about the IF part or the THEN part? Did that part happen?',
+    hint: 'Here is one case that fits the fact, checked for you. Check the other case the same way.',
+    hintCase: kase(MOVE_HINT_ROW[opts.move]),
     teach: {
       rule: moveRule(fact),
       terms: [...partTerms(opts.skin), NOTHING_TERM],
@@ -1231,6 +1259,9 @@ export function samePickItem(rng: Rng, opts: { skin: SkinId; extra?: boolean }):
       simpler: sameSteps(opts.skin, c),
     };
   }
+  // The hint checks one wrong choice (the first in the list) in the case that tells it apart from the rule.
+  const off = order.find((c) => !sameMeaning(c, RULE))!;
+  const offRow = telltaleRow(off)!.row;
   const item: ChooseCore = {
     kind: 'choose',
     prompt: 'Which sentence means the same as the rule? Two sentences mean the same when the same cases break them.',
@@ -1239,7 +1270,12 @@ export function samePickItem(rng: Rng, opts: { skin: SkinId; extra?: boolean }):
     answer: condId(right[0]),
     explain: matches(skin, right[0]).replace(/^It /, 'The right one '),
     feedback,
-    hint: 'Think of a case that breaks one sentence. Does it break the rule too?',
+    hint: `Here is one sentence, checked for you: “${condText(opts.skin, off)}” Check the others the same way.`,
+    hintCase: {
+      label: sentence(cap(skin.kase[rowKey(offRow)])),
+      truths: [{ who: RULE_WHO, value: ruleHolds(offRow) }, { who: THIS_WHO, value: condHolds(off, offRow) }],
+      note: `${apartLine(offRow, off, 'this sentence')} So this sentence does not mean the same as the rule.`,
+    },
     // The cases show the rule and flip and NOT side by side; the simpler example is the flip-only trap.
     teach: sameTeach(opts.skin, CONTRA, CONTRA_WHO, 'the flip and NOT sentence', 'Which cases break the rule? Which break the flip and NOT sentence?', CONVERSE, true),
   };
@@ -1290,7 +1326,13 @@ export function sameYesNoItem(rng: Rng, opts: { skin: SkinId; rewrite?: Rewrite 
     answer: isSame ? 'yes' : 'no',
     explain,
     feedback: { [isSame ? 'no' : 'yes']: fb },
-    hint: 'Try a case that breaks the rule. Does it break this sentence too? Then try the other cases.',
+    hint: 'Here is one case, checked for you. Check the other three cases the same way.',
+    // A case that keeps the rule and every rewrite, so the hint shows how to mark a case without giving the answer.
+    hintCase: {
+      label: sentence(cap(skin.kase.TT)),
+      truths: [{ who: RULE_WHO, value: ruleHolds(rowAt(true, true)) }, { who: THIS_WHO, value: condHolds(c, rowAt(true, true)) }],
+      note: 'This case keeps the rule and this sentence. Now check the other three cases.',
+    },
     teach: sameTeach(opts.skin, c, THIS_WHO, 'this sentence', 'Which cases break the rule? Which break this sentence?', c),
   };
   syncWhyWrong(item);
@@ -1372,6 +1414,19 @@ function cardSteps(skin: Skin, face: Lit, sym: Symbols): string[] {
   return out;
 }
 
+/** One card for a hint, marked back by back (is the rule kept with each back?), then whether you must turn it over. */
+export function cardHintCase(skin: Skin, face: Lit, sym: Symbols): TeachCase {
+  const cards = skin.cards!;
+  return {
+    label: `The card that shows “${cards.face(face, sym)}.”`,
+    truths: [
+      ...otherPart(face).map((b) => ({ who: `The rule with ${cards.back(b, sym)} on the back`, value: ruleHolds(cardRow(face, b)) })),
+      { who: TURN_WHO, value: mustTurn(face) },
+    ],
+    note: cardNote(skin, face, sym),
+  };
+}
+
 /** Lesson 5: four cards, one side showing. Which must you turn over? The IF card and the NOT-THEN card. */
 export function checkerItem(rng: Rng, opts: { skin: SkinId }): CondMade {
   const skin = SKINS[opts.skin];
@@ -1401,7 +1456,9 @@ export function checkerItem(rng: Rng, opts: { skin: SkinId }): CondMade {
     explain: `Only the cards that show ${q(a)} and ${q(b)} could hide a broken rule. The card that shows ${q(trap)} is the trap. Even with ${cards.back('P', sym)} on the back, the rule is kept.`,
     pickTips,
     missTips,
-    hint: 'For each card, ask what could be on the back. Could that break the rule?',
+    hint: 'Here is one card, checked for you. Check the other cards the same way.',
+    // The IF part did not happen on this card: not a card to turn, so the hint never gives the answer away.
+    hintCase: cardHintCase(skin, 'notP', sym),
     conflict: true,
     // The two cards people get wrong most: the NOT THEN card (turn it) and the THEN card (the trap: skip it).
     teach: cardTeach(skin, opts.skin, cases, 'Which cards could hide a broken rule?', [
@@ -1457,10 +1514,358 @@ export function cardItem(rng: Rng, opts: { skin: SkinId; face?: Lit }): CondMade
     answer: turn ? 'yes' : 'no',
     explain,
     feedback: { [turn ? 'no' : 'yes']: fb },
-    hint: 'What could be on the back of this card? Could any of those break the rule?',
+    hint: 'Here is another card, checked for you. Check this card the same way.',
+    // Another card, never the one asked about: the IF card, or the NOT IF card when the IF card is asked.
+    hintCase: cardHintCase(skin, face === 'P' ? 'notP' : 'P', sym),
     teach: cardTeach(skin, opts.skin, otherPart(face).map(backCase), `What could be on the back of the card that shows ${shown}?`, cardSteps(skin, face, sym)),
   };
   syncWhyWrong(item);
   if (face === 'Q' || face === 'notQ') item.conflict = true;
   return { tag: 'checker-card', item, meta: { skin: opts.skin, name: '', faces: { one: face }, sym } };
+}
+
+// ---------- the Do step: guided boards ----------
+//
+// Every lesson's Do board is built here, so every mark comes from the truth table and none is written by hand:
+//  - lesson 1: a box of the four boxes is ✓ when ruleHolds() keeps its case;
+//  - lessons 2 and 3: a case that fits a fact can happen when it keeps the rule, and a sentence is true in it when
+//    litHolds() says so; what the board settles comes from statusOf() and follows();
+//  - lesson 4: a sentence's box is ✓ when condHolds() keeps that sentence in that case;
+//  - lesson 5: a back keeps or breaks the rule by ruleHolds(cardRow()), and a card must be turned (mustTurn) when
+//    some back breaks it.
+// Every message for a wrong mark names the case (or the card and its back) and what is true there.
+
+/** What a board says (its id, title and instructions), apart from the marks the engine works out. */
+export interface BoardText {
+  id: string;
+  title: string;
+  body: string[];
+  /** A twin board: what changed from the worked example's board. */
+  twin?: string;
+}
+
+const TRUE_FALSE: DrillOption[] = [{ id: 'true', label: 'True' }, { id: 'false', label: 'False' }];
+const KEPT_BROKEN: DrillOption[] = [{ id: 'holds', label: 'Kept' }, { id: 'crashes', label: 'Broken' }];
+/** A grid box (✓ / ✗), or a yes / no mark on a row. */
+const yesNo = (): DrillOption[] => BOX_MARKS.map((o) => ({ id: o.id, label: o.label }));
+const tfId = (v: boolean) => (v ? 'true' : 'false');
+const ynId = (v: boolean) => (v ? 'yes' : 'no');
+const twinOf = (t: BoardText) => (t.twin ? { twin: t.twin } : {});
+
+// ----- lesson 1: the four boxes -----
+
+/** The words of one rule's four boxes: its rule card, a name for each fact, and each case as a noun phrase. */
+export interface BoxWords {
+  /** The rule card: the setting, then the rule. */
+  lines: string[];
+  /** Row and column names: "Dessert", "Left some veggies". */
+  face: Record<Lit, string>;
+  kase: Record<RowKey, string>;
+  onlyAbout: string;
+}
+
+/** A skin's four boxes, named by its card faces (the names on ruleGrid, the worked example). */
+export function boxWords(skin: SkinId): BoxWords {
+  const s = SKINS[skin];
+  const cards = s.cards;
+  if (!cards) throw new Error(`boxWords: ${skin} has no cards`);
+  const scene = ruleScene(skin);
+  return {
+    lines: scene.kind === 'text' ? scene.lines : [],
+    face: { P: cards.face('P', CLASSIC), notP: cards.face('notP', CLASSIC), Q: cards.face('Q', CLASSIC), notQ: cards.face('notQ', CLASSIC) },
+    kase: s.kase,
+    onlyAbout: s.onlyAbout,
+  };
+}
+
+/**
+ * The skill-drill handoff's sample rule for the four boxes: a red card and a hat. It is drawn only on a guided board
+ * (a twin of the lunchroom boxes), never in a quiz, so it is not one of the skins.
+ */
+export const HAT_BOXES: BoxWords = {
+  lines: ['Each kid in the game holds a red card or a blue card.', 'If a kid is holding a red card, then they are wearing a hat.'],
+  face: { P: 'Red card', notP: 'Blue card', Q: 'Hat', notQ: 'No hat' },
+  kase: { TT: 'a kid with a red card and a hat', TF: 'a kid with a red card and no hat', FT: 'a kid with a blue card and a hat', FF: 'a kid with a blue card and no hat' },
+  onlyAbout: 'The rule only talks about kids holding a red card.',
+};
+
+/**
+ * The pet rule's four boxes (lesson 2: marked by hand before the rule is turned around). The pet skin has no
+ * rule-checker cards, so its row and column names are written here. The rule card, the cases and every box's mark
+ * come from the skin and fourBoxDrill, as for the other boards.
+ */
+export const PET_BOXES: BoxWords = (() => {
+  const scene = ruleScene('pets');
+  return {
+    lines: scene.kind === 'text' ? [...scene.lines] : [],
+    face: { P: 'Dog', notP: 'Not a dog', Q: 'Four legs', notQ: 'Not four legs' },
+    kase: SKINS.pets.kase,
+    onlyAbout: SKINS.pets.onlyAbout,
+  };
+})();
+
+/** The rule card above a four-box board. */
+export const boxScene = (w: BoxWords): Scene => ({ kind: 'text', lines: [...w.lines] });
+
+/** Why one box keeps or breaks the rule: said when the learner marks it the other way. */
+function boxWhy(w: BoxWords, r: Row): string {
+  const is = `This box is for ${w.kase[rowKey(r)]}.`;
+  if (!ruleHolds(r)) return `${is} The IF part happened, but the THEN part did not. That is the break, so this box gets the ✗, not a ✓.`;
+  if (r.p) return `${is} The IF part and the THEN part both happened. That keeps the rule, so this box gets a ✓, not a ✗.`;
+  return `${is} The IF part did not happen. ${w.onlyAbout} So this box keeps the rule. It gets a ✓, not a ✗.`;
+}
+
+/**
+ * Lesson 1: the four boxes of one rule, empty. Rows are the IF part and NOT the IF part, columns the THEN part and NOT
+ * the THEN part, as on the worked example's grid. The learner marks every box: ✓ keeps the rule, ✗ breaks it.
+ */
+export function fourBoxDrill(w: BoxWords, t: BoardText): DrillStep {
+  const cols: Lit[] = ['Q', 'notQ'];
+  const rows: DrillRow[] = (['P', 'notP'] as const).map((rl) => ({
+    id: rl,
+    label: w.face[rl],
+    marks: cols.map((cl): DrillMark => {
+      const r = ROWS.find((x) => litHolds(rl, x) && litHolds(cl, x))!;
+      const kept = ruleHolds(r);
+      return { id: `${rl}-${cl}`, label: w.face[cl], options: yesNo(), answer: ynId(kept), why: { [ynId(!kept)]: boxWhy(w, r) } };
+    }),
+  }));
+  const broken = brokenRows(RULE);
+  if (broken.length !== 1) throw new Error('fourBoxDrill: exactly one box breaks the rule');
+  const b = broken[0];
+  return {
+    id: t.id,
+    title: t.title,
+    body: t.body,
+    scene: boxScene(w),
+    ...twinOf(t),
+    rows,
+    columns: cols.map((c) => w.face[c]),
+    caption: '✓ keeps the rule. ✗ breaks it.',
+    done: `Right. Only one box breaks the rule: “${w.face[litOf('p', b.p)]}” with “${w.face[litOf('q', b.q)]}.” That is the break. The other three boxes keep the rule.`,
+  };
+}
+
+// ----- lessons 2 and 3: the cases that fit a fact -----
+
+/** One fact and the cases that fit it, on a lesson 2 or lesson 3 board. */
+export interface FactCases {
+  /** Who the fact is about: "Rex". */
+  name: string;
+  fact: Lit;
+  /** Sentences about the other part, marked true or false in each case. */
+  say: Lit[];
+  /** Cases shown already marked (the worked case). Each one fits the fact. */
+  shown: Row[];
+  /** Cases the learner marks. Each one fits the fact. */
+  mark: Row[];
+}
+
+/** A way a case without the IF part could happen: "Rex could be a cat with four legs." Empty with the IF part. */
+const wayOf = (skin: Skin, name: string, r: Row) => (r.p ? '' : skin.noIf(name)[r.q ? 0 : 1]);
+
+/** Can this case happen, when the rule is always true? Said when the learner marks it the other way. */
+function canWhy(skin: Skin, name: string, r: Row): string {
+  const says = sentence(skin.says(name, r));
+  if (!ruleHolds(r)) return `${says} The IF part happened, but the THEN part did not. That breaks the rule, so this case can’t happen here.`;
+  if (r.p) return `${says} The IF part and the THEN part both happened. That keeps the rule, so this case can happen.`;
+  const way = `${cap(wayOf(skin, name, r))}.`;
+  if (r.q) return `${says} ${way} The THEN part happened without the IF part. That keeps the rule, so this case can happen.`;
+  return `${says} ${way} The IF part did not happen, so the rule asks for nothing. This case can happen.`;
+}
+
+/** Is a sentence true in this case? Said when the learner marks it the other way. */
+function sayWhy(skin: Skin, name: string, t: Lit, r: Row): string {
+  const v = litHolds(t, r);
+  const there = partOf(t) === 'p' ? litOf('p', r.p) : litOf('q', r.q);
+  return `In this case, ${mid(skin.fact(there, name))}. So “${skin.fact(t, name)}” is ${v ? 'true' : 'false'} here, not ${v ? 'false' : 'true'}.`;
+}
+
+/** One case that fits the fact, as a row: can it happen (does it keep the rule), then each sentence true or false. */
+function factCaseRow(skinId: SkinId, f: FactCases, r: Row, given: boolean): DrillRow {
+  const skin = SKINS[skinId];
+  if (!litHolds(f.fact, r)) throw new Error('factCaseRow: the case must fit the fact');
+  const id = `${f.name}-${rowKey(r)}`;
+  const g = given ? { given: true } : {};
+  const kept = ruleHolds(r);
+  const marks: DrillMark[] = [
+    { id: `${id}-can`, label: 'Can this case happen?', options: yesNo(), answer: ynId(kept), ...g, why: { [ynId(!kept)]: canWhy(skin, f.name, r) } },
+    ...f.say.map((t): DrillMark => {
+      const v = litHolds(t, r);
+      return { id: `${id}-${t}`, label: `“${sentence(skin.fact(t, f.name))}”`, options: TRUE_FALSE, answer: tfId(v), ...g, why: { [tfId(!v)]: sayWhy(skin, f.name, t, r) } };
+    }),
+  ];
+  return { id, label: sentence(skin.says(f.name, r)), marks, note: possibleNote(r, wayOf(skin, f.name, r)) };
+}
+
+/** What the cases settle: each sentence for sure or not (lesson 2), or what follows for sure (lesson 3). */
+function factConclusion(skin: Skin, f: FactCases, how: 'status' | 'follows'): string {
+  const n = rowsWith(f.fact).length;
+  const got = follows(f.fact);
+  if ((n === 1) !== !!got) throw new Error('factConclusion: one case left means something follows');
+  if (how === 'follows') {
+    return got
+      ? `For ${f.name}, only one case can happen, so “${skin.fact(got, f.name)}” follows for sure.`
+      : `For ${f.name}, two cases can happen, so nothing follows for sure.`;
+  }
+  const lines = f.say.map((t) => {
+    const s = statusOf(f.fact, t);
+    const q = `“${skin.fact(t, f.name)}”`;
+    if (s === 'must') return `${q} is true in it, so it is true for sure.`;
+    if (s === 'never') return `${q} is false in it, so it is false for sure.`;
+    return `${q} is true in one and false in the other, so you can’t tell.`;
+  });
+  return [n === 1 ? 'Only one case can happen.' : 'Two cases can happen.', ...lines].join(' ');
+}
+
+/**
+ * Lessons 2 and 3: a rule that is always true, a fact, and the two cases that fit it. Each case is marked: can it
+ * happen, and is each sentence true in it. One case is shown (the worked case); the learner marks the other one.
+ * No final answer on the board: the quiz asks it, and the board's last words say what the marks settle.
+ */
+export function factCasesDrill(skinId: SkinId, t: BoardText, blocks: FactCases[], conclude: 'status' | 'follows'): DrillStep {
+  const skin = SKINS[skinId];
+  for (const f of blocks) for (const s of f.say) if (partOf(s) === partOf(f.fact)) throw new Error('factCasesDrill: a sentence must be about the other part');
+  const rows = blocks.flatMap((f) => [...f.shown.map((r) => factCaseRow(skinId, f, r, true)), ...f.mark.map((r) => factCaseRow(skinId, f, r, false))]);
+  return {
+    id: t.id,
+    title: t.title,
+    body: t.body,
+    scene: ruleScene(skinId, true),
+    ...twinOf(t),
+    rows,
+    done: `Right. ${blocks.map((f) => factConclusion(skin, f, conclude)).join(' ')}`,
+  };
+}
+
+// ----- lesson 4: the same cases break them -----
+
+/** A rewrite's name on a board. */
+export const SENTENCE_NAME: Record<Rewrite, string> = { contra: 'the flip and NOT sentence', converse: 'the flip only sentence', inverse: 'the NOT only sentence' };
+
+/** Is a sentence kept in this case? Said when the learner marks its box the other way. */
+function sentenceBoxWhy(skin: Skin, c: Cond, r: Row, name: string): string {
+  const k = cap(skin.kase[rowKey(r)]);
+  const ifp = `“${skin.parts[c.a].if},”`;
+  const thenp = `“${skin.parts[c.b].then ?? skin.parts[c.b].if},”`;
+  const a = litHolds(c.a, r);
+  const b = litHolds(c.b, r);
+  if (a && !b) return `${k}: the IF part, ${ifp} is true. The THEN part, ${thenp} is false. That breaks ${name}, so this box gets a ✗, not a ✓.`;
+  if (!a) return `${k}: the IF part, ${ifp} is false. So ${name} asks for nothing here. It is kept, so this box gets a ✓, not a ✗.`;
+  return `${k}: the IF part, ${ifp} is true. The THEN part, ${thenp} is true too. That keeps ${name}, so this box gets a ✓, not a ✗.`;
+}
+
+/** What the marked boxes show: the same cases break the rule and the sentence, or one case tells them apart. */
+function meaningConclusion(skin: Skin, rewrites: Rewrite[]): string {
+  const out: string[] = [];
+  const rule = brokenRows(RULE);
+  for (const w of rewrites.filter((x) => sameMeaning(REWRITES[x], RULE))) {
+    const only = brokenRows(REWRITES[w]);
+    if (rule.length !== 1 || only.length !== 1 || rowKey(only[0]) !== rowKey(rule[0])) throw new Error('meaningConclusion: one case breaks each');
+    out.push(`Only ${skin.kase[rowKey(rule[0])]} breaks the rule. It is also the only case that breaks ${SENTENCE_NAME[w]}. So ${SENTENCE_NAME[w]} means the same as the rule.`);
+  }
+  // The others, grouped by the case that tells them apart from the rule.
+  const groups = new Map<string, Rewrite[]>();
+  for (const w of rewrites.filter((x) => !sameMeaning(REWRITES[x], RULE))) {
+    const t = telltaleRow(REWRITES[w])!;
+    const key = `${rowKey(t.row)} ${t.breaks}`;
+    groups.set(key, [...(groups.get(key) ?? []), w]);
+  }
+  for (const ws of groups.values()) {
+    const t = telltaleRow(REWRITES[ws[0]])!;
+    const names = ws.map((w) => SENTENCE_NAME[w]).join(' and ');
+    const k = cap(skin.kase[rowKey(t.row)]);
+    out.push(t.breaks === 'sentence' ? `${k} keeps the rule but breaks ${names}.` : `${k} breaks the rule but keeps ${names}.`);
+    out.push(ws.length === 1 ? 'So it does not mean the same as the rule.' : 'So neither one means the same as the rule.');
+  }
+  return out.join(' ');
+}
+
+/**
+ * Lesson 4: the four cases of the worked example's grid. The rule's boxes are shown marked (the worked case); the
+ * learner marks each rewrite's boxes: ✓ when the case keeps that sentence, ✗ when it breaks it.
+ */
+export function meaningDrill(skinId: SkinId, t: BoardText, rewrites: Rewrite[]): DrillStep {
+  const skin = SKINS[skinId];
+  const label = (id: string) => SENTENCE_COLUMNS.find(([k]) => k === id)![1];
+  const rows: DrillRow[] = ROWS.map((r) => ({
+    id: rowKey(r),
+    label: cap(skin.kase[rowKey(r)]),
+    marks: [
+      { id: `${rowKey(r)}-rule`, label: label('rule'), options: yesNo(), answer: ynId(ruleHolds(r)), given: true, why: {} },
+      ...rewrites.map((w): DrillMark => {
+        const kept = condHolds(REWRITES[w], r);
+        return { id: `${rowKey(r)}-${w}`, label: label(w), options: yesNo(), answer: ynId(kept), why: { [ynId(!kept)]: sentenceBoxWhy(skin, REWRITES[w], r, SENTENCE_NAME[w]) } };
+      }),
+    ],
+  }));
+  return {
+    id: t.id,
+    title: t.title,
+    body: t.body,
+    scene: ruleScene(skinId),
+    ...twinOf(t),
+    rows,
+    columns: [label('rule'), ...rewrites.map(label)],
+    caption: '✓ keeps the sentence. ✗ breaks it.',
+    done: `Right. ${meaningConclusion(skin, rewrites)}`,
+  };
+}
+
+// ----- lesson 5: the rule checker -----
+
+/** Is the rule kept with this back on the card? Said when the learner marks it the other way. */
+function backWhy(skin: Skin, face: Lit, back: Lit, sym: Symbols): string {
+  const r = cardRow(face, back);
+  const it = `With ${skin.cards!.back(back, sym)} on the back, it is ${skin.kase[rowKey(r)]}.`;
+  if (!ruleHolds(r)) return `${it} The IF part happened, but the THEN part did not. That breaks the rule.`;
+  if (r.p) return `${it} The IF part and the THEN part both happened. That keeps the rule.`;
+  if (r.q) return `${it} The THEN part happened without the IF part. That keeps the rule.`;
+  return `${it} The IF part did not happen, so the rule asks for nothing. That keeps the rule.`;
+}
+
+/** Must you turn this card over? Said when the learner marks it the other way. */
+function turnWhy(skin: Skin, face: Lit, sym: Symbols): string {
+  const cards = skin.cards!;
+  const back = breakingBack(face);
+  if (back) return `With ${cards.back(back, sym)} on the back, the rule is broken. That back could be there, so you must turn this card over.`;
+  return `With ${backs(cards, face, sym)} on the back, the rule is kept. No back can break it, so you do not need to turn this card over.`;
+}
+
+/** "the “Dessert” card and the “Left some veggies” card" */
+const cardList = (cards: NonNullable<Skin['cards']>, faces: Lit[], sym: Symbols) => faces.map((l) => `the “${cards.face(l, sym)}” card`).join(' and ');
+
+/**
+ * Lesson 5: rule-checker cards, one row each. A row marks what each possible back does to the rule (kept or broken),
+ * then whether you must turn the card over. The worked card is shown; the learner marks the others.
+ */
+export function cardDrill(skinId: SkinId, t: BoardText, shown: Lit[], mark: Lit[], sym: Symbols = CLASSIC): DrillStep {
+  const skin = SKINS[skinId];
+  const cards = skin.cards;
+  if (!cards) throw new Error(`cardDrill: ${skinId} has no cards`);
+  const row = (face: Lit, given: boolean): DrillRow => {
+    const g = given ? { given: true } : {};
+    const marks: DrillMark[] = otherPart(face).map((b): DrillMark => {
+      const kept = ruleHolds(cardRow(face, b));
+      return { id: `${CARD_IDS[face]}-${CARD_IDS[b]}`, label: `${cap(cards.back(b, sym))} on the back`, options: KEPT_BROKEN, answer: kept ? 'holds' : 'crashes', ...g, why: { [kept ? 'crashes' : 'holds']: backWhy(skin, face, b, sym) } };
+    });
+    const turn = mustTurn(face);
+    marks.push({ id: `${CARD_IDS[face]}-turn`, label: 'Turn it over?', options: yesNo(), answer: ynId(turn), ...g, why: { [ynId(!turn)]: turnWhy(skin, face, sym) } });
+    return { id: CARD_IDS[face], label: `The card that shows “${cards.face(face, sym)}.”`, marks, note: cardNote(skin, face, sym) };
+  };
+  const faces = [...shown, ...mark];
+  const turn = faces.filter(mustTurn);
+  const skip = faces.filter((l) => !mustTurn(l));
+  const done = [`Right. Turn over ${cardList(cards, turn, sym)}.`];
+  if (skip.length) done.push(`Skip ${cardList(cards, skip, sym)}. No back on ${skip.length === 1 ? 'it' : 'them'} can break the rule.`);
+  if (skip.includes('Q')) done.push(`The “${cards.face('Q', sym)}” card is the trap.`);
+  return {
+    id: t.id,
+    title: t.title,
+    body: t.body,
+    scene: ruleScene(skinId),
+    ...twinOf(t),
+    rows: [...shown.map((l) => row(l, true)), ...mark.map((l) => row(l, false))],
+    done: done.join(' '),
+  };
 }

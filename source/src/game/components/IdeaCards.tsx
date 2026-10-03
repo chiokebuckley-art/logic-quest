@@ -18,9 +18,12 @@ export interface IdeaCardsExtraProps {
   after?: ReactNode;
   /** A short line under the last card's button ("Then the check opens"). */
   doneNote?: string;
+  /** When these cards are a stretch of a lesson's cards: the first one's number, and how many the lesson has. */
+  numberFrom?: number;
+  numberOf?: number;
 }
 
-export function IdeaCards({ cards, readAloud, onDone, doneLabel = 'Try it', kicker = 'Key idea', after, doneNote }: IdeaCardsProps & IdeaCardsExtraProps) {
+export function IdeaCards({ cards, readAloud, onDone, doneLabel = 'Try it', kicker = 'Key idea', after, doneNote, numberFrom = 1, numberOf }: IdeaCardsProps & IdeaCardsExtraProps) {
   const [i, setI] = useState(0);
   const titleRef = useRef<HTMLHeadingElement>(null);
   const moved = useRef(false);
@@ -59,7 +62,7 @@ export function IdeaCards({ cards, readAloud, onDone, doneLabel = 'Try it', kick
     <article className="play-card play-idea" aria-roledescription="key idea card">
       <div className="play-item-top">
         <span className="play-kicker">
-          {kicker} {count > 1 && <span className="play-kicker-count">· {i + 1} of {count}</span>}
+          {kicker} {(numberOf ?? count) > 1 && <span className="play-kicker-count">· {numberFrom + i} of {numberOf ?? count}</span>}
         </span>
         {readAloud && <ReadAloudButton key={i} text={speechText} />}
       </div>

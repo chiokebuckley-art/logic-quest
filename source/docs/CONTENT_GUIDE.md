@@ -9,11 +9,12 @@ STOP=2 npx vitest run src/engine/__tests__/stops.test.ts
 
 ## Shape
 
-- **3–6 lessons**, ids `sN.l1`, `sN.l2`, …
-- Each lesson starts with **3–6 key-idea cards**. They are taught before any question. A card can show a scene
-  as a worked example.
-- `practice(rng)` gives **3–5 guided items** in at least two skins: an everyday story, a fantasy story, and
-  abstract letters or shapes.
+- **3–7 lessons**, ids `sN.l1`, `sN.l2`, … (one method per lesson: a new rule family gets its own lesson)
+- Each lesson starts with **3–6 key-idea cards**. They are taught before any question. One card shows a worked
+  case already marked on its board (see "Teach before the quiz").
+- Then the lesson's **guided boards** (`drill`): the learner marks a new case on that board by taps.
+- `practice(rng)` gives **3–5 quiz items** in at least two skins: an everyday story, a fantasy story, and
+  abstract letters or shapes. Every one is in the rule family the lesson taught.
 - `check(rng)` gives **8–10 items**. It covers every lesson and includes at least one **conflict item**, where
   intuition points the wrong way. Every seed gives a new check: a retry never repeats the last one.
 - `practice(rng)` on the stop gives one Arcade item from anywhere in the stop.
@@ -26,6 +27,42 @@ STOP=2 npx vitest run src/engine/__tests__/stops.test.ts
   (for example, reading OR as "one but not both"). Hints nudge; they never give the answer, and checks never
   show them.
 - Use only the `rng` you are given, so the same seed always gives the same items.
+
+## Teach before the quiz: See, Do, Quiz
+
+The rule (skill-drill handoff, 2 October 2026): every new method is **See one marked case, Do one with taps, then
+Quiz a twin**. Never introduce a new rule family inside a quiz set. A lesson is not passed until the learner has
+performed the skill: a learner who only taps Next fails, and a learner who marks the guided case meets a twin quiz
+of the same rule. The reference is Stop 1, Lesson 4 (Treasure signs: `L4_DRILL` in `src/content/stop1.ts`, built by
+`signDrill` in `src/engine/puzzles/signs.ts`).
+
+- **See** (`ideas`): one card shows one case already marked on its board, with its truths. "An example" in the
+  Treasure signs lesson walks the three chests and concludes Silver.
+- **Do** (`drill`, a list of `DrillStep`s): the same board as the See card (the same scene), or a twin that
+  changes one piece (say what changed in `twin`).
+  - Show the worked case as a given row where it helps (Silver: False, False, True, 1, Keep).
+  - The learner marks a new case (Gold: True, True, False, 2, Reject). No final-answer buttons on the board.
+  - Build boards with an engine helper, so every answer is computed. Never hand-assert one.
+  - Every wrong option of every mark to tap has a `why` that names that exact mismatch in plain words: “If the
+    treasure is in the Gold chest, the Silver chest sign is true. It says, “The treasure is not in this chest.”
+    The treasure is not in the Silver chest.”
+  - Options: `true`/`false`, `fit`/`not` (put the card on each mark with `thing`), `holds`/`crashes`,
+    `keep`/`reject`, counts `'0'`–`'3'`, names, `cant`. Grid boards set `columns` and use `YES_NO`.
+  - Keep a board phone-sized: about 12 taps or fewer. Use a second board instead of one big one.
+- **Quiz** (`practice`): twins of the same rule family only. Move a family no See and Do taught out of the pack,
+  and out of the stop check, the Arcade and the new examples too. Treasure signs now uses only “Exactly one sign
+  is true.”
+  - A first quiz can carry its own board (`workFirst`), marked before its answer buttons show. Treasure signs
+    does this with the frozen Ice, Fire and Moss caves.
+  - Every hinted item has `hintCase`: one marked case, not the answer case. A hint models the method; it never
+    only restates it.
+- **Pass** (`pass`): the boards marked right, then 3 right on the first try with no hint (the default). A lesson
+  can ask for them in a row, or include a tagged kind (`include` with `ItemBase.tags`, such as a false statement
+  or a Can’t tell). Every include tag must be in every planned practice pack. Extra items come from the lesson’s
+  own practice until the rule is met.
+
+The contract test checks the boards (`stop N: See -> Do -> Quiz` in `stops.test.ts`). Each stop's drill worksheet
+is in `docs/audit/drill-stopN.md`.
 
 ## Wrong answers: teach first
 

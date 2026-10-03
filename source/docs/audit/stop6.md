@@ -1,5 +1,10 @@
 # Wrong-answer audit: Stop 6 (If… then)
 
+> Since the skill-drill handoff (see `drill-stop6.md`), every lesson has guided boards before its quiz, and every hint
+> shows one marked case (`hintCase`). “Which sentence means the same?” now offers only flip and NOT, flip only and NOT
+> only: the four odd-rewrite rows of `samePickItem` below still describe feedback the engine builds and tests (its
+> default), but no quiz, check, Arcade item or new example offers an odd rewrite, because no card or board marks one.
+
 Every Stop 6 item now carries `teach`: the idea in plain words, the IF part and THEN part defined with the rule’s own
 words, what the rule says and the one case that breaks it, and the rows of the four-row truth table told in the
 story’s words (“Rex is not a dog and has four legs.”), with the IF part, the THEN part and the rule marked true or false

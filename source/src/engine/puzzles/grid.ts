@@ -14,9 +14,12 @@
  * choice). Its cases are boxes, lines of the grid, or whole ways to fill it, and every true / false they show is
  * computed from the case by the same brute force (see "teaching after a wrong answer" below).
  */
+import { YES_NO } from '../drill';
 import { gridClueHolds } from '../grade';
 import { syncWhyWrong } from '../teach';
-import type { AssignItem, Choice, ChoiceFeedback, ChooseItem, GridClue, MultiItem, Rng, Scene, Teach, TeachCase, Truth } from '../types';
+import type {
+  AssignItem, Choice, ChoiceFeedback, ChooseItem, DrillMark, DrillOption, DrillRow, DrillStep, GridClue, MultiItem, Rng, Scene, Teach, TeachCase, Truth,
+} from '../types';
 
 const STOP = 4;
 export const CANT = 'cant';
@@ -577,6 +580,8 @@ export interface Basis {
 export interface Bases {
   cases: Basis[];
   examples: Record<string, Basis>;
+  /** The Hint's marked case (Item.hintCase). */
+  hint?: Basis;
 }
 
 /** Every assignment a basis allows. */
@@ -773,6 +778,10 @@ export function gridPuzzle(rng: Rng, o: GridOpts): Built<AssignItem> & { clues: 
   const next = first.why.k === 'clue' ? ticks.find((s) => s.why.k !== 'clue') : undefined;
   const lead = next ? `${tickText(cast, clues, first)} Then ${lowerFirst(tickText(cast, clues, next))}` : tickText(cast, clues, first);
   const { teach, bases } = gridTeach(cast, sol, clues, ticks);
+  // The Hint shows the first mark a clue gives by itself, checked against that clue alone.
+  const s0 = solve.steps.find((s) => s.why.k === 'clue')!;
+  const k0 = s0.why.k === 'clue' ? s0.why.i : 0;
+  const hintCase = teachWords(cast).box(fitting(cast.spec, [clues[k0]]), s0.p, s0.c, s0.v, `Clue ${k0 + 1}: ${clueText(cast, clues[k0])}`);
   const item: AssignItem = {
     kind: 'assign',
     layout: 'grid',
@@ -788,12 +797,13 @@ export function gridPuzzle(rng: Rng, o: GridOpts): Built<AssignItem> & { clues: 
     gridClues: clues,
     explain: `${lead} Keep going the same way until every row has one ✓${o.ncat === 2 ? ' in each part of the grid' : ''}. ${answerText(cast, sol)}`,
     hint: o.ncat === 1
-      ? 'Put in the marks the clues give you. Then look for a row or column with just one empty box.'
-      : 'Put in the marks the clues give you. A linking clue lets you carry a ✓ or ✗ from one part of the grid to the other.',
+      ? 'Here is the first mark a clue gives you. Put in the other clue marks. Then look for a row or column with just one empty box.'
+      : 'Here is the first mark a clue gives you. Put in the other clue marks. A linking clue lets you carry a ✓ or ✗ from one part of the grid to the other.',
+    hintCase,
     seconds: o.ncat === 1 ? 150 : 180,
     teach,
   };
-  return { item, cast, sol, clues, bases: { cases: bases, examples: {} }, steps: ticks.slice(0, 3) };
+  return { item, cast, sol, clues, bases: { cases: bases, examples: {}, hint: { clues: [clues[k0]] } }, steps: ticks.slice(0, 3) };
 }
 
 // ---------- lesson 1: one clue, one box ----------
@@ -928,11 +938,14 @@ export function markPuzzle(rng: Rng, o: MarkOpts): Built<ChooseItem> & { clue: G
       : t === 'isnt'
         ? `The clue says ${w.not(p, c, target.v)}. So ${cell} gets a ✗.`
         : `${P} ${w.cat(c).is} one of the two named in the clue. So ${w.not(p, c, target.v)}, and ${cell} gets a ✗.`;
+    // The Hint shows one box already checked against the clue (never the clue's own box), then the method.
     const hint = t === 'either'
-      ? `The clue names two ${w.cat(c).plural}. What about the third one?`
+      ? `Here is one box, checked against the clue. The clue names two ${w.cat(c).plural}. What about the third one?`
       : t === 'is'
-        ? 'A ✓ goes where the right row meets the right column.'
-        : 'A clue with “not” gives a ✗. Find the box where the right row and column meet.';
+        ? 'Here is one box, checked against the clue. A ✓ goes where the right row meets the right column.'
+        : 'Here is one box, checked against the clue. A clue with “not” gives a ✗ where the right row and column meet.';
+    const hintBox = wrong[0];
+    const hintCase = tw.box(sols, hintBox.p, c, hintBox.v, `One box, checked against the clue: ${w.cell(hintBox.p, hintBox.v, c)}.`);
     const cells = gridOrder(cast, 0, [target, ...wrong]);
     const item: ChooseItem = {
       kind: 'choose',
@@ -947,10 +960,11 @@ export function markPuzzle(rng: Rng, o: MarkOpts): Built<ChooseItem> & { clue: G
       feedback,
       explain,
       hint,
+      hintCase,
       teach,
     };
     syncWhyWrong(item);
-    return { item, cast, sol, clue, ask, target, bases: { cases: caseBoxes.map(() => ({ clues: [clue] })), examples }, kinds };
+    return { item, cast, sol, clue, ask, target, bases: { cases: caseBoxes.map(() => ({ clues: [clue] })), examples, hint: { clues: [clue] } }, kinds };
   }
   throw new Error('markPuzzle: no puzzle found');
 }
@@ -1174,6 +1188,15 @@ export function onlyOnePuzzle(rng: Rng, o: OnlyOpts): Built<ChooseItem> & { mark
         : [`Start with ${P}’s row. Each ✗ there rules out one ${catNoun} for ${P}.`, `If one box is left, the ${catNoun} in its column is the answer.`, 'If two boxes are left, look at the other marks too.', 'If they do not rule out one of the two, you can’t tell yet.'],
     };
     const question = ask === 'col' ? `${cast.skin.who} must ${w.base(c, val)}?` : fill(w.cat(c).ask, { p: P });
+    // The Hint marks one box of the asked line on this grid: a box with a ✗, checked (could: false). It is never the
+    // answer, and every truth it shows holds on the grid the learner is looking at.
+    if (!crossedS.length) throw new Error('onlyOnePuzzle: the asked line has a ✗');
+    const [hq, hx] = boxOf(crossedS[0]);
+    const hintCase: TeachCase = {
+      label: ask === 'col' ? `In this grid, ${nm(hq)}’s box in ${colName} has a ✗.` : `In this grid, ${P}’s box for ${w.obj(c, hx)} has a ✗.`,
+      truths: [tw.could(sols, hq, c, hx)],
+      note: `A ✗ means no. So ${ask === 'col' ? nm(hq) : w.obj(c, hx)} is out.`,
+    };
     const item: ChooseItem = {
       kind: 'choose',
       id: o.id,
@@ -1186,12 +1209,15 @@ export function onlyOnePuzzle(rng: Rng, o: OnlyOpts): Built<ChooseItem> & { mark
       answer,
       feedback,
       explain,
-      hint: ask === 'col' ? `Count the empty boxes in ${colName}.` : `Count the empty boxes in ${P}’s row.`,
+      hint: ask === 'col'
+        ? `Here is one box in ${colName}, checked for you. Now count the empty boxes in ${colName}.`
+        : `Here is one box in ${P}’s row, checked for you. Now count the empty boxes in ${P}’s row.`,
+      hintCase,
       ...(cant ? { conflict: true } : {}),
       teach,
     };
     syncWhyWrong(item);
-    return { item, cast, sol, marks, ask, p: ask === 'row' ? p : holder, val, bases: { cases: [gridBasis, { marks: { c, marks: boundary } }], examples }, kinds, boundary };
+    return { item, cast, sol, marks, ask, p: ask === 'row' ? p : holder, val, bases: { cases: [gridBasis, { marks: { c, marks: boundary } }], examples, hint: gridBasis }, kinds, boundary };
   }
   throw new Error('onlyOnePuzzle: no puzzle found');
 }
@@ -1294,12 +1320,14 @@ export function spreadPuzzle(rng: Rng, o: SpreadOpts): Built<MultiItem> & { mark
       missTips,
       pickTips,
       explain: `${w.is(p, c, val)}. So every other box in ${P}’s row gets a ✗. So does every other box in ${colName}. Here that means ${joinNames(mustLabels)}.`,
-      hint: 'A ✓ tells you about its whole row and its whole column.',
+      // The Hint shows one box outside the ✓'s row and column, checked (it stays empty), then the method.
+      hint: 'Here is one box, checked for you. A ✓ tells you about its whole row and its whole column.',
+      hintCase: teach.cases![2],
       ...(o.column ? { conflict: true } : {}),
       teach,
     };
     const basis: Basis = { marks: { c, marks } };
-    return { item, cast, sol, marks, p, val, bases: { cases: [basis, basis, basis], examples: {} } };
+    return { item, cast, sol, marks, p, val, bases: { cases: [basis, basis, basis], examples: {}, hint: basis } };
   }
   throw new Error('spreadPuzzle: no puzzle found');
 }
@@ -1469,14 +1497,16 @@ export function linkPuzzle(rng: Rng, o: LinkOpts): Built<ChooseItem> & { clues: 
       answer,
       feedback,
       explain,
+      // The Hint shows one person the clues cross out (never the answer), then the method.
       hint: o.mode === 'link'
-        ? `Find ${w.holder(c1, sol[T][c1])} in the grid first.`
-        : `Cross out everyone who can’t ${base2}. Who is left?`,
+        ? `Here is one ${skin.noun}, checked for you. Find ${w.holder(c1, sol[T][c1])} in the grid first.`
+        : `Here is one ${skin.noun}, checked for you. Cross out everyone who can’t ${base2}. Who is left?`,
+      hintCase: personCase(L),
       ...(o.mode === 'notLink' ? { conflict: true } : {}),
       teach,
     };
     syncWhyWrong(item);
-    return { item, cast, sol, clues, c1, c2, val, bases: { cases: ppl.map(() => linkBasis), examples }, kinds };
+    return { item, cast, sol, clues, c1, c2, val, bases: { cases: ppl.map(() => linkBasis), examples, hint: linkBasis }, kinds };
   }
   throw new Error('linkPuzzle: no puzzle found');
 }
@@ -1651,6 +1681,7 @@ export function proofPuzzle(rng: Rng, o: ProofOpts): Built<ChooseItem> & { clues
       ],
     };
     const tempting = clues.some((cl, j) => j !== prover && mentions(cl, null, c, x));
+    const hintAt = shown.find((i) => i !== prover)!;
     const item: ChooseItem = {
       kind: 'choose',
       id: o.id,
@@ -1663,13 +1694,15 @@ export function proofPuzzle(rng: Rng, o: ProofOpts): Built<ChooseItem> & { clues
       answer: `k${prover + 1}`,
       feedback,
       explain,
-      hint: `Test one clue at a time. If it were the only clue, could ${P} still ${w.base(c, x)}?`,
+      // The Hint shows one clue that does not prove it, tested by itself, then the method.
+      hint: `Here is one clue, tested by itself. Test the others the same way: if it were the only clue, could ${P} still ${w.base(c, x)}?`,
+      hintCase: teach.cases![shown.indexOf(hintAt)],
       ...(tempting ? { conflict: true } : {}),
       ...(ncat === 2 ? { seconds: 120 } : {}),
       teach,
     };
     syncWhyWrong(item);
-    return { item, cast, sol, clues, target: cell, bases: { cases: shown.map((i) => ({ clues: [clues[i]] })), examples }, kinds };
+    return { item, cast, sol, clues, target: cell, bases: { cases: shown.map((i) => ({ clues: [clues[i]] })), examples, hint: { clues: [clues[hintAt]] } }, kinds };
   }
   throw new Error('proofPuzzle: no puzzle found');
 }
@@ -1789,13 +1822,355 @@ export function enoughPuzzle(rng: Rng, o: EnoughOpts): Built<ChooseItem> & { clu
       answer: o.tell ? 'yes' : CANT,
       feedback,
       explain,
-      hint: `Use only clues 1 and 2. Could more than one ${cast.skin.noun} still ${base}?`,
+      // The Hint shows one person checked with only clues 1 and 2 (one they cross out when there is one).
+      hint: `Here is one ${cast.skin.noun}, checked with only clues 1 and 2. Could more than one ${cast.skin.noun} still ${base}?`,
+      hintCase: personCase(ppl.find((q) => cellStatus(sols, q, c, val) === 'no') ?? ppl[0]),
       ...(o.tell ? {} : { conflict: true }),
       ...(ncat === 2 ? { seconds: 120 } : {}),
       teach,
     };
     syncWhyWrong(item);
-    return { item, cast, sol, clues, c, val, bases: { cases: ppl.map(() => twoBasis), examples } };
+    return { item, cast, sol, clues, c, val, bases: { cases: ppl.map(() => twoBasis), examples, hint: twoBasis } };
   }
   throw new Error('enoughPuzzle: no puzzle found');
+}
+
+// ---------- the Do beat: guided boards ----------
+//
+// See -> Do -> Quiz (the skill-drill handoff, 2 Oct 2026). An idea card shows one case already marked; a guided board
+// keeps that board up, shows the worked case, and the learner marks a new case by taps. Every answer on a board is
+// computed here: a box's mark from every assignment that fits what the row says (fitting), and the words for each
+// wrong tap from the human-style solver's step for that box (humanSolve), so each reason is one a person with a
+// pencil would give: the clue that says it, the ✓ that spreads to it, the last box left, or the link that carries it.
+
+/** Snacks for the smallest grid: two kids, an apple and bread (the handoff's Mia and Leo). */
+const LUNCH: Cat = {
+  id: 'lunch', label: 'Snack', noun: 'snack', plural: 'snacks',
+  values: [v('apple', 'apple', 'an apple', 'the apple'), v('bread', 'bread', 'bread', 'the bread')],
+  is: 'has', not: 'does not have', base: 'have',
+  each: '{who} each have a different snack', one: '{p} has just one snack', ask: 'Which snack must {p} have?', holder: 'the kid with {v}',
+};
+
+const CARD_CATS = { pet: PET, snack: SNACK, lunch: LUNCH } as const;
+export type CardCat = keyof typeof CARD_CATS;
+
+/** The cast of an idea card: kids in the order given (a card's rows are not sorted) and fixed values. No rng. */
+export function cardCast(names: readonly string[], parts: readonly { cat: CardCat; values: readonly string[] }[]): Cast {
+  const people = names.map((l) => ({ id: l.toLowerCase(), label: l }));
+  const cats = parts.map(({ cat: k, values }) => {
+    const cat = CARD_CATS[k];
+    const vals = values.map((id) => {
+      const x = cat.values.find((y) => y.id === id);
+      if (!x) throw new Error(`cardCast: no ${id} in ${k}`);
+      return x;
+    });
+    if (vals.length !== people.length) throw new Error('cardCast: one value per kid');
+    return { cat, vals };
+  });
+  const names_: Record<string, string> = Object.fromEntries(people.map((p) => [p.id, p.label]));
+  const spec: Spec = { people: people.map((p) => p.id), cats: cats.map((c) => ({ id: c.cat.id, values: c.vals.map((x) => x.id) })) };
+  return { skin: SKINS.kids, people, cats, spec, nm: (id) => names_[id] };
+}
+
+/** A card's grid picture of one part of a cast (same shape as the quiz grids), with an optional caption. */
+export function cardGrid(cast: Cast, part: number, marks: Marks, caption?: string): Scene {
+  const cols = cast.cats[part].vals.map((x) => ({ id: x.id, label: x.label }));
+  return { kind: 'grid', rows: cast.people, cols, marks, ...(caption ? { caption } : {}) };
+}
+
+/** The marks a picture shows, as clues: a ✓ says "has", a ✗ says "does not have". */
+export function marksAsClues(c: string, marks: Marks): GridClue[] {
+  return Object.entries(marks).flatMap(([p, m]) => Object.entries(m).map(([val, mk]): GridClue => (mk === 'yes' ? { t: 'is', p, c, v: val } : { t: 'isnt', p, c, v: val })));
+}
+
+/** What one board row knows: the marks a picture already shows (facts, never numbered) and the clues it names. */
+export interface BoardBasis {
+  /** Marks already drawn, as clues (see marksAsClues). */
+  facts?: GridClue[];
+  /** The clues the row names: “the clue” when there is one, else “clue 1”, “clue 2”, … in this order. */
+  clues?: GridClue[];
+}
+
+/**
+ * A mark a board row asks for. Its label, its options and its answer are all computed. A board never asks the quiz's
+ * own question (“Which pet must Leo have?”, “Who must have the cat?”, “Can you tell yet?”): the learner marks the
+ * boxes, counts, and taps the last box, and the row's note says what that decides (the skill-drill handoff: no
+ * final-answer buttons on a Do board).
+ */
+export type BoardAsk =
+  /** One box: ✓, ✗ or (on a card row) Can’t tell yet. */
+  | { k: 'box'; p: string; c: string; v: string }
+  /** How many boxes in p's row (or in v's column) have no mark drawn yet. */
+  | { k: 'count'; c: string; p?: string; v?: string }
+  /** “Could Leo have the dog?” Yes or No. `later`: clues on the list the row may not use. */
+  | { k: 'could'; p: string; c: string; v: string; later?: GridClue[] }
+  /** “How many kids could have the cat?” 0 up to the number of people. `later`: clues on the list the row may not use. */
+  | { k: 'howMany'; c: string; v: string; later?: GridClue[] };
+
+export interface BoardRowSpec {
+  id: string;
+  label: string;
+  basis: BoardBasis;
+  ask: BoardAsk[];
+  /** The worked case: shown already marked. */
+  given?: boolean;
+  note?: string;
+}
+
+/** The options of a box on a card row: ✓ (Yes), ✗ (No) or Can’t tell yet (the box stays empty). */
+export const BOX_OPTIONS: DrillOption[] = [...YES_NO, { id: CANT, label: 'Can’t tell yet' }];
+
+/**
+ * Everything one row's marks need: every assignment that fits its facts and clues, the solver's steps, and the
+ * words for why a box gets its mark. `grid`: the row sits on a drawn grid, so a reason may say a box “has a ✗”.
+ * `shown`: boxes the board draws already marked (a grid board's given boxes), named as marks in a reason.
+ * `rowsDrawClues`: a card row, whose label adds its “has” and “does not have” clues as marks the learner sees.
+ */
+function boardCtx(cast: Cast, b: BoardBasis, grid: boolean, shown: Marks = {}, rowsDrawClues = false) {
+  const w = wordsFor(cast);
+  const nm = cast.nm;
+  const facts = b.facts ?? [];
+  const clues = b.clues ?? [];
+  /**
+   * A box the learner already sees marked: drawn on the picture (a fact), shown on a grid board, or (on a card row,
+   * where the row's label adds it) set by a “has” or “does not have” clue. A box the learner still has to tap is not.
+   */
+  const seen = (p: string, c: string, v: string) =>
+    shown[p]?.[v] !== undefined
+    || [...facts, ...(rowsDrawClues ? clues : [])].some((f) => (f.t === 'is' || f.t === 'isnt') && f.p === p && f.c === c && f.v === v);
+  if (facts.some((f) => f.t !== 'is' && f.t !== 'isnt')) throw new Error('board: a fact is a drawn mark');
+  const all = [...facts, ...clues];
+  const sols = fitting(cast.spec, all);
+  if (!sols.length) throw new Error('board: no way to fill the grid fits this row');
+  const solve = humanSolve(cast.spec, all);
+  const ppl = cast.spec.people;
+  const vals = (c: string) => cast.spec.cats.find((x) => x.id === c)!.values;
+  const name = (i: number) => (clues.length === 1 ? 'the clue' : `clue ${i + 1}`);
+  const said = (cl: GridClue) => {
+    const t = unstop(clueText(cast, cl));
+    return cl.t === 'link' || cl.t === 'notLink' ? lowerFirst(t) : t;
+  };
+  const status = (p: string, c: string, x: string) => cellStatus(sols, p, c, x);
+  /** The solver's step for a decided box. Every box a board asks about is reached without guessing. */
+  const step = (p: string, c: string, x: string): Step => {
+    const s = solve.at(p, c, x);
+    if (!s || s.mark !== status(p, c, x)) throw new Error(`board: no pencil step for ${w.cell(p, x, c)}`);
+    return s;
+  };
+  /** The ✓ a spread starts from. */
+  const from = (f: Cell): string => {
+    const s = solve.at(f.p, f.c, f.v)!;
+    if ((s.why.k === 'clue' && s.why.i < facts.length) || shown[f.p]?.[f.v] === 'yes') return `${w.cell(f.p, f.v, f.c)} has a ✓.`;
+    if (s.why.k === 'clue') return `${cap(name(s.why.i - facts.length))} says ${w.is(f.p, f.c, f.v)}.`;
+    return `${nm(f.p)} must ${w.base(f.c, f.v)}.`;
+  };
+  /** Why a decided box gets its mark, in a sentence or two (without the “So …” that ends it). */
+  const reason = (s: Step): string => {
+    const why = s.why;
+    if (why.k === 'clue') {
+      if (why.i < facts.length) return `${w.cell(s.p, s.v, s.c)} has a ${s.mark === 'yes' ? '✓' : '✗'}.`;
+      const k = why.i - facts.length;
+      const cl = clues[k];
+      return cl.t === 'either' ? `${cap(name(k))} says ${said(cl)}. It leaves out ${w.obj(s.c, s.v)}.` : `${cap(name(k))} says ${said(cl)}.`;
+    }
+    if (why.k === 'spread') return `${from(why.from)} ${why.along === 'row' ? w.one(s.p, s.c) : w.onlyOne(s.c, s.v)}.`;
+    if (why.k === 'left') {
+      const one = why.along === 'row' ? `${w.one(s.p, s.c)}.` : `One ${cast.skin.noun} ${w.cat(s.c).is} ${w.obj(s.c, s.v)}.`;
+      // “Leo – apple has a ✗” only when the learner sees that ✗; a box still to tap “gets a ✗”.
+      const crossed = (cells: [string, string][]) => {
+        const drawn = cells.every(([q, x]) => seen(q, s.c, x));
+        const verb = cells.length === 1 ? (drawn ? 'has' : 'gets') : drawn ? 'have' : 'get';
+        return `${joinNames(cells.map(([q, x]) => w.cell(q, x, s.c)))} ${verb} a ✗.`;
+      };
+      if (why.along === 'row') {
+        const others = vals(s.c).filter((x) => x !== s.v);
+        return grid
+          ? `${crossed(others.map((x): [string, string] => [s.p, x]))} ${one}`
+          : `${nm(s.p)} can’t ${w.cat(s.c).base} ${joinOr(others.map((x) => w.obj(s.c, x)))}. ${one}`;
+      }
+      const others = ppl.filter((q) => q !== s.p);
+      return grid
+        ? `${crossed(others.map((q): [string, string] => [q, s.v]))} ${one}`
+        : `${joinNames(others.map(nm))} can’t ${w.base(s.c, s.v)}. ${one}`;
+    }
+    if (why.i < facts.length) throw new Error('board: a link is never a drawn mark');
+    const f = why.from;
+    const fm = solve.at(f.p, f.c, f.v)!.mark;
+    return `${cap(name(why.i - facts.length))} says ${said(all[why.i])}. ${cap(fm === 'yes' ? w.is(f.p, f.c, f.v) : w.not(f.p, f.c, f.v))}.`;
+  };
+  /** Words for each wrong mark of one box. `three`: the box also offers Can’t tell yet. */
+  const boxWhy = (p: string, c: string, x: string, three: boolean): Record<string, string> => {
+    const st = status(p, c, x);
+    const cell = w.cell(p, x, c);
+    if (st !== 'open') {
+      const r = reason(step(p, c, x));
+      const mk = st === 'yes' ? 'a ✓' : 'a ✗';
+      return {
+        [st === 'yes' ? 'no' : 'yes']: `${r} So ${cell} gets ${mk}, not ${st === 'yes' ? 'a ✗' : 'a ✓'}.`,
+        ...(three ? { [CANT]: `You can tell. ${r} So ${cell} gets ${mk}.` } : {}),
+      };
+    }
+    if (!three) throw new Error(`board: ${cell} is not decided, so it can’t be a grid box`);
+    const alts = options(sols, p, c, vals(c)).filter((y) => y !== x);
+    const named = clues.findIndex((cl) => cl.t === 'either' && cl.p === p && cl.c === c && (cl.v1 === x || cl.v2 === x));
+    return {
+      yes: `${nm(p)} could ${w.base(c, x)}, but ${nm(p)} could also ${w.base(c, alts[0])}. So ${cell} can’t get a ✓ yet.`,
+      no: named >= 0
+        ? `${cap(name(named))} names ${w.obj(c, x)} as one choice for ${nm(p)}. So ${nm(p)} could ${w.base(c, x)}, and ${cell} stays empty for now.`
+        : `Nothing rules out ${w.obj(c, x)} for ${nm(p)}. ${nm(p)} could ${w.cat(c).base} ${joinOr([x, ...alts].map((y) => w.obj(c, y)))}. So ${cell} stays empty for now.`,
+    };
+  };
+  /** The marks drawn so far in category c: the facts, plus every “has” or “does not have” clue the row names. */
+  const drawn = (c: string): Marks => {
+    const m: Marks = Object.fromEntries(ppl.map((q) => [q, {}]));
+    for (const cl of all) if ((cl.t === 'is' || cl.t === 'isnt') && cl.c === c) m[cl.p][cl.v] = cl.t === 'is' ? 'yes' : 'no';
+    return m;
+  };
+  const clueRef = clues.length === 1 ? 'this clue' : `clues ${joinNames(clues.map((_, i) => String(i + 1)))}`;
+  return { w, nm, sols, status, step, reason, boxWhy, drawn, vals, ppl, said, clues, clueRef };
+}
+
+type BoardCtx = ReturnType<typeof boardCtx>;
+
+/** One asked mark on a card row, with its computed answer and words for every wrong option. */
+function boardMark(cast: Cast, x: BoardCtx, rowId: string, a: BoardAsk, given: boolean): DrillMark {
+  const { w, nm, status } = x;
+  const mark = (id: string, label: string, opts: DrillOption[], answer: string, why: Record<string, string>): DrillMark => {
+    if (!opts.some((o) => o.id === answer)) throw new Error(`board ${id}: the answer is not an option`);
+    for (const o of opts) if (!given && o.id !== answer && !why[o.id]) throw new Error(`board ${id}: no words for a wrong ${o.label}`);
+    const words = given ? {} : Object.fromEntries(opts.filter((o) => o.id !== answer).map((o) => [o.id, why[o.id]]));
+    return { id, label, options: opts, answer, ...(given ? { given: true } : {}), why: words };
+  };
+  switch (a.k) {
+    case 'box': {
+      const st = status(a.p, a.c, a.v);
+      return mark(`${rowId}-${a.p}-${a.v}`, w.cell(a.p, a.v, a.c), BOX_OPTIONS, st === 'open' ? CANT : st, x.boxWhy(a.p, a.c, a.v, true));
+    }
+    case 'count': {
+      const row = a.p !== undefined;
+      const line: [string, string][] = row ? x.vals(a.c).map((y): [string, string] => [a.p!, y]) : x.ppl.map((q): [string, string] => [q, a.v!]);
+      const d = x.drawn(a.c);
+      if (line.some(([q, y]) => d[q][y] === 'yes')) throw new Error('board: a counted line has no ✓ yet');
+      const crossed = line.filter(([q, y]) => d[q][y] === 'no').map(([q, y]) => w.cell(q, y, a.c));
+      const empty = line.filter(([q, y]) => d[q][y] === undefined).map(([q, y]) => w.cell(q, y, a.c));
+      const n = empty.length;
+      const lineName = row ? `${nm(a.p!)}’s row` : `the ${w.val(a.c, a.v!).label} column`;
+      const emptyText = n === 0 ? 'No box is empty' : n === 1 ? `Only ${empty[0]} is empty` : `${joinNames(empty)} are empty`;
+      const crossedText = crossed.length ? `${joinNames(crossed)} ${crossed.length === 1 ? 'has' : 'have'} a ✗. ` : '';
+      const opts = [...line.map((_, i) => String(i)), String(line.length)].map((id) => ({ id, label: id }));
+      const why = Object.fromEntries(opts.map((o) => [o.id, `Count the empty boxes in ${lineName}. ${crossedText}${emptyText}. That makes ${n}, not ${o.id}.`]));
+      return mark(`${rowId}-count`, `Empty boxes in ${lineName}`, opts, String(n), why);
+    }
+    case 'could': {
+      const st = status(a.p, a.c, a.v);
+      const P = nm(a.p);
+      const base = w.base(a.c, a.v);
+      const why: Record<string, string> = {};
+      if (st === 'no') why.yes = `${x.reason(x.step(a.p, a.c, a.v))} So ${P} can’t ${base}.`;
+      else if (st === 'yes') why.no = `${x.reason(x.step(a.p, a.c, a.v))} So ${P} must ${base}.`;
+      else {
+        const can = options(x.sols, a.p, a.c, x.vals(a.c));
+        const lead = x.clues.length === 1 ? `The clue says ${x.said(x.clues[0])}. ` : '';
+        // A later clue on the list may rule it out; the question says not to use it, so name it.
+        const later = a.later ?? [];
+        const k = later.findIndex((_, i) => cellStatus(fitting(cast.spec, [...x.clues, ...later.slice(0, i + 1)]), a.p, a.c, a.v) === 'no');
+        const tail = k >= 0 ? ` Clue ${x.clues.length + k + 1} says ${x.said(later[k])}, but use only ${x.clueRef}.` : '';
+        why.no = `${lead}With only ${x.clueRef}, ${P} could ${w.cat(a.c).base} ${joinOr(can.map((y) => w.obj(a.c, y)))}. So ${P} could still ${base}.${tail}`;
+      }
+      return mark(`${rowId}-could-${a.p}-${a.v}`, `Could ${P} ${base}?`, [...YES_NO], st === 'no' ? 'no' : 'yes', why);
+    }
+    case 'howMany': {
+      const who = holders(x.sols, a.c, a.v, x.ppl);
+      const out = x.ppl.filter((q) => !who.includes(q));
+      const n = who.length;
+      const base = w.base(a.c, a.v);
+      const could = n === 1 ? `only ${nm(who[0])} could ${base}` : `${joinNames(who.map(nm))} could each ${base}`;
+      const cant = out.length ? ` ${joinNames(out.map(nm))} can’t.` : '';
+      // A later clue on the list may change the count; the question says not to use it, so say so on that count.
+      const later = a.later ?? [];
+      const withLater = later.length ? holders(fitting(cast.spec, [...x.clues, ...later]), a.c, a.v, x.ppl).length : n;
+      const opts = Array.from({ length: x.ppl.length + 1 }, (_, i) => ({ id: String(i), label: String(i) }));
+      const why = Object.fromEntries(opts.map((o) => {
+        const laterRef = later.length === 1 ? `Clue ${x.clues.length + 1}` : `Clues ${joinNames(later.map((_, i) => String(x.clues.length + i + 1)))}`;
+        const tail = withLater !== n && Number(o.id) === withLater ? ` ${laterRef} would make it ${o.id}, but use only ${x.clueRef}.` : '';
+        return [o.id, `With only ${x.clueRef}, ${could}.${cant} That makes ${n}, not ${o.id}.${tail}`];
+      }));
+      return mark(`${rowId}-many-${a.v}`, `How many ${plural(cast)} could ${base}?`, opts, String(n), why);
+    }
+  }
+}
+
+export interface CardBoardOptions {
+  id: string;
+  title: string;
+  body: string[];
+  /** The worked example's board: the same scene object as its idea card. */
+  scene?: Scene;
+  twin?: string;
+  rows: BoardRowSpec[];
+  done: string;
+}
+
+/**
+ * A guided board of cards: each row is one case (a clue, a line of the grid, a question), with its marks to tap.
+ * Given rows are the worked case, shown already marked.
+ */
+export function cardBoard(cast: Cast, o: CardBoardOptions): DrillStep {
+  const rows: DrillRow[] = o.rows.map((r) => {
+    const x = boardCtx(cast, r.basis, (r.basis.facts ?? []).length > 0, {}, true);
+    return { id: r.id, label: r.label, marks: r.ask.map((a) => boardMark(cast, x, r.id, a, !!r.given)), ...(r.note ? { note: r.note } : {}) };
+  });
+  return { id: o.id, title: o.title, body: o.body, ...(o.scene ? { scene: o.scene } : {}), ...(o.twin ? { twin: o.twin } : {}), rows, done: o.done };
+}
+
+export interface GridBoardOptions {
+  id: string;
+  title: string;
+  body: string[];
+  /** The other part of the grid, drawn above (a two-part grid). A one-part grid board is the board itself. */
+  scene?: Scene;
+  /** Which part of the cast the boxes are (an index into cast.cats). */
+  part: number;
+  basis: BoardBasis;
+  /** The worked case: boxes shown already marked. Each must be what the facts and clues give. */
+  given: Marks;
+  caption?: string;
+  /** A note under a person's row (shown for a given row, and once the board is right). */
+  notes?: Record<string, string>;
+  done: string;
+}
+
+/**
+ * A guided logic grid (DrillStep.columns): one row per person, one box per value of one part. Every box is decided
+ * by the facts and clues (a grid box is only ✓ or ✗); given boxes are shown, and the learner taps the rest.
+ */
+export function gridBoard(cast: Cast, o: GridBoardOptions): DrillStep {
+  const x = boardCtx(cast, o.basis, true, o.given);
+  const c = cast.cats[o.part].cat.id;
+  const vs = cast.spec.cats[o.part].values;
+  for (const [p, m] of Object.entries(o.given)) {
+    for (const y of Object.keys(m)) if (!cast.spec.people.includes(p) || !vs.includes(y)) throw new Error(`gridBoard ${o.id}: ${p} – ${y} is not a box`);
+  }
+  const rows: DrillRow[] = cast.people.map(({ id: p, label }) => ({
+    id: `${o.id}-${p}`,
+    label,
+    ...(o.notes?.[p] ? { note: o.notes[p] } : {}),
+    marks: vs.map((y): DrillMark => {
+      const st = x.status(p, c, y);
+      if (st === 'open') throw new Error(`gridBoard ${o.id}: ${x.w.cell(p, y, c)} is not decided`);
+      const g = o.given[p]?.[y];
+      if (g !== undefined && g !== st) throw new Error(`gridBoard ${o.id}: the card shows ${g} in ${x.w.cell(p, y, c)}, but the clues give ${st}`);
+      return { id: `${o.id}-${p}-${y}`, label: x.w.val(c, y).label, options: [...YES_NO], answer: st, ...(g ? { given: true } : {}), why: g ? {} : x.boxWhy(p, c, y, false) };
+    }),
+  }));
+  return {
+    id: o.id,
+    title: o.title,
+    body: o.body,
+    ...(o.scene ? { scene: o.scene } : {}),
+    columns: vs.map((y) => x.w.val(c, y).label),
+    ...(o.caption ? { caption: o.caption } : {}),
+    rows,
+    done: o.done,
+  };
 }

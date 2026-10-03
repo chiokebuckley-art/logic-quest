@@ -5,10 +5,12 @@
  * checks the teaching after a wrong answer the same way: every truth on every card is recomputed.
  */
 import { describe, expect, it } from 'vitest';
-import { EXAMPLES, EXAMPLE_RULES, exampleScene, stop2 } from '../../content/stop2';
+import { DRILLS, EXAMPLES, EXAMPLE_RULES, TAUGHT_POOL, TWINS, exampleScene, stop2, untaughtItems } from '../../content/stop2';
 import { explanationFor } from '../../game/explanation';
+import { checkDrill, marksToTap } from '../drill';
 import { freshCheckSet, looks } from '../fresh';
 import { grade } from '../grade';
+import { freshItem } from '../notebook';
 import { READING, fkGrade, longestSentence } from '../readability';
 import { feedbackText, teachStrings } from '../teach';
 import {
@@ -48,7 +50,7 @@ import {
 import type { Card, Formula, Misreading } from '../puzzles/rules';
 import { createRng } from '../rng';
 import type { Rng } from '../rng';
-import type { ChooseItem, Item, TapAllItem, TeachCase, Thing } from '../types';
+import type { ChooseItem, DrillStep, Item, TapAllItem, TeachCase, Thing } from '../types';
 
 const red = colorIs('red'), blue = colorIs('blue'), yellow = colorIs('yellow');
 const big = sizeIs('big'), small = sizeIs('small');
@@ -609,6 +611,12 @@ function everyItem(seeds = 40): Item[] {
 }
 const ITEMS = everyItem();
 
+/**
+ * The families stop 2 does not teach yet (A AND NOT B, and (A OR B) AND NOT C): no lesson, check, Arcade item or new
+ * example uses them, but they stay built for the later lesson that teaches them, so they are still checked here.
+ */
+const LATER = Array.from({ length: 300 }, (_, i) => untaughtItems(createRng(i + 1))).flat();
+
 const FEATURE_WORD = /^(red|blue|yellow|big|small|a circle|a square|a triangle)$/;
 const featureOfWord = (w: string) => ALL_FEATURES.find((f) => (f.kind === 'shape' ? `a ${f.value}` : f.value) === w)!;
 const rightLabel = (it: ChooseItem) => it.choices.find((c) => c.id === it.answer)!.label;
@@ -705,7 +713,8 @@ function mistakeKinds(it: ChooseItem, cid: string): string[] {
     case 's2.same-meaning': {
       const given = ruleIn(it.prompt), w = parse(label);
       if (given.op === 'not' && (given.a.op === 'and' || given.a.op === 'or')) {
-        return [w.op === given.a.op && w.a.op === 'not' && w.b.op === 'not' ? 'keeps-join-inside' : 'not-on-one-part'];
+        if (w.op === 'not' && (w.a.op === 'and' || w.a.op === 'or') && w.a.op !== given.a.op) return ['switches-outside'];
+        return [w.op === given.a.op && w.a.op === 'not' && w.b.op === 'not' ? 'keeps-join-inside' : '?'];
       }
       if (given.op === 'and' || given.op === 'or') return [w.op === 'not' ? 'keeps-join-outside' : 'switches-only'];
       return ['?'];
@@ -1167,8 +1176,9 @@ describe('stop 2 review: the fixes stay fixed', () => {
   });
 
   it('a NOT part in a two-part rule is flipped in words before it is used: “It is small. So “NOT small” is false.”', () => {
+    // A AND NOT B is untaught in stop 2 today (no marked example, no board), so it is checked on the built-for-later items.
     let seen = 0;
-    for (const it of ITEMS) {
+    for (const it of LATER) {
       if (it.kind !== 'tapall' || it.skill !== 's2.and-not') continue;
       const rule = ruleIn(it.prompt);
       if (rule.op !== 'and' || rule.b.op !== 'not') throw new Error(`${it.id}: not A AND NOT B`);
@@ -1206,9 +1216,10 @@ describe('stop 2 review: the fixes stay fixed', () => {
   });
 
   it('brackets first: an answer that is exactly the inside of the brackets is named by the last part it leaves out', () => {
+    // (A OR B) AND NOT C is untaught in stop 2 today (no marked example, no board), so it is checked on the built-for-later items.
     let same = 0;
     const esc = (s: string) => s.replace(/[()]/g, '\\$&');
-    for (const it of ITEMS) {
+    for (const it of LATER) {
       if (it.kind !== 'tapall' || it.skill !== 's2.brackets-first') continue;
       const rule = ruleIn(it.prompt);
       if (rule.op !== 'and') throw new Error(`${it.id}: not ( … ) AND NOT …`);
@@ -1317,6 +1328,494 @@ describe('stop 2 review: the fixes stay fixed', () => {
           expect(text, `${l.id} ${card.title}`).not.toMatch(/\bboth\b(?! parts| checks)/i);
         }
       }
+    }
+  });
+
+  it('the untaught families stay built and sound for a later lesson', () => {
+    expect(new Set(LATER.map((it) => it.skill))).toEqual(new Set(['s2.and-not', 's2.brackets-first']));
+    for (const it of LATER) expect(soundness(it), it.id).toEqual([]);
+  });
+});
+
+// ---------- See -> Do -> Quiz (the skill-drill handoff, 2 Oct 2026) ----------
+//
+// See: a key idea shows one rule on a row of cards, every card already marked. Do: the same cards stay up and the
+// learner taps Fits or Not on each card for a new rule of the same family (Guess the rule: tests a rule, then keeps
+// it or rules it out). Quiz: try 1 is a twin rule on the same cards in a new order; nothing in a quiz, the check, the
+// Arcade, a new example or the notebook uses a rule family its lesson did not teach. Every hint shows a marked card.
+
+/**
+ * Read a rule's words without the rule engine and say whether a card fits: NOT binds tightest, then AND, then OR,
+ * and brackets group. Used to re-solve every mark on the boards from the words the learner sees.
+ */
+function fitsByWords(words: string, c: Card): boolean {
+  const toks = words.replace(/\ba (circle|square|triangle)\b/g, '$1').replace(/\(/g, ' ( ').replace(/\)/g, ' ) ').trim().split(/\s+/);
+  const FEATURES = ['circle', 'square', 'triangle', 'red', 'blue', 'yellow', 'big', 'small'];
+  let i = 0;
+  const atom = (): boolean => {
+    const t = toks[i++];
+    if (t === 'NOT') return !atom();
+    if (t === '(') {
+      const v = anyOf();
+      if (toks[i++] !== ')') throw new Error(`no ) in "${words}"`);
+      return v;
+    }
+    if (!FEATURES.includes(t)) throw new Error(`cannot read "${t}" in "${words}"`);
+    return c.shape === t || c.color === t || c.size === t;
+  };
+  const allOf = (): boolean => {
+    let v = atom();
+    while (toks[i] === 'AND') {
+      i++;
+      const w = atom();
+      v = v && w;
+    }
+    return v;
+  };
+  const anyOf = (): boolean => {
+    let v = allOf();
+    while (toks[i] === 'OR') {
+      i++;
+      const w = allOf();
+      v = v || w;
+    }
+    return v;
+  };
+  const v = anyOf();
+  if (i !== toks.length) throw new Error(`extra words in "${words}"`);
+  return v;
+}
+
+/** A rule and every part inside it, in words: “NOT (blue AND small)”, “blue AND small”, “blue”, “small”. */
+function partsOf(f: Formula): string[] {
+  const kids = f.op === 'is' ? [] : f.op === 'not' ? [f.a] : [f.a, f.b];
+  return [render(f), ...kids.flatMap(partsOf)];
+}
+
+/** The rule a board row is about, read from its label: "Rule: NOT blue" or "Test the rule “big.”" */
+function rowRule(label: string): string {
+  const m = /^Rule: (.+)$/.exec(label) ?? /^Test the rule “(.+?)\.”$/.exec(label);
+  if (!m) throw new Error(`no rule in the row label "${label}"`);
+  return m[1];
+}
+
+/** Every player-facing string of a board. */
+const boardText = (st: DrillStep): string[] => [
+  st.title, ...st.body, st.done, st.twin ?? '',
+  ...st.rows.flatMap((r) => [r.label, r.note ?? '', ...r.marks.flatMap((m) => [m.label, ...Object.values(m.why)])]),
+].filter(Boolean);
+
+/** The rule families a stop 2 rule belongs to. */
+type Family = 'one' | 'not-x' | 'and' | 'or' | 'not-and' | 'not-or' | 'not-and-not' | 'not-or-not' | 'not-one-part' | 'other';
+function familyOf(f: Formula): Family {
+  const lit = (g: Formula) => g.op === 'is';
+  const neg = (g: Formula) => g.op === 'not' && g.a.op === 'is';
+  if (lit(f)) return 'one';
+  if (neg(f)) return 'not-x';
+  if ((f.op === 'and' || f.op === 'or') && lit(f.a) && lit(f.b)) return f.op;
+  if (f.op === 'not' && (f.a.op === 'and' || f.a.op === 'or') && lit(f.a.a) && lit(f.a.b)) return f.a.op === 'and' ? 'not-and' : 'not-or';
+  if ((f.op === 'and' || f.op === 'or') && neg(f.a) && neg(f.b)) return f.op === 'and' ? 'not-and-not' : 'not-or-not';
+  if ((f.op === 'and' || f.op === 'or') && neg(f.a) && lit(f.b)) return 'not-one-part';
+  return 'other';
+}
+
+/** What each lesson teaches with a marked key idea and a board. */
+const TAUGHT: Record<string, Family[]> = {
+  's2.l1': ['not-x'],
+  's2.l2': ['and'],
+  's2.l3': ['or'],
+  's2.l4': ['not-and', 'not-or', 'not-and-not', 'not-or-not'],
+  's2.l5': ['one', 'not-x', 'and', 'or'],
+};
+
+/**
+ * Every rule an item asks the learner to use: the rule in its prompt, or for guess the rule every choice (the secret
+ * rule and the rules to rule out), or for same meaning the question's rule and the right answer.
+ */
+function rulesUsed(it: Item): Formula[] {
+  if (it.kind === 'choose' && it.skill === 's2.guess-rule') return it.choices.map((c) => parse(c.label));
+  if (it.kind === 'choose' && it.skill === 's2.same-meaning') return [ruleIn(it.prompt), parse(rightLabel(it))];
+  return [ruleIn(it.prompt)];
+}
+
+function familyProblems(it: Item, where: string): string[] {
+  const out: string[] = [];
+  if (it.skill === 's2.and-not' || it.skill === 's2.brackets-first') out.push(`${where} ${it.id}: untaught skill ${it.skill}`);
+  for (const f of rulesUsed(it)) if (!TAUGHT[it.lesson].includes(familyOf(f))) out.push(`${where} ${it.id}: “${render(f)}” (${familyOf(f)}) is not taught in ${it.lesson}`);
+  // Same meaning: every choice, wrong ones too, is a form lesson 4 marks on its cards. A NOT on one part only (“NOT a
+  // circle AND yellow”) is A AND NOT B again, a family no lesson teaches, so it is never offered.
+  if (it.kind === 'choose' && it.skill === 's2.same-meaning') {
+    for (const c of it.choices) {
+      const fam = familyOf(parse(c.label));
+      if (!TAUGHT['s2.l4'].includes(fam)) out.push(`${where} ${it.id}: choice “${c.label}” (${fam})`);
+    }
+  }
+  return out;
+}
+
+describe('stop 2: See -> Do -> Quiz (skill-drill handoff)', () => {
+  const E = EXAMPLE_RULES;
+  const deckOfScene = (st: DrillStep) => (st.scene?.kind === 'things' ? st.scene.things : []);
+
+  it('See: every lesson has a key idea with one rule on a row of cards, every card already marked by the engine', () => {
+    for (const l of stop2.lessons) {
+      const marked = l.ideas.filter((c) => c.scene?.kind === 'things' && c.scene.things.length >= 4 && c.scene.things.every((t) => t.mark));
+      expect(marked.length, l.id).toBeGreaterThan(0);
+      expect(l.ideas.length, l.id).toBeGreaterThanOrEqual(3);
+      expect(l.ideas.length, l.id).toBeLessThanOrEqual(6);
+    }
+    // The handoff's See: NOT red, with a blue circle and a yellow square marked in, a red circle out, and the note.
+    const see = stop2.lessons[0].ideas[2];
+    const things = see.scene?.kind === 'things' ? see.scene.things : [];
+    const markOf = (name: string) => things.find((t) => cardName(t) === name)?.mark;
+    expect([markOf('big blue circle'), markOf('small yellow square'), markOf('big red circle')]).toEqual(['yes', 'yes', 'no']);
+    expect(see.body.join(' ')).toContain('NOT red is not “the blue ones.”');
+    for (const t of things) expect(t.mark).toBe(fitsByWords('NOT red', t) ? 'yes' : 'no');
+  });
+
+  it('the key ideas’ new claims are true: NOT on a shape and a size, NOT (red OR big), and the switch', () => {
+    const l1 = stop2.lessons[0], l4 = stop2.lessons[3];
+    expect(l1.ideas[3].scene).toEqual(exampleScene(EXAMPLES.sample, E.notCircle));
+    for (const c of ALL_CARDS) {
+      expect(evaluate(E.notCircle, c)).toBe(c.shape === 'square' || c.shape === 'triangle');
+      expect(evaluate(not(big), c)).toBe(c.size === 'small');
+    }
+    expect(l4.ideas[3].scene).toEqual(exampleScene(EXAMPLES.brackets, E.notRedOrBig));
+    expect(EXAMPLES.brackets.filter((c) => evaluate(E.notRedOrBig, c)).map(cardName)).toEqual(['small yellow circle', 'small blue triangle']);
+    expect(l4.ideas[3].body.join(' ')).toContain('The same two cards fit: the small yellow circle and the small blue triangle.');
+    expect(EXAMPLES.brackets.map((c) => evaluate(E.notRedOrBig, c))).toEqual(EXAMPLES.brackets.map((c) => evaluate(E.notRedAndNotBig, c)));
+    // The switch: NOT red OR NOT big marks the cards as NOT (red AND big) does, and only the big red circle is out.
+    expect(l4.ideas[4].scene).toEqual(l4.ideas[1].scene);
+    expect(EXAMPLES.brackets.filter((c) => !evaluate(E.notRedOrNotBig, c)).map(cardName)).toEqual(['big red circle']);
+    // The OR deck holds the handoff's four sample cards.
+    for (const name of ['big red circle', 'small red square', 'big blue circle', 'small yellow triangle']) expect(EXAMPLES.or.map(cardName)).toContain(name);
+  });
+
+  it('Do: every lesson has boards on a key idea’s own picture, with only Fits / Not (and Keep / Rule out) to tap', () => {
+    for (const l of stop2.lessons) {
+      expect(l.drill, l.id).toBe(DRILLS[l.id]);
+      expect(l.drill!.length, l.id).toBeGreaterThan(0);
+      for (const st of l.drill!) {
+        // The same board: the very picture a key idea shows (its marks are the case already shown).
+        expect(l.ideas.some((c) => c.scene === st.scene), `${st.id} uses a key idea’s picture`).toBe(true);
+        expect(st.twin).toBeUndefined();
+        const deck = deckOfScene(st);
+        expect(deck.length, st.id).toBe(6);
+        for (const r of st.rows) {
+          const cards = r.marks.filter((m) => m.thing);
+          // One mark per card of the picture, in the same order, each drawn beside its name.
+          expect(cards.map((m) => m.label.toLowerCase()), r.id).toEqual(deck.map(cardName));
+          for (const m of cards) expect(cardName(m.thing!), m.id).toBe(m.label.toLowerCase());
+          for (const m of r.marks) expect(m.options.map((o) => o.id).join(), m.id).toMatch(/^(?:fit,not|keep,reject)$/);
+        }
+        // No final-answer question on a board, and tapping nothing (only Next) never passes it.
+        expect(boardText(st).join(' ')).not.toMatch(/\bWhich\b|\bHow many\b/);
+        expect(checkDrill(st, {}).done).toBe(false);
+        expect(marksToTap(st).length, st.id).toBeLessThanOrEqual(12);
+        const right = Object.fromEntries(marksToTap(st).map((m) => [m.id, m.answer]));
+        expect(checkDrill(st, right).done, st.id).toBe(true);
+      }
+    }
+  });
+
+  it('Do: every mark is re-solved from the words on the board, and every machine mark from the picture', () => {
+    let n = 0;
+    for (const l of stop2.lessons) {
+      for (const st of l.drill!) {
+        const deck = deckOfScene(st);
+        for (const r of st.rows) {
+          const words = rowRule(r.label);
+          for (const m of r.marks) {
+            if (m.thing) {
+              const card = parseCard(m.label)!;
+              expect(m.answer, `${m.id} ${words}`).toBe(fitsByWords(words, card) ? 'fit' : 'not');
+              n++;
+            } else {
+              // Keep or rule out: keep only when every card's Fits / Not matches the machine's mark in the picture.
+              const matches = deck.every((t) => fitsByWords(words, t) === (t.mark === 'yes'));
+              expect(m.answer, m.id).toBe(matches ? 'keep' : 'reject');
+            }
+          }
+        }
+      }
+    }
+    // 10 rows of 6 cards: 9 for the learner, and the kept rule shown on Guess the rule's board.
+    expect(n).toBe(6 * 10);
+  });
+
+  it('Do: the boards drill the handoff’s cases (NOT is more than one color, OR keeps a card that fits both parts, brackets change who fits)', () => {
+    const [l1, l2, l3, l4, l5] = stop2.lessons;
+    const answers = (st: DrillStep, k: number) => Object.fromEntries(st.rows[k].marks.filter((m) => m.thing).map((m) => [m.label.toLowerCase(), m.answer]));
+    // NOT: the See card's NOT red stays up; the learner marks NOT blue. More than one other color fits.
+    const notBlue = l1.drill![0];
+    expect(notBlue.scene).toBe(l1.ideas[2].scene);
+    expect(rowRule(notBlue.rows[0].label)).toBe('NOT blue');
+    const fitColors = new Set(notBlue.rows[0].marks.filter((m) => m.answer === 'fit').map((m) => m.thing!.color));
+    expect([...fitColors].sort()).toEqual(['red', 'yellow']);
+    expect(rowRule(l1.drill![1].rows[0].label)).toBe('NOT a square');
+    // AND: red AND big on the red AND a circle cards.
+    expect(rowRule(l2.drill![0].rows[0].label)).toBe('red AND big');
+    expect(Object.entries(answers(l2.drill![0], 0)).filter(([, v]) => v === 'fit').map(([k]) => k)).toEqual(['big red circle', 'big red triangle']);
+    // OR: the handoff's sample taps. Big OR red: Fit on the big red circle, the small red square and the big blue
+    // circle; Not on the small yellow triangle. The big red circle fits even though it is big and red.
+    const or = answers(l3.drill![0], 0);
+    expect(rowRule(l3.drill![0].rows[0].label)).toBe('big OR red');
+    expect([or['big red circle'], or['small red square'], or['big blue circle'], or['small yellow triangle']]).toEqual(['fit', 'fit', 'fit', 'not']);
+    expect(l3.drill![0].done).toContain('The big red circle fits even though it is big and red.');
+    // Brackets: two groupings on one board, and who fits changes.
+    const [withB, withoutB] = [answers(l4.drill![0], 0), answers(l4.drill![0], 1)];
+    const changed = Object.keys(withB).filter((k) => withB[k] !== withoutB[k]);
+    expect(changed).toEqual(['small red square', 'big blue triangle', 'small yellow circle']);
+    expect(l4.drill![0].done).toContain('The small red square, the big blue triangle, and the small yellow circle fit “NOT (blue AND small).”');
+    // NOT (blue OR small) marks the cards as NOT blue AND NOT small does, and the two rules mean the same.
+    expect(answers(l4.drill![1], 0)).toEqual(withoutB);
+    expect(sameMeaning(E.notBlueOrSmall, E.notBlueAndNotSmall)).toBe(true);
+    // The switch: NOT blue OR NOT small, on key idea 5's picture, marks the cards as NOT (blue AND small) does.
+    const sw = l4.drill![2];
+    expect(sw.scene).toBe(l4.ideas[4].scene);
+    expect(rowRule(sw.rows[0].label)).toBe('NOT blue OR NOT small');
+    expect(answers(sw, 0)).toEqual(withB);
+    expect(sw.done).toBe('Right. Only the small blue triangle is left out. “NOT blue OR NOT small” fits the same cards as “NOT (blue AND small).”');
+    // Guess the rule: the kept rule is shown; the learner tests big and rules it out with the small blue circle.
+    const [shown, mine] = l5.drill![0].rows;
+    expect(shown.marks.every((m) => m.given)).toBe(true);
+    expect(shown.marks.at(-1)!.answer).toBe('keep');
+    expect(mine.marks.some((m) => m.given)).toBe(false);
+    expect(mine.marks.at(-1)!.answer).toBe('reject');
+    expect(mine.marks.at(-1)!.why.keep).toBe('The small blue circle got a yes, but it does not fit “big.” One card that does not match is enough to rule it out.');
+    for (const m of mine.marks) if (m.thing) expect(m.thing.mark, m.id).toBeDefined();
+    for (const m of l1.drill![0].rows[0].marks) expect(m.thing!.mark, m.id).toBeUndefined();
+  });
+
+  it('Do: every wrong option names that card and that rule, and every claim in it is true', () => {
+    let n = 0;
+    for (const l of stop2.lessons) {
+      for (const st of l.drill!) {
+        for (const r of st.rows) {
+          const words = rowRule(r.label);
+          const rule = parse(words);
+          for (const m of r.marks) {
+            if (m.given) continue;
+            for (const o of m.options) {
+              if (o.id === m.answer) continue;
+              const why = m.why[o.id];
+              expect(why, `${m.id} ${o.id}`).toBeTruthy();
+              // It names the rule, or the part of it that decides this card.
+              const quoted = [...why.matchAll(/“([^”]+?)[.,]?”/g)].map((q) => render(parse(q[1])));
+              expect(quoted.length, why).toBeGreaterThan(0);
+              for (const q of quoted) expect(partsOf(rule), why).toContain(q);
+              if (m.thing) {
+                expect(why.startsWith(`The ${m.label.toLowerCase()} `), why).toBe(true);
+                for (const cl of claims(why)) expect(fitsByWords(words, cl.card), why).toBe(cl.fits);
+                expect(cardClaimProblems({ id: m.id, skill: 's2.drill' } as Item, { text: why, rule, card: parseCard(m.label), where: m.id }).problems).toEqual([]);
+              } else expect(why).toMatch(/^The (?:big|small) \w+ \w+ got a (?:yes|no), but it/);
+              n++;
+            }
+          }
+        }
+      }
+    }
+    expect(n).toBe(6 * 9 + 1);
+    // The message for one wrong tap, as the board shows it: the first mismatch in plain words.
+    const st = stop2.lessons[2].drill![0];
+    const right = Object.fromEntries(marksToTap(st).map((m) => [m.id, m.answer]));
+    const both = marksToTap(st).find((m) => m.label === 'Big red circle')!;
+    expect(checkDrill(st, { ...right, [both.id]: 'not' }).message).toBe('The big red circle is big, and it is red. Both parts of “big OR red” are true. OR takes a card that fits both parts, so it fits.');
+  });
+
+  it('Do: board text reads at a 6th-grade level, with curly quotes, rules that read back, and “both” always “both parts”', () => {
+    for (const l of stop2.lessons) {
+      const text = l.drill!.flatMap(boardText);
+      expect(fkGrade(text.join('\n')), l.id).toBeLessThanOrEqual(READING.maxGrade);
+      for (const t of text) {
+        expect(longestSentence(t).words, t).toBeLessThanOrEqual(READING.maxSentenceWords);
+        expect(t).not.toMatch(/["']/);
+        expect(t).not.toMatch(/”\./);
+        expect(t).not.toMatch(/the opposite|that row/i);
+        expect(t, t).not.toMatch(/\bboth\b(?! parts)/i);
+        for (const q of t.matchAll(/“([^”]+?)[.,]?”/g)) expect(() => parse(q[1]), t).not.toThrow();
+        // A two-part rule inside a sentence is in quotes (a row label "Rule: …" is not a sentence).
+        if (!t.startsWith('Rule: ')) expect(t.replace(/“.+?”/g, ''), t).not.toMatch(/\b(?:red|blue|yellow|big|small|circle|square|triangle|\)) (?:AND|OR) /);
+      }
+    }
+  });
+
+  it('Quiz try 1: a twin rule of the lesson’s family on the worked example’s six cards, in a new order, in plain cards', () => {
+    const decks = [EXAMPLES.sample, EXAMPLES.and, EXAMPLES.or, EXAMPLES.brackets, EXAMPLES.guess];
+    const shownRules = (l: (typeof stop2.lessons)[number]) => [
+      ...l.ideas.flatMap((c) => (c.scene?.kind === 'things' && c.scene.things.every((t) => t.mark) ? [c.scene.things.map((t) => t.mark === 'yes')] : [])),
+    ];
+    stop2.lessons.forEach((l, k) => {
+      const orders = new Set<string>();
+      const rules = new Set<string>();
+      for (let seed = 1; seed <= 60; seed++) {
+        const first = l.practice(createRng(seed))[0];
+        const cards = first.kind === 'tapall' ? first.things : sceneThings(first);
+        expect(cards.map(cardName).sort(), `${l.id} seed ${seed}`).toEqual(decks[k].map(cardName).sort());
+        expect(cards.map((t) => t.id)).toEqual(['c1', 'c2', 'c3', 'c4', 'c5', 'c6']);
+        expect(skinOf(first), first.id).toBe('card');
+        expect(first.workFirst).toBeUndefined();
+        orders.add(cards.map(cardName).join());
+        const rule = first.kind === 'choose' && first.skill === 's2.guess-rule' ? parse(rightLabel(first)) : ruleIn(first.prompt);
+        rules.add(render(rule));
+        expect(TAUGHT[l.id], `${first.id}: ${render(rule)}`).toContain(familyOf(rule));
+        // Its marks on the deck differ from every rule the key ideas and the boards already marked there.
+        const marks = decks[k].map((c) => evaluate(rule, c));
+        for (const shown of shownRules(l)) expect(marks, `${l.id} ${render(rule)}`).not.toEqual(shown);
+        for (const st of l.drill!) for (const r of st.rows) expect(render(rule)).not.toBe(rowRule(r.label));
+      }
+      expect(orders.size, l.id).toBeGreaterThan(10);
+      expect(rules.size, l.id).toBeGreaterThan(1);
+    });
+    expect(TWINS.not.map((f) => render(f)).sort()).toEqual(['NOT a triangle', 'NOT yellow']);
+    for (const pool of Object.values(TWINS)) expect(pool.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('Quiz: practice, the check, the Arcade, new examples and the notebook use only the families each lesson taught', () => {
+    const problems: string[] = [];
+    let n = 0;
+    const look = (it: Item, where: string) => {
+      problems.push(...familyProblems(it, where));
+      n++;
+    };
+    for (let seed = 1; seed <= 200; seed++) {
+      for (const l of stop2.lessons) {
+        const items = l.practice(createRng(seed));
+        items.forEach((it) => look(it, `practice seed ${seed}`));
+        if (seed <= 25) for (const it of items) freshCheckSet(stop2, it, seed).forEach((x) => look(x, `fresh after ${it.id} seed ${seed}`));
+      }
+      stop2.check!(createRng(seed)).forEach((it) => look(it, `check seed ${seed}`));
+      look(stop2.practice!(createRng(seed)), `arcade seed ${seed}`);
+      look(stop2.practice!(createRng(seed + 1000)), `arcade seed ${seed + 1000}`);
+    }
+    const skills = new Map(stop2.lessons.flatMap((l) => l.practice(createRng(1)).concat(l.practice(createRng(2))).map((it) => [it.skill, it.lesson] as const)));
+    for (const [skill, lesson] of skills) {
+      for (let seed = 1; seed <= 20; seed++) {
+        const it = freshItem(stop2, { skill, stop: 2, lesson, missed: '2026-10-01', fixes: 0, due: '2026-10-01' }, seed);
+        expect(it?.skill, skill).toBe(skill);
+        if (it) look(it, `notebook ${skill} seed ${seed}`);
+      }
+    }
+    expect(problems.slice(0, 10)).toEqual([]);
+    expect(n).toBeGreaterThan(5000);
+    // Guess the rule draws its secret rule and every wrong rule from the taught pool: no NOT inside a two-part rule.
+    expect(TAUGHT_POOL.every((f) => ['one', 'not-x', 'and', 'or'].includes(familyOf(f)))).toBe(true);
+    expect(TAUGHT_POOL.length).toBe(RULE_POOL.filter((f) => ['one', 'not-x', 'and', 'or'].includes(familyOf(f))).length);
+    expect(RULE_POOL.some((f) => familyOf(f) === 'not-one-part' || (f.op === 'and' && f.b.op === 'not'))).toBe(true);
+    // The words-only items come last in their packs, after the pictures.
+    for (let seed = 1; seed <= 20; seed++) {
+      expect(stop2.lessons[0].practice(createRng(seed)).at(-1)!.skill).toBe('s2.not-means');
+      expect(stop2.lessons[3].practice(createRng(seed)).at(-1)!.skill).toBe('s2.same-meaning');
+    }
+  });
+
+  it('makeRuleGuess takes its wrong rules from the pool it is given, and a fixed deck in a new order', () => {
+    for (let seed = 1; seed <= 200; seed++) {
+      const g = makeRuleGuess(createRng(seed), TAUGHT_POOL, { distractors: 2, minCards: 6, maxCards: 9, pool: TAUGHT_POOL });
+      for (const d of g.distractors) expect(TAUGHT_POOL.some((f) => render(f) === render(d))).toBe(true);
+      const fixed = makeRuleGuess(createRng(seed), TWINS.guess, { distractors: 2, minCards: 6, maxCards: 6, pool: TAUGHT_POOL, deck: EXAMPLES.guess });
+      expect(fixed.things.map(cardName).sort()).toEqual(EXAMPLES.guess.map(cardName).sort());
+      expect(fixed.things.every((t) => t.mark === (evaluate(fixed.target, t) ? 'yes' : 'no'))).toBe(true);
+    }
+  });
+
+  it('every hint shows one card already worked through, re-checked from its words, and it is never the answer', () => {
+    let n = 0;
+    for (let seed = 1; seed <= 60; seed++) {
+      const items = [...stop2.lessons.flatMap((l) => l.practice(createRng(seed))), ...stop2.check!(createRng(seed)), stop2.practice!(createRng(seed))];
+      for (const it of items) {
+        expect(it.hint, it.id).toBeTruthy();
+        const hc = it.hintCase!;
+        expect(hc, `${it.id}: the hint shows a marked case`).toBeDefined();
+        expect(hc.truths!.length, it.id).toBeGreaterThanOrEqual(2);
+        expect(hc.note, it.id).toBeTruthy();
+        expect(caseProblems(it, hc, 'hint')).toEqual([]);
+        expect(it.hint, it.id).toMatch(/Here is (?:one|a different) \w+, checked for you\.$/);
+        for (const t of [hc.label, hc.note ?? '', ...hc.truths!.map((x) => x.who)]) {
+          expect(t).not.toMatch(/["']/);
+          expect(t).not.toMatch(/”\./);
+        }
+        const card = cardOfLabel(hc.label)!;
+        const scene = it.kind === 'tapall' ? it.things : sceneThings(it);
+        switch (it.skill) {
+          case 's2.guess-rule': {
+            // A card that rules out a wrong choice: its mark and that rule disagree.
+            if (it.kind !== 'choose') throw new Error('guess is a choose item');
+            const fits = /^It fits “(.+)”$/.exec(hc.truths![1].who)![1];
+            expect(fits).not.toBe(rightLabel(it));
+            expect(it.choices.map((c) => c.label)).toContain(fits);
+            expect(hc.truths![0].value).not.toBe(hc.truths![1].value);
+            break;
+          }
+          case 's2.same-meaning':
+            // The question's rule is marked; no choice is.
+            expect(hc.truths!.some((t) => /your answer|right answer/.test(t.who)), it.id).toBe(false);
+            break;
+          case 's2.or-yesno': case 's2.bracket-yesno':
+            expect(cardName(card), it.id).not.toBe(cardName(scene[0]));
+            break;
+          case 's2.and-pick': case 's2.or-pick':
+            if (it.kind !== 'choose') throw new Error('pick is a choose item');
+            expect(cardName(card), it.id).not.toBe(rightLabel(it).toLowerCase());
+            expect(scene.some((t) => cardName(t) === cardName(card)), it.id).toBe(true);
+            break;
+          default: {
+            // Tap-all, count and NOT-groups items: a card the rule leaves out, so the hint hands over none of the answer.
+            const rule = ruleIn(it.prompt);
+            expect(evaluate(rule, card), `${it.id} ${hc.label}`).toBe(false);
+            if (scene.length) expect(scene.some((t) => cardName(t) === cardName(card)), it.id).toBe(true);
+          }
+        }
+        n++;
+      }
+    }
+    expect(n).toBeGreaterThan(1000);
+  });
+
+  it('a new example after a miss is never try 1’s twin again: a new deck or a new rule machine of the same family', () => {
+    const decks = new Set(Object.values(EXAMPLES).map((d) => d.map(cardName).sort().join()));
+    const onSeeDeck = (it: Item) => {
+      const cards = it.kind === 'tapall' ? it.things : sceneThings(it);
+      return cards.length === 6 && decks.has(cards.map(cardName).sort().join());
+    };
+    let n = 0, twins = 0;
+    for (let seed = 1; seed <= 40; seed++) {
+      for (const l of stop2.lessons) {
+        l.practice(createRng(seed)).forEach((it, i) => {
+          if (onSeeDeck(it)) twins++;
+          // The seed the lesson gives a new example: the lesson's seed, the try, and the round (LessonRunner, LearnItem).
+          const set = freshCheckSet(stop2, it, seed + (i + 1) * 7 + 15485863, [], 1);
+          expect(set[0].skill, it.id).toBe(it.skill);
+          for (const x of set) expect(onSeeDeck(x), `${it.id} -> ${x.prompt}`).toBe(false);
+          n += set.length;
+        });
+      }
+    }
+    expect(twins).toBe(40 * 5);
+    expect(n).toBeGreaterThan(800);
+  });
+
+  it('same meaning: the wrong choices are the switch without the move, and the move without the switch', () => {
+    let n = 0;
+    for (const it of ITEMS) {
+      if (it.kind !== 'choose' || it.skill !== 's2.same-meaning') continue;
+      const given = ruleIn(it.prompt);
+      const wrong = it.choices.filter((c) => c.id !== it.answer).map((c) => parse(c.label));
+      expect(wrong.length, it.id).toBe(2);
+      // One NOT ( … ) with the other joining word inside, and one rule with a NOT on each part.
+      expect(wrong.filter((f) => f.op === 'not').length, it.id).toBe(1);
+      expect(wrong.filter((f) => familyOf(f) === 'not-and-not' || familyOf(f) === 'not-or-not').length, it.id).toBe(1);
+      for (const f of wrong) expect(sameMeaning(f, given), `${it.id} ${render(f)}`).toBe(false);
+      n++;
+    }
+    expect(n).toBeGreaterThan(50);
+  });
+
+  it('pass: the boards first (marked by taps), then the default rule, 3 right on the first try with no hint', () => {
+    for (const l of stop2.lessons) {
+      expect(l.pass, l.id).toBeUndefined();
+      expect(l.drill!.length, l.id).toBeGreaterThan(0);
+      for (const it of l.practice(createRng(1))) expect(it.tags, it.id).toBeUndefined();
     }
   });
 });

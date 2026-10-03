@@ -4,6 +4,7 @@
  * any Pattern Lab preview events.
  */
 import { MAX_NOT_YETS_PER_DAY, viewStop, type CheckKind } from '../../engine/journey/mastery';
+import { lessonWaitsFor } from '../../engine/drill';
 import { canFix } from '../../engine/notebook';
 import { STOPS, stopById } from '../../content/stops';
 import { DESTINATIONS } from '../pattern/bridges';
@@ -95,22 +96,24 @@ export function StopScreen({ route }: { route: Extract<Route, { name: 'stop' }> 
           const isNext = action?.name === 'lesson' && action.lessonId === lesson.id;
           const resuming = isNext && run?.lessonId === lesson.id;
           const tries = lesson.ideas.length;
+          const waits = lessonWaitsFor(stop, lesson.id, done, save.drilled ?? []);
           let meta: { text: string; tone: string } = { text: '', tone: 'muted' };
           if (isNext) meta = { text: resuming ? 'Resume ▸' : redo ? 'Redo ▸' : 'Start ▸', tone: redo ? 'orange' : 'gold' };
           else if (redo) meta = { text: 'redo', tone: 'orange' };
           else if (isDone) meta = { text: 'done', tone: 'mint' };
           else if (k === lessonsDone) meta = { text: 'next', tone: 'muted' };
+          if (waits && !isNext) meta = { text: 'after Lesson ' + k, tone: 'muted' };
           return (
             <Row
               key={lesson.id}
               lead={<KindTag kind="learn" />}
               title={`Lesson ${k + 1} · ${lesson.title}`}
-              sub={`${tries} key ${tries === 1 ? 'idea' : 'ideas'} + tries${resuming ? ' · partway' : ''}`}
+              sub={waits ? `Opens when you have done Lesson ${k}` : `${tries} key ${tries === 1 ? 'idea' : 'ideas'}${lesson.drill?.length ? ' + you do it' : ''} + tries${resuming ? ' · partway' : ''}`}
               meta={meta.text}
               metaTone={meta.tone}
               tone={isNext ? (redo ? 'orange' : 'current') : undefined}
               current={isNext}
-              onClick={() => actions.navigate({ name: 'lesson', stopId: stop.id, lessonId: lesson.id, from: 'stop' })}
+              onClick={waits ? undefined : () => actions.navigate({ name: 'lesson', stopId: stop.id, lessonId: lesson.id, from: 'stop' })}
             />
           );
         })}

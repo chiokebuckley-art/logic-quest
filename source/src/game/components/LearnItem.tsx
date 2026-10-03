@@ -27,6 +27,8 @@ export interface LearnItemProps {
   nextLabel?: string;
   autoFocus?: boolean;
   onDone(record: AnswerRecord): void;
+  /** The item's first answer was wrong (it is not finished yet). */
+  onMiss?(): void;
   /** For tests: the new examples to use instead of the engine's. */
   freshFor?(round: number, avoid: readonly Item[]): Item[];
 }
@@ -35,7 +37,7 @@ type Step = { at: 'first' } | { at: 'fresh'; round: number; set: Item[]; i: numb
 
 const MODE: ItemMode = 'learn';
 
-export function LearnItem({ stop, item, seed, readAloud, kicker, nextLabel = 'Next', autoFocus = true, onDone, freshFor }: LearnItemProps) {
+export function LearnItem({ stop, item, seed, readAloud, kicker, nextLabel = 'Next', autoFocus = true, onDone, onMiss, freshFor }: LearnItemProps) {
   const [step, setStep] = useState<Step>({ at: 'first' });
   const first = useRef<AnswerRecord | null>(null);
   const shown = useRef<Item[]>([]);
@@ -107,6 +109,7 @@ export function LearnItem({ stop, item, seed, readAloud, kicker, nextLabel = 'Ne
         nextLabel={nextLabel}
         afterHelpLabel="Try a new example"
         autoFocus={autoFocus}
+        onMiss={onMiss}
         onDone={afterFirst}
       />
     ),

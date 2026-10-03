@@ -9,12 +9,14 @@
  *  - notItem(): "pick the NOT". The right choice is checked to equal NOT(statement) on every test row, and
  *    each wrong choice is checked to agree with the statement on some row. That row becomes the labelled
  *    example in the choice's feedback, and the item teaches with cases that cover every way it can go.
+ *  - verdictDrillRow() / notDrillRow(): rows of the guided boards (the Do beat) for lessons 2 and 3. Every mark and
+ *    every message for a wrong mark is computed here, from judge(), holds() and isExactOpposite().
  *
  * Only the rng passed in is used for variety. The fixed test rows come from their own fixed seed.
  */
 import { createRng } from '../rng';
 import { syncWhyWrong } from '../teach';
-import type { Choice, ChoiceFeedback, ChooseItem, Color, Rng, Shape, Size, Teach, TeachCase, Thing, Truth } from '../types';
+import type { Choice, ChoiceFeedback, ChooseItem, Color, DrillMark, DrillOption, DrillRow, Rng, Shape, Size, Teach, TeachCase, Thing, Truth } from '../types';
 
 export const COLORS: readonly Color[] = ['red', 'blue', 'yellow'];
 export const SHAPES: readonly Shape[] = ['circle', 'square', 'triangle'];
@@ -263,11 +265,11 @@ export function randomRow(rng: Rng): Thing[] {
 }
 
 export type RowTemplate =
-  | 'hasColor' | 'hasExact' | 'allShape' | 'allColorShape' | 'noColor'
+  | 'hasColor' | 'hasShape' | 'hasExact' | 'allColor' | 'allShape' | 'allColorShape' | 'noColor'
   | 'exactlyColor' | 'atLeastShape' | 'moreColor' | 'firstShape' | 'allBigColor';
 
 export const ROW_TEMPLATES: readonly RowTemplate[] = [
-  'hasColor', 'hasExact', 'allShape', 'allColorShape', 'noColor',
+  'hasColor', 'hasShape', 'hasExact', 'allColor', 'allShape', 'allColorShape', 'noColor',
   'exactlyColor', 'atLeastShape', 'moreColor', 'firstShape', 'allBigColor',
 ];
 
@@ -277,10 +279,12 @@ export function rowStatement(rng: Rng, tpl: RowTemplate, row: readonly Thing[]):
   if (!vis.length) return null;
   switch (tpl) {
     case 'hasColor': return { t: 'some', d: { color: rng.pick(COLORS) } };
+    case 'hasShape': return { t: 'some', d: { shape: rng.pick(SHAPES) } };
     case 'hasExact': {
       const c = rng.chance(0.5) ? rng.pick(vis) : rng.pick(KINDS);
       return { t: 'some', d: { size: c.size, color: c.color, shape: c.shape } };
     }
+    case 'allColor': return { t: 'every', d: { color: rng.chance(0.6) ? rng.pick(vis).color : rng.pick(COLORS) } };
     case 'allShape': return { t: 'every', d: { shape: rng.chance(0.6) ? rng.pick(vis).shape : rng.pick(SHAPES) } };
     case 'allColorShape': {
       // The color comes from a card you can see, so "every red card" is never about zero cards.
@@ -954,14 +958,19 @@ export interface RowItemOptions {
   target?: Verdict;
   /** Ask for a "can't tell" item where the cards you can see make true or false look obvious. */
   conflict?: boolean;
+  /** The kinds of sentence to ask about (default: every template). A lesson passes only the kinds it taught. */
+  templates?: readonly RowTemplate[];
 }
+
+/** The hint for a row item: one way to fill the face-down cards, already checked (its case card shows it). */
+export const ROW_HINT = 'Here is one way the face-down cards could be, already checked. Could another way change the answer?';
 
 /** A "true, false or can't tell" item about a row of cards with some face down. */
 export function rowItem(rng: Rng, opts: RowItemOptions): Made {
   for (let attempt = 0; attempt < 6000; attempt++) {
     const strict = attempt < 5000;
     const row = randomRow(rng);
-    const s = rowStatement(rng, rng.pick(ROW_TEMPLATES), row);
+    const s = rowStatement(rng, rng.pick(opts.templates ?? ROW_TEMPLATES), row);
     if (!s) continue;
     const { hidden, table } = truthTable(s, row);
     const verdict = verdictOf(table);
@@ -987,6 +996,10 @@ export function rowItem(rng: Rng, opts: RowItemOptions): Made {
     }
     const { prompt, whose } = rowPrompt(rng, opts.frame, text);
     const { teach, feedback } = rowTeach(s, row, verdict, whose, looks, cant, reason);
+    const cases = teach.cases!;
+    // The hint draws one filling already checked. Can't tell: the filling that goes against what the visible cards
+    // suggest. Settled: the filling that agrees most easily (the explanation keeps the one that tries to flip it).
+    const hintCase = verdict === 'cant' ? cases[looks === true ? 1 : 0] : cases.find((c) => c !== feedback[verdict === 'true' ? 'false' : 'true'].example)!;
     const item: ItemCore = {
       kind: 'choose',
       prompt,
@@ -995,7 +1008,8 @@ export function rowItem(rng: Rng, opts: RowItemOptions): Made {
       answer: verdict,
       explain,
       feedback,
-      hint: 'Think about each face-down card. Could it change the answer?',
+      hint: ROW_HINT,
+      hintCase,
       teach,
     };
     syncWhyWrong(item);
@@ -1662,6 +1676,14 @@ export function notItem(rng: Rng, opts: NotItemOptions): Made {
   if (new Set(ids).size !== ids.length) throw new Error(`notItem ${key}: two choices share an id`);
   const choices = options.map((s) => ({ id: stmtId(s), label: say(s, n) }));
   const caseFeats = featuresOf(c.s, c.right);
+  const cases = caseRows.map((cr) =>
+    rowCase(cr.row, caseFeats, n, ordered, [
+      { who: Whose, value: holds(c.s, cr.row) },
+      { who: 'The NOT answer', value: holds(c.right, cr.row) },
+    ], cr.note),
+  );
+  // The hint draws one row already checked: the row where the classic mistake agrees with the statement.
+  const hintAt = caseRows.findIndex((cr) => holds(c.s, cr.row) === holds(c.wrongs[0].s, cr.row));
   const item: ItemCore = {
     kind: 'choose',
     prompt,
@@ -1670,18 +1692,14 @@ export function notItem(rng: Rng, opts: NotItemOptions): Made {
     answer: stmtId(c.right),
     explain: c.explain(t),
     feedback,
-    hint: `The NOT must be true every time “${t.S}” is false, and false every time it is true.`,
+    hint: `Here is one row, already checked. The NOT must be true every time “${t.S}” is false, and false every time it is true.`,
+    hintCase: cases[hintAt >= 0 ? hintAt : 0],
     teach: {
       rule: NOT_RULE,
       terms: c.terms(t),
       meaning: c.meaning(t),
       casesTitle: `When is ${whose} true, and when is it false?`,
-      cases: caseRows.map((cr) =>
-        rowCase(cr.row, caseFeats, n, ordered, [
-          { who: Whose, value: holds(c.s, cr.row) },
-          { who: 'The NOT answer', value: holds(c.right, cr.row) },
-        ], cr.note),
-      ),
+      cases,
       remember: [c.remember(t), NOT_ASK],
       simpler: c.simpler(t),
     },
@@ -1690,4 +1708,130 @@ export function notItem(rng: Rng, opts: NotItemOptions): Made {
   if (c.conflict) item.conflict = true;
   const wrongs = options.filter((s) => stmtId(s) !== item.answer);
   return { tag: c.tag, item, flip: { s: c.s, right: c.right, wrongs, noun: n, examples: wrongs.map((s) => examples[kept.findIndex((w) => w.s === s)]), cases: caseRows.map((cr) => cr.row) } };
+}
+
+// ---------- the Do step: marks on a picture ----------
+//
+// Guided boards for lessons 2 and 3. Every right mark is computed here (judge() for a row with face-down cards,
+// holds() for face-up cards, isExactOpposite() for a NOT), and every message for a wrong mark names what the
+// sentence says and what the cards show.
+
+const TF: DrillOption[] = [{ id: 'true', label: 'True' }, { id: 'false', label: 'False' }];
+const tv = (v: boolean) => (v ? 'true' : 'false');
+const lc = (x: string) => x.charAt(0).toLowerCase() + x.slice(1);
+
+/**
+ * A fact about face-up cards that shows whether the statement is true there, naming a card or a count:
+ * "Card 2 is small, not big." / "There are 3 red cards."
+ */
+export function cardFact(s: Stmt, cards: readonly Card[]): string {
+  const v = holds(s, cards);
+  const at = (test: (c: Card) => boolean) => cards.findIndex(test);
+  const notIt = (d: Desc) => {
+    const i = at((c) => !fits(c, d));
+    return `Card ${i + 1} is ${adj(restrict(cards[i], d))}, not ${adj(d)}.`;
+  };
+  const num = (n: number) => (n === 0 ? 'no' : String(n));
+  switch (s.t) {
+    case 'every': return v ? `Every card is ${adj(s.d)}.` : notIt(s.d);
+    case 'someNot': return v ? notIt(s.d) : `Every card is ${adj(s.d)}.`;
+    case 'some': case 'none': {
+      const i = at((c) => fits(c, s.d));
+      return i >= 0 ? `Card ${i + 1} is ${adj(s.d)}.` : `No card is ${adj(s.d)}.`;
+    }
+    case 'count': {
+      const n = countOf(cards, s.d, !!s.not);
+      if (s.not) return `There ${n === 1 ? 'is 1 card that is' : `are ${num(n)} cards that are`} not ${adj(s.d, n !== 1)}.`;
+      return `There ${n === 1 ? 'is' : 'are'} ${num(n)} ${np(s.d, n !== 1)}.`;
+    }
+    case 'more': case 'asMany': {
+      const na = countOf(cards, s.a), nb = countOf(cards, s.b);
+      const t = `There ${na === 1 ? 'is' : 'are'} ${num(na)} ${np(s.a, na !== 1)} and ${num(nb)} ${np(s.b, nb !== 1)}.`;
+      return na === nb ? `${t} That is a tie.` : t;
+    }
+    default: throw new Error(`cardFact: no fact for “${say(s)}”`);
+  }
+}
+
+/**
+ * Lesson 2's Do: one sentence about a row of cards (some face down), marked True, False or Can't tell. The right
+ * mark is judge() over every way to fill the face-down cards. A wrong mark is answered with the card that settles
+ * it, or with the face-down card that could make it go the other way.
+ */
+export function verdictDrillRow(s: Stmt, row: readonly Thing[], o: { id: string; given?: boolean }): DrillRow {
+  const { hidden, table } = truthTable(s, row);
+  const verdict = verdictOf(table);
+  const S = `“${bare(s)}”`;
+  let why: Record<string, string>;
+  let note: string;
+  if (verdict === 'cant') {
+    const looks = holds(s, row.filter((t) => !t.hidden));
+    const cant = cantTellCases(hidden, table, !looks);
+    if (!cant) throw new Error(`verdictDrillRow: no reason why “${say(s)}” can’t be told`);
+    why = {
+      true: `${cant.whenFalse} So ${S} might be false. You can’t tell yet.`,
+      false: `${cant.whenTrue} So ${S} might be true. You can’t tell yet.`,
+    };
+    note = cant.explain;
+  } else {
+    const v = verdict === 'true';
+    const reason = settledReason(s, row, v);
+    if (!reason) throw new Error(`verdictDrillRow: no card you can see settles “${say(s)}”`);
+    const down = hidden.length === 1 ? 'The face-down card' : 'The face-down cards';
+    why = {
+      [tv(!v)]: `${reason} So ${S} is ${verdict}.`,
+      cant: `${reason} ${down} can’t change that. So ${S} is ${verdict}, not “Can’t tell.”`,
+    };
+    note = `${reason} So it is ${verdict}, no matter what is face down.`;
+  }
+  const mark: DrillMark = { id: `${o.id}-v`, label: 'True, false or can’t tell?', options: VERDICT_CHOICES.map((c) => ({ ...c })), answer: verdict, why };
+  if (o.given) mark.given = true;
+  return { id: o.id, label: `“${say(s)}”`, marks: [mark], note };
+}
+
+export interface NotDrillOptions {
+  id: string;
+  /** The statement. */
+  s: Stmt;
+  /** Its NOT: checked to be true exactly when the statement is false, on every test row. */
+  right: Stmt;
+  /** Wrong NOTs. On these cards each one agrees with the statement, so the board itself shows it is wrong. */
+  wrongs: Stmt[];
+  /** The face-up cards on the board. */
+  cards: readonly Card[];
+  given?: boolean;
+}
+
+/**
+ * Lesson 3's Do: a statement on a picture. Pick its NOT, then mark the statement and its NOT true or false on these
+ * cards. A statement and its NOT never agree; each wrong NOT agrees with the statement here, and its message shows it.
+ */
+export function notDrillRow(o: NotDrillOptions): DrillRow {
+  if (!isExactOpposite(o.s, o.right)) throw new Error(`notDrillRow: “${say(o.right)}” is not the NOT of “${say(o.s)}”`);
+  const v = holds(o.s, o.cards);
+  for (const w of o.wrongs) {
+    if (isExactOpposite(o.s, w) || holds(w, o.cards) !== v) throw new Error(`notDrillRow: these cards do not show that “${say(w)}” is not the NOT`);
+  }
+  const S = `“${bare(o.s)}”`;
+  const fact = cardFact(o.s, o.cards);
+  // In word order, so where the right NOT sits does not give it away.
+  const options = [o.right, ...o.wrongs].map((x) => ({ id: stmtId(x), label: say(x) })).sort((a, b) => a.label.localeCompare(b.label));
+  const given = o.given ? { given: true } : {};
+  const marks: DrillMark[] = [
+    {
+      id: `${o.id}-not`,
+      label: 'Its NOT',
+      options,
+      answer: stmtId(o.right),
+      ...given,
+      why: Object.fromEntries(o.wrongs.map((w) => [
+        stmtId(w),
+        `${S} is ${tv(v)} here: ${lc(fact)} “${bare(w)}” is ${tv(v)} here too: ${lc(cardFact(w, o.cards))} A statement and its NOT never agree.`,
+      ])),
+    },
+    { id: `${o.id}-s`, label: 'This sentence, on these cards', options: TF, answer: tv(v), ...given, why: { [tv(!v)]: `${fact} So ${S} is ${tv(v)} on these cards.` } },
+    { id: `${o.id}-n`, label: 'Its NOT, on these cards', options: TF, answer: tv(!v), ...given, why: { [tv(v)]: `${S} is ${tv(v)} here, so its NOT must be ${tv(!v)}. ${cardFact(o.right, o.cards)}` } },
+  ];
+  const traps = o.wrongs.map((w) => `“${bare(w)}” is ${tv(v)} here too, so it is not the NOT.`);
+  return { id: o.id, label: `“${say(o.s)}”`, marks, note: [fact, `So ${S} is ${tv(v)} here, and its NOT is ${tv(!v)}.`, ...traps].join(' ') };
 }

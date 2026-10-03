@@ -66,14 +66,18 @@ export function fixableCards(nb: Notebook, day: string, stops: readonly StopDef[
 
 /**
  * A fresh question on the card's skill: drawn from that lesson's practice sets (trying new seeds until the
- * skill matches), else any item from that lesson, else any item from the stop.
+ * skill matches), else any item from that lesson, else any item from the stop. A lesson's scaffolded first quiz
+ * (workFirst) or fixed item (the same board every time) is never used: a repair needs a new question.
  */
 export function freshItem(stop: StopDef, card: NoteCard, seed: number): Item | null {
   const lesson = stop.lessons.find((l) => l.id === card.lesson);
   let fallback: Item | null = null;
   if (lesson) {
     for (let i = 0; i < 60; i++) {
-      const items = lesson.practice(createRng(seed + i * 7919));
+      const pack = lesson.practice(createRng(seed + i * 7919)).filter((it) => !it.workFirst && !it.fixed);
+      // Start at a different place in each pack, so repairs vary.
+      const turn = pack.length ? (seed + i) % pack.length : 0;
+      const items = [...pack.slice(turn), ...pack.slice(0, turn)];
       const hit = items.find((it) => it.skill === card.skill);
       if (hit) return hit;
       fallback ??= items[0] ?? null;

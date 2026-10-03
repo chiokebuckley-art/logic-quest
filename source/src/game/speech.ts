@@ -167,12 +167,16 @@ export function sceneSpeech(scene: Scene): string[] {
         ...scene.boxes.map((b) => `${b.name} sign: ${asSentence(b.sign)}`),
       ];
     case 'clues':
-      return scene.clues.map((c, i) => `Clue ${i + 1}: ${asSentence(c)}`);
+      return [
+        ...scene.clues.map((c, i) => `Clue ${i + 1}: ${asSentence(c)}${scene.marks?.[i] ? ` ${scene.marks[i] === 'ok' ? 'It holds.' : 'It is broken.'}` : ''}`),
+        ...(scene.line ? [`The line, ${scene.line.first.toLowerCase()} to ${scene.line.last.toLowerCase()}: ${scene.line.names.join(', ')}.`] : []),
+      ];
     case 'text':
       return scene.lines.map(asSentence);
     case 'speakers':
       return [
         ...(scene.rule ? [asSentence(scene.rule)] : []),
+        ...(scene.fact ? [`What is true: ${asSentence(scene.fact)}`] : []),
         ...scene.speakers.map((sp) => (sp.says.trim() ? `${sp.name} says: ${asSentence(sp.says)}` : `${sp.name} says nothing.`)),
       ];
     case 'grid': {
@@ -180,7 +184,7 @@ export function sceneSpeech(scene: Scene): string[] {
       const word = (m: 'yes' | 'no' | undefined) => m ?? 'blank';
       return [
         ...(scene.caption ? [asSentence(scene.caption)] : []),
-        ...scene.rows.map((r) => `${r.label}: ${scene.cols.map((c) => `${c.label}: ${word(scene.marks[r.id]?.[c.id])}`).join('; ')}.`),
+        ...scene.rows.map((r) => `${r.label}: ${scene.cols.map((c) => `${c.label}: ${word(scene.marks[r.id]?.[c.id])}${scene.labels?.[r.id]?.[c.id] ? `, ${scene.labels[r.id][c.id]}` : ''}`).join('; ')}.`),
       ];
     }
   }

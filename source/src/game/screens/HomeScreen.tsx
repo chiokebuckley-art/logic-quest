@@ -37,7 +37,7 @@ export function nextUpInfo(next: NextStep, views: ReturnType<typeof viewAll>, an
       stopId: stop.id,
       kicker: `Next up · Stop ${stop.n} · ${stop.title}`,
       title: `Lesson ${k} · ${lesson?.title ?? ''}`,
-      text: redo ? 'Learn this idea again. Then you can try the check again, with new questions.' : k === stop.lessons.length ? 'Then the stop check opens.' : `${lesson?.ideas.length ?? 1} key ${lesson?.ideas.length === 1 ? 'idea' : 'ideas'}, then a few tries.`,
+      text: redo ? 'Learn this idea again. Then you can try the check again, with new questions.' : k === stop.lessons.length ? 'Then the stop check opens.' : `${lesson?.ideas.length ?? 1} key ${lesson?.ideas.length === 1 ? 'idea' : 'ideas'}, ${lesson?.drill?.length ? 'then you do it yourself, then' : 'then'} a few tries.`,
       button: {
         label: redo ? `Learn it again: Lesson ${k}` : `Start Lesson ${k} of ${stop.lessons.length}`,
         route: { name: 'lesson', stopId: stop.id, lessonId: next.lessonId, from: 'home' },

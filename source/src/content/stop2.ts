@@ -6,6 +6,14 @@
  * ../engine/puzzles/rules.ts; nothing is hand-asserted. Items come in three skins: plain cards
  * (abstract), everyday stories and fantasy stories.
  *
+ * Each lesson is See -> Do -> Quiz (the skill-drill handoff, 2 Oct 2026). See: a key-idea card shows one rule on a
+ * row of cards with every card already marked. Do: the same cards stay up, and the learner taps Fits or Not on each
+ * card for a new rule of the same family (Guess the rule: tests a rule card by card, then keeps it or rules it out).
+ * Quiz: try 1 is a twin rule on the same cards in a new order, pictures up; the other tries stay in the family the
+ * lesson taught. A AND NOT B and (A OR B) AND NOT C have no marked example and no board yet, so no quiz, check or
+ * Arcade item uses them (untaughtItems keeps them built for the later lesson that teaches them). Every hint shows one
+ * card already worked through, never the answer.
+ *
  * Story rules are stated both ways ("every cookie that is red, and no other cookies"), because the
  * answer key reads them both ways: a cookie is packed exactly when it fits the rule. In feedback
  * text, a rule named inside a sentence is put in curly quotes so it does not run into the words
@@ -20,6 +28,8 @@
  */
 import {
   ALL_CARDS,
+  ALL_FEATURES,
+  FEATURE_PAIRS,
   KINDS,
   LITERALS,
   RULE_POOL,
@@ -28,11 +38,14 @@ import {
   cardId,
   cardName,
   colorIs,
+  deckRow,
+  deckTwins,
   differences,
   drawThings,
   evaluate,
   featureText,
   featuresOf,
+  firstMismatch,
   has,
   is,
   makeRuleGuess,
@@ -42,18 +55,23 @@ import {
   pickIds,
   render,
   ruleId,
+  ruleTestRow,
+  sameCard,
   sameFeature,
   sameMeaning,
   shapeIs,
+  showsEveryWay,
+  shuffledDeck,
   sizeIs,
   twoFeatures,
   withoutBrackets,
 } from '../engine/puzzles/rules';
-import type { Card, Feature, FeatureKind, Formula } from '../engine/puzzles/rules';
+import type { Card, CardWords, Feature, FeatureKind, Formula, RuleGuess } from '../engine/puzzles/rules';
 import { syncWhyWrong } from '../engine/teach';
 import type {
   ChoiceFeedback,
   ChooseItem,
+  DrillStep,
   IdeaCard,
   Item,
   LessonDef,
@@ -577,9 +595,37 @@ function misread(rule: Formula, things: readonly Thing[], ids: string[], lead: s
   return { ids, message: ex ? `${lead} ${whyFits(rule, ex, `For example, ${the(ex)}`, s)}` : lead };
 }
 
+// ---------- the Hint: one card already worked through ----------
+
+/** The card a worked case is about. */
+const caseCard = (c: TeachCase): Card | undefined => c.things?.[0];
+const onBoard = (things: readonly Card[]) => (c: Card) => things.some((t) => sameCard(t, c));
+
+/**
+ * The Hint's marked case: one worked card from the item's own teaching, with each part and the rule already marked
+ * true or false, and a note that says what decides it. The first rule in `prefer` that some case meets picks it.
+ * Every generator picks a card that is not the answer: a card that does not fit a tap-all rule (so the hint hands
+ * over none of the answer), a wrong choice, or a card other than the one asked about.
+ */
+function hintCaseOf(teach: Teach, prefer: ((c: Card) => boolean)[], what: string): TeachCase {
+  for (const ok of prefer) {
+    const hit = (teach.cases ?? []).find((x) => {
+      const c = caseCard(x);
+      return !!c && ok(c);
+    });
+    if (hit) return hit;
+  }
+  throw new Error(`${what}: no worked card for the hint`);
+}
+
+/** The hint's last words, under its marked case. */
+const checkedOne = (s: Skin) => `Here is one ${s.one}, checked for you.`;
+const checkedOther = (s: Skin) => `Here is a different ${s.one}, checked for you.`;
+
 /**
  * A tap-all item. Besides the named misreadings, it names every one-card slip (a card left out, or one card too
- * many), tapping every card, and tapping none, so grade() can say exactly which card is wrong and why.
+ * many), tapping every card, and tapping none, so grade() can say exactly which card is wrong and why. Its hint
+ * shows a card that does not fit, worked through.
  */
 function tapItem(
   b: Base,
@@ -605,9 +651,13 @@ function tapItem(
     seen.add(k);
     diagnose.push(d);
   }
+  const teach = teachFor(p.rule, s, p.things);
+  const out = (c: Card) => !evaluate(p.rule, c);
   return {
     kind: 'tapall', ...baseOf(b), prompt: p.prompt, things: p.things, answer,
-    explain: p.explain, hint: p.hint, diagnose, teach: teachFor(p.rule, s, p.things),
+    explain: p.explain, hint: `${p.hint} ${checkedOne(s)}`,
+    hintCase: hintCaseOf(teach, [(c) => out(c) && onBoard(p.things)(c), out], b.id),
+    diagnose, teach,
   };
 }
 
@@ -616,7 +666,7 @@ function chooseItem(
   b: Base,
   p: {
     prompt: string; scene?: Scene; choices: { id: string; label: string }[]; answer: string; explain: string; hint: string;
-    feedback: Record<string, ChoiceFeedback>; teach: Teach;
+    hintCase: TeachCase; feedback: Record<string, ChoiceFeedback>; teach: Teach;
   },
 ): ChooseItem {
   if (!p.choices.some((c) => c.id === p.answer)) throw new Error(`${b.id}: answer is not a choice`);
@@ -628,7 +678,7 @@ function chooseItem(
   }
   return syncWhyWrong<ChooseItem>({
     kind: 'choose', ...baseOf(b), prompt: p.prompt, ...(p.scene ? { scene: p.scene } : {}),
-    choices: p.choices, answer: p.answer, explain: p.explain, hint: p.hint, feedback, teach: p.teach,
+    choices: p.choices, answer: p.answer, explain: p.explain, hint: p.hint, hintCase: p.hintCase, feedback, teach: p.teach,
   });
 }
 
@@ -675,9 +725,15 @@ const oneKind = (rng: Rng): FeatureKind => rng.pick<FeatureKind>(['color', 'colo
 const notTap: Gen = (rng, id, s) => {
   const kind = oneKind(rng);
   const x = rng.pick(featuresOf(kind));
+  const things = drawThings(rng, rng.int(6, 9), featuresOf(kind).map(is));
+  return notTapOn(id, s, x, things);
+};
+
+/** "Tap every card that is NOT x" on the given cards. */
+function notTapOn(id: string, s: Skin, x: Feature, things: Thing[]): TapAllItem {
+  const kind = x.kind;
   const rule = not(is(x));
   const others = featuresOf(kind).filter((f) => !sameFeature(f, x));
-  const things = drawThings(rng, rng.int(6, 9), featuresOf(kind).map(is));
   const n = pickIds(rule, things).length;
   const fx = ft(x);
   return tapItem({ id, lesson: L1, skill: 's2.not' }, s, {
@@ -696,7 +752,7 @@ const notTap: Gen = (rng, id, s) => {
         : []),
     ],
   });
-};
+}
 
 const notMeans: Gen = (rng, id, s) => {
   const kind = oneKind(rng);
@@ -739,14 +795,17 @@ const notMeans: Gen = (rng, id, s) => {
       };
     }
   }
+  const teach = teachFor(rule, s, []);
   return chooseItem({ id, lesson: L1, skill: 's2.not-means' }, {
     prompt: s.which(R(rule)),
     choices: choices.map(({ id: cid, label: l }) => ({ id: cid, label: l })),
     answer: right[0].id,
     explain: `${Q(rule)} means every ${s.one} that is not ${fx}. So ${groups(others, s)} fit.`,
-    hint: `${Q(rule)} takes every ${s.one} that is not ${fx}. Which ${kind}s are left?`,
+    hint: `${Q(rule)} takes every ${s.one} that is not ${fx}. Which ${kind}s are left? ${checkedOne(s)}`,
+    // A card the rule leaves out: it is in none of the right groups.
+    hintCase: hintCaseOf(teach, [(c) => !evaluate(rule, c)], id),
     feedback,
-    teach: teachFor(rule, s, []),
+    teach,
   });
 };
 
@@ -796,13 +855,16 @@ const notCount: Gen = (rng, id, s) => {
       }),
     },
   ];
+  const teach = teachFor(rule, s, things);
   return chooseItem({ id, lesson: L1, skill: 's2.not-count' }, {
     prompt: s.count(R(rule)),
     scene: { kind: 'things', things },
     ...countChoices(right, cands),
     explain: `There ${plural(nx, 'is', 'are')} ${nx} ${group(x, s, nx)}. Every other ${s.one} fits ${Q(rule, ',')} so the answer is ${right}.`,
-    hint: `Leave out the ${group(x, s)}. Count the rest.`,
-    teach: teachFor(rule, s, things),
+    hint: `Leave out the ${group(x, s)}. Count the rest. ${checkedOne(s)}`,
+    // A shown card that does not count.
+    hintCase: hintCaseOf(teach, [(c) => !evaluate(rule, c) && onBoard(things)(c)], id),
+    teach,
   });
 };
 
@@ -813,8 +875,13 @@ const onePartOf = (A: Formula, B: Formula) => (t: Card) => evaluate(A, t) !== ev
 
 const andTap: Gen = (rng, id, s) => {
   const [a, b] = twoFeatures(rng);
+  const things = drawThings(rng, rng.int(6, 10), quads(is(a), is(b)));
+  return andTapOn(id, s, a, b, things);
+};
+
+/** "Tap every card that is a AND b" on the given cards (they show every way the two parts can go). */
+function andTapOn(id: string, s: Skin, a: Feature, b: Feature, things: Thing[]): TapAllItem {
   const A = is(a), B = is(b), rule = and(A, B);
-  const things = drawThings(rng, rng.int(6, 10), quads(A, B));
   const fit = things.filter((t) => evaluate(rule, t));
   const miss = things.find((t) => has(t, a) && !has(t, b))!;
   const first = fit.length <= 3
@@ -832,8 +899,9 @@ const andTap: Gen = (rng, id, s) => {
       misread(rule, things, pickIds(B, things), `Your answer takes all the ${group(b, s)}, but some of them are not ${ftPl(a)}.`, s),
     ],
   });
-};
+}
 
+/** A AND NOT B. Untaught: no key idea marks it and no board drills it, so only untaughtItems() builds it. */
 const andNotTap: Gen = (rng, id, s) => {
   const [a, b] = twoFeatures(rng);
   const A = is(a), B = is(b), rule = and(A, not(B));
@@ -881,15 +949,18 @@ const andPick: Gen = (rng, id, s) => {
       };
     }
   }
+  const teach = teachFor(rule, s, things);
   return chooseItem({ id, lesson: L2, skill: 's2.and-pick' }, {
     prompt: s.fit(R(rule)),
     scene: { kind: 'things', things },
     choices,
     answer: right[0].id,
     explain: `Only ${the(right[0])} is ${ft(a)} and ${ft(b)}. AND needs both parts to be true.`,
-    hint: `Check both parts on each ${s.one}.`,
+    hint: `Check both parts on each ${s.one}. ${checkedOne(s)}`,
+    // A shown card that fits one part only: a wrong choice, never the answer.
+    hintCase: hintCaseOf(teach, [(c) => onePartOf(A, B)(c) && onBoard(things)(c)], id),
     feedback,
-    teach: teachFor(rule, s, things),
+    teach,
   });
 };
 
@@ -899,6 +970,7 @@ const andCount: Gen = (rng, id, s) => {
   const things = drawThings(rng, rng.int(7, 10), quads(A, B));
   const count = (f: Formula) => pickIds(f, things).length;
   const right = count(rule);
+  const teach = teachFor(rule, s, things);
   const truths = (c: Card) => [partTruth(A, c), partTruth(B, c), fitsTruth(rule, c)];
   const one = things.find(onePartOf(A, B))!;
   const partOnly = (p: Feature, q: Feature): CountWrong => {
@@ -930,8 +1002,10 @@ const andCount: Gen = (rng, id, s) => {
       partOnly(b, a),
     ]),
     explain: `There ${plural(right, 'is', 'are')} ${right} ${plural(right, s.one, s.many)} that ${plural(right, 'fits', 'fit')} ${Q(rule, '.')} ${plural(right, 'It is', 'Each one is')} ${ft(a)} and also ${ft(b)}.`,
-    hint: `A ${s.one} counts only if both parts are true.`,
-    teach: teachFor(rule, s, things),
+    hint: `A ${s.one} counts only if both parts are true. ${checkedOne(s)}`,
+    // A shown card that does not count.
+    hintCase: hintCaseOf(teach, [(c) => !evaluate(rule, c) && onBoard(things)(c)], id),
+    teach,
   });
 };
 
@@ -939,8 +1013,13 @@ const andCount: Gen = (rng, id, s) => {
 
 const orTap: Gen = (rng, id, s) => {
   const [a, b] = twoFeatures(rng);
+  const things = drawThings(rng, rng.int(6, 10), quads(is(a), is(b)));
+  return orTapOn(id, s, a, b, things);
+};
+
+/** "Tap every card that is a OR b" on the given cards (they show every way the two parts can go). */
+function orTapOn(id: string, s: Skin, a: Feature, b: Feature, things: Thing[]): TapAllItem {
   const A = is(a), B = is(b), rule = or(A, B);
-  const things = drawThings(rng, rng.int(6, 10), quads(A, B));
   const n = pickIds(rule, things).length;
   const both = things.find((t) => has(t, a) && has(t, b))!;
   const nBoth = pickIds(and(A, B), things).length;
@@ -957,7 +1036,7 @@ const orTap: Gen = (rng, id, s) => {
       misread(rule, things, pickIds(B, things), `Your answer takes only the ${group(b, s)}. A ${s.one} that is ${ft(a)} fits too.`, s),
     ],
   });
-};
+}
 
 const orNotFit: Gen = (rng, id, s) => {
   const [a, b] = twoFeatures(rng);
@@ -965,6 +1044,7 @@ const orNotFit: Gen = (rng, id, s) => {
   const { things, choices } = choiceThings(rng, quads(A, B).map((q) => cardFitting(rng, q)));
   const out = things.filter((t) => !evaluate(rule, t));
   if (out.length !== 1) throw new Error(`${id}: ${out.length} cards do not fit`);
+  const teach = teachFor(rule, s, things);
   const feedback: Record<string, ChoiceFeedback> = {};
   const ask = `The question asks for the ${s.one} that does not fit.`;
   for (const t of things) {
@@ -992,9 +1072,11 @@ const orNotFit: Gen = (rng, id, s) => {
     choices,
     answer: out[0].id,
     explain: `Only ${the(out[0])} is not ${ft(a)} and not ${ft(b)}. No part is true for it, so it is the one that does not fit.`,
-    hint: `Look for the ${s.one} that fits no part at all.`,
+    hint: `Look for the ${s.one} that fits no part at all. ${checkedOne(s)}`,
+    // A shown card that fits one part: a wrong choice (it fits), never the answer.
+    hintCase: hintCaseOf(teach, [(c) => onePartOf(A, B)(c) && onBoard(things)(c)], id),
     feedback,
-    teach: teachFor(rule, s, things),
+    teach,
   });
 };
 
@@ -1010,6 +1092,7 @@ const orCount: Gen = (rng, id, s) => {
   const bOnly = things.find((t) => !has(t, a) && has(t, b))!;
   const xor = pickIds(rule, things, 'orExclusive').length;
   const nA = count(A);
+  const teach = teachFor(rule, s, things);
   return chooseItem({ id, lesson: L3, skill: 's2.or-count', conflict: true }, {
     prompt: s.count(R(rule)),
     scene: { kind: 'things', things },
@@ -1040,8 +1123,10 @@ const orCount: Gen = (rng, id, s) => {
       },
     ]),
     explain: `In all, ${nFit(right, s)} ${Q(rule, '.')} That includes ${nBoth} ${plural(nBoth, s.one, s.many)} that ${plural(nBoth, 'fits', 'fit')} both parts.`,
-    hint: `Did you count the ${s.many} that fit both parts?`,
-    teach: teachFor(rule, s, things),
+    hint: `Did you count the ${s.many} that fit both parts? ${checkedOne(s)}`,
+    // A shown card that does not count.
+    hintCase: hintCaseOf(teach, [(c) => !evaluate(rule, c) && onBoard(things)(c)], id),
+    teach,
   });
 };
 
@@ -1059,6 +1144,7 @@ function orYesNoAs(rng: Rng, id: string, s: Skin, want?: OrCard): ChooseItem {
   const which: OrCard = want ?? (rng.chance(0.6) ? 'both' : 'neither');
   const c = cardFitting(rng, which === 'both' ? and(A, B) : which === 'one' ? and(A, not(B)) : and(not(A), not(B)));
   const answer = evaluate(rule, c) ? 'yes' : 'no';
+  const teach = teachFor(rule, s, [c]);
   const ex = cardCase(c, [partTruth(A, c), partTruth(B, c), fitsTruth(rule, c)], noteFor(rule, c, s), { the: true });
   const fb: ChoiceFeedback = which === 'both'
     ? {
@@ -1089,9 +1175,11 @@ function orYesNoAs(rng: Rng, id: string, s: Skin, want?: OrCard): ChooseItem {
       : which === 'one'
         ? `${The(c)} is ${ft(a)}. One part is enough for OR, so it fits.`
         : `${The(c)} is not ${ft(a)} and not ${ft(b)}. OR needs at least one part, so it does not fit.`,
-    hint: `Check each part on this ${s.one}. OR needs at least one part to fit. If both parts fit, that counts too.`,
+    hint: `Check each part on this ${s.one}. OR needs at least one part to fit. If both parts fit, that counts too. ${checkedOther(s)}`,
+    // Never the card being asked about: one that does not fit if there is one, else any other card.
+    hintCase: hintCaseOf(teach, [(x) => !sameCard(x, c) && !evaluate(rule, x), (x) => !sameCard(x, c)], id),
     feedback: { [answer === 'yes' ? 'no' : 'yes']: fb },
-    teach: teachFor(rule, s, [c]),
+    teach,
   });
 }
 
@@ -1110,8 +1198,13 @@ function notOnOnePart(rule: Formula, s: Skin): string {
 
 const notAndTap: Gen = (rng, id, s) => {
   const [a, b] = twoFeatures(rng);
+  const things = drawThings(rng, rng.int(6, 10), quads(is(a), is(b)));
+  return notAndTapOn(id, s, a, b, things);
+};
+
+/** "Tap every card that is NOT (a AND b)" on the given cards (they show every way the two parts can go). */
+function notAndTapOn(id: string, s: Skin, a: Feature, b: Feature, things: Thing[]): TapAllItem {
   const A = is(a), B = is(b), inner = and(A, B), rule = not(inner);
-  const things = drawThings(rng, rng.int(6, 10), quads(A, B));
   const n = pickIds(rule, things).length;
   const one = things.find(onePartOf(A, B))!;
   const [p, q] = has(one, a) ? [a, b] : [b, a];
@@ -1128,7 +1221,7 @@ const notAndTap: Gen = (rng, id, s) => {
       misread(rule, things, pickIds(inner, things), `Your answer takes the ${s.many} that fit the inside of the brackets, ${Q(inner, '.')} NOT flips that, so those are the only ${s.many} that do not fit.`, s),
     ],
   });
-};
+}
 
 const notOrTap: Gen = (rng, id, s) => {
   const [a, b] = twoFeatures(rng);
@@ -1153,6 +1246,7 @@ const notOrTap: Gen = (rng, id, s) => {
   });
 };
 
+/** (A OR B) AND NOT C. Untaught: no key idea marks it and no board drills it, so only untaughtItems() builds it. */
 const groupTap: Gen = (rng, id, s) => {
   const [k1, k2, k3] = rng.shuffle(KINDS);
   const a = rng.pick(featuresOf(k1)), b = rng.pick(featuresOf(k2));
@@ -1190,7 +1284,9 @@ const groupTap: Gen = (rng, id, s) => {
 
 /**
  * Which rule means the same as NOT (A op B) (or, the other way round, as its De Morgan twin)? Every wrong
- * choice names how it differs and a card where it and the question's rule disagree.
+ * choice names how it differs and a card where it and the question's rule disagree. The wrong choices are the two
+ * halves of the switch done alone: the NOT moved without switching the joining word, or the joining word switched
+ * without moving the NOT. Every choice is a rule lesson 4 marks on its cards (NOT ( … ), or a NOT on each part).
  */
 function sameMeaningAs(rng: Rng, id: string, want?: 'and' | 'or'): ChooseItem {
   const [a, b] = twoFeatures(rng);
@@ -1211,7 +1307,8 @@ function sameMeaningAs(rng: Rng, id: string, want?: 'and' | 'or'): ChooseItem {
     ]
     : [
       { f: join(not(A), not(B), op), head: `Your answer keeps ${W(op)} when the NOT moves inside the brackets.`, why: `When the NOT moves inside, each part gets a NOT, and ${W(op)} must switch to ${W(flip)}.` },
-      { f: join(not(A), B, op), head: 'Your answer puts a NOT on only one part.', why: `To move a NOT inside brackets, put a NOT on each part. Your answer has no NOT on ${Q(B, '.')}` },
+      // The switch without the move. Never a NOT on one part only (“NOT red AND big”): no lesson teaches that rule.
+      { f: not(join(A, B, flip)), head: `Your answer switches ${W(op)} to ${W(flip)}, but the NOT stays outside the brackets.`, why: `${W(op)} turns into ${W(flip)} only when the NOT moves inside the brackets and goes on each part.` },
     ]
   ).filter((w) => !sameMeaning(w.f, given));
   if (!sameMeaning(right, given) || wrongs.length < 1) throw new Error(`${id}: same-meaning set is broken`);
@@ -1249,7 +1346,10 @@ function sameMeaningAs(rng: Rng, id: string, want?: 'and' | 'or'): ChooseItem {
     choices,
     answer: ruleId(right),
     explain,
-    hint: 'Test each choice on a card that fits only one part.',
+    hint: `Test each choice on a card that fits only one part. ${checkedOne(ABSTRACT)}`,
+    // One card that fits only one part, with the question's rule marked on it, but no choice marked: the choices
+    // are for the learner to test on it.
+    hintCase: cardCase(onePart, [partTruth(A, onePart), partTruth(B, onePart), qTruth(onePart)], 'Now test each choice on this card. A choice that does not agree here cannot mean the same.'),
     feedback,
     teach: {
       rule: 'Two rules mean the same when they fit exactly the same cards. To move a NOT inside brackets, put a NOT on each part and switch the joining word. AND turns into OR, and OR turns into AND.',
@@ -1288,6 +1388,7 @@ function bracketYesNoAs(rng: Rng, id: string, s: Skin, want?: 'and' | 'or'): Cho
   const c = cardFitting(rng, and(A, not(B)));
   const answer = evaluate(rule, c) ? 'yes' : 'no';
   const fits = answer === 'yes';
+  const teach = teachFor(rule, s, [c]);
   const ex = cardCase(c, [partTruth(A, c), partTruth(B, c), fitsTruth(inner, c), fitsTruth(rule, c)], noteFor(rule, c, s), { the: true });
   // The headline says what the card does, and why: the inside of the brackets decides it. The detail works the
   // inside out step by step (AND needs both parts; one part is enough for OR), then flips it.
@@ -1310,9 +1411,11 @@ function bracketYesNoAs(rng: Rng, id: string, s: Skin, want?: 'and' | 'or'): Cho
     explain: fits
       ? `${The(c)} is ${ft(p)}, but it is not ${ft(q)}. So ${Q(inner)} is false, and NOT flips it to true. It fits.`
       : `${The(c)} is ${ft(p)}, so it fits ${Q(inner, '.')} NOT flips that, so it does not fit.`,
-    hint: `Do the brackets first. Does this ${s.one} fit ${Q(inner)}?`,
+    hint: `Do the brackets first. Does this ${s.one} fit ${Q(inner)}? ${checkedOther(s)}`,
+    // Never the card being asked about: one that does not fit if there is one, else any other card.
+    hintCase: hintCaseOf(teach, [(x) => !sameCard(x, c) && !evaluate(rule, x), (x) => !sameCard(x, c)], id),
     feedback: { [fits ? 'no' : 'yes']: fb },
-    teach: teachFor(rule, s, [c]),
+    teach,
   });
 }
 
@@ -1320,14 +1423,23 @@ const bracketYesNo: Gen = (rng, id, s) => bracketYesNoAs(rng, id, s);
 
 // ---------- lesson 5: guess the rule ----------
 
-type Family = 'simple' | 'and' | 'or' | 'andNot' | 'any';
+type Family = 'simple' | 'and' | 'or' | 'any';
+
+/** Two features joined by AND or OR, with no NOT inside ('red AND a circle', 'big OR blue'). */
+const plainJoin = (f: Formula) => isJoin(f) && f.a.op === 'is' && f.b.op === 'is';
+
+/**
+ * The rules lessons 1-3 teach with a marked example and a board: one feature, NOT one feature, and two features
+ * joined by AND or OR. A rule machine's secret rule and every wrong choice come from here. RULE_POOL's rules with a
+ * NOT inside a two-part rule ('blue AND NOT big', 'red OR NOT a square') are left out: no lesson teaches them.
+ */
+export const TAUGHT_POOL: readonly Formula[] = RULE_POOL.filter((f) => literal(f) || plainJoin(f));
 
 const TARGETS: Record<Family, readonly Formula[]> = {
   simple: LITERALS,
-  and: RULE_POOL.filter((f) => f.op === 'and' && f.a.op === 'is' && f.b.op === 'is'),
-  or: RULE_POOL.filter((f) => f.op === 'or' && f.a.op === 'is' && f.b.op === 'is'),
-  andNot: RULE_POOL.filter((f) => f.op === 'and' && (f.a.op === 'not' || f.b.op === 'not')),
-  any: RULE_POOL,
+  and: TAUGHT_POOL.filter((f) => f.op === 'and'),
+  or: TAUGHT_POOL.filter((f) => f.op === 'or'),
+  any: TAUGHT_POOL,
 };
 
 /** What a rule from the pool says yes to, in plain words. */
@@ -1339,7 +1451,11 @@ function ruleSays(d: Formula, s: Skin): string {
 }
 
 function guess(rng: Rng, id: string, s: Skin, family: Family): ChooseItem {
-  const g = makeRuleGuess(rng, TARGETS[family], { distractors: 2, minCards: 6, maxCards: 9 });
+  return guessOn(rng, id, s, makeRuleGuess(rng, TARGETS[family], { distractors: 2, minCards: 6, maxCards: 9, pool: TAUGHT_POOL }));
+}
+
+/** "Which rule is it using?" on a built rule-machine puzzle. */
+function guessOn(rng: Rng, id: string, s: Skin, g: RuleGuess): ChooseItem {
   const opts = rng.shuffle([g.target, ...g.distractors]);
   const choices = opts.map((f) => ({ id: ruleId(f), label: R(f) }));
   const byId = (tid: string) => g.things.find((t) => t.id === tid)!;
@@ -1366,13 +1482,19 @@ function guess(rng: Rng, id: string, s: Skin, family: Family): ChooseItem {
   const plain = (m: 'yes' | 'no') => g.things.find((t) => t.mark === m && !g.ruledOutBy.includes(t.id)) ?? g.things.find((t) => t.mark === m)!;
   const yesCard = plain('yes'), noCard = plain('no');
   const d0 = g.distractors[0], t0 = byId(g.ruledOutBy[0]);
+  const ruledOut = g.distractors.map((d, k) => {
+    const t = byId(g.ruledOutBy[k]);
+    return cardCase(t, [got(t), fitsTruth(d, t)], `The mark and ${Q(d)} do not match. So ${Q(d)} is ruled out.`, { the: true, mark: t.mark });
+  });
   return chooseItem({ id, lesson: L5, skill: 's2.guess-rule' }, {
     prompt: s.guess,
     scene: { kind: 'things', things: g.things },
     choices,
     answer: ruleId(g.target),
     explain: `Only the rule ${Q(g.target)} fits every ${s.one}. ${outs.join(' ')}`,
-    hint: `Test each rule on every ${s.one}. One ${s.one} that does not match rules it out.`,
+    hint: `Test each rule on every ${s.one}. One ${s.one} that does not match rules it out. ${checkedOne(s)}`,
+    // A card that rules out a wrong rule, already tested: it models the test without naming the secret rule.
+    hintCase: ruledOut[0],
     feedback,
     teach: {
       rule: `The secret rule matches every mark. Each ${s.one} with a yes fits it. Each ${s.one} with a no does not fit it.`,
@@ -1382,10 +1504,7 @@ function guess(rng: Rng, id: string, s: Skin, family: Family): ChooseItem {
       cases: [
         cardCase(yesCard, [got(yesCard), fitsTruth(g.target, yesCard)], `The mark and ${Q(g.target)} match.`, { the: true, mark: 'yes' }),
         cardCase(noCard, [got(noCard), fitsTruth(g.target, noCard)], `The mark and ${Q(g.target)} match.`, { the: true, mark: 'no' }),
-        ...g.distractors.map((d, k) => {
-          const t = byId(g.ruledOutBy[k]);
-          return cardCase(t, [got(t), fitsTruth(d, t)], `The mark and ${Q(d)} do not match. So ${Q(d)} is ruled out.`, { the: true, mark: t.mark });
-        }),
+        ...ruledOut,
       ],
       remember: ['The right rule matches every mark.', `Ask: “Is there a ${s.one} whose mark this rule gets wrong?”`],
       simpler: [`Look at ${the(t0)}. It got a ${t0.mark}.`, `Does it fit ${Q(d0)}? ${yn(evaluate(d0, t0))}.`, `The mark and the rule do not match. So ${Q(d0)} is ruled out.`],
@@ -1395,7 +1514,45 @@ function guess(rng: Rng, id: string, s: Skin, family: Family): ChooseItem {
 
 const guessEasy: Gen = (rng, id, s) => guess(rng, id, s, rng.pick<Family>(['simple', 'and']));
 const guessOr: Gen = (rng, id, s) => guess(rng, id, s, 'or');
-const guessHard: Gen = (rng, id, s) => guess(rng, id, s, rng.pick<Family>(['andNot', 'any']));
+const guessHard: Gen = (rng, id, s) => guess(rng, id, s, 'any');
+
+// ---------- try 1: a twin rule on the worked example's deck ----------
+//
+// The handoff's first quiz: "a twin rule on a shuffled twin of the same deck, pictures still up". The cards are the
+// worked example's six cards in a new order (ids c1..c6); the rule is a new rule of the same family that marks the
+// deck differently from the worked example and from the boards, so copying marks already shown never answers it.
+// Plain cards, so nothing but the rule changes.
+
+/** Try 1 is the same six cards every time: it stays in the planned quiz, never an extra item or a repair. */
+const fixedGen = (gen: Gen): Gen => (rng, id, skin) => ({ ...gen(rng, id, skin), fixed: true });
+
+const twinOf = (rng: Rng, pool: readonly Formula[], what: string) => {
+  if (!pool.length) throw new Error(`no twin rules for ${what}`);
+  return rng.pick(pool);
+};
+
+const notTwin: Gen = (rng, id) => notTapOn(id, ABSTRACT, featOf(twinOf(rng, TWINS.not, 'NOT')), shuffledDeck(rng, EXAMPLES.sample));
+
+const andTwin: Gen = (rng, id) => {
+  const r = twinOf(rng, TWINS.and, 'AND');
+  if (!isJoin(r)) throw new Error('not a two-part rule');
+  return andTapOn(id, ABSTRACT, featOf(r.a), featOf(r.b), shuffledDeck(rng, EXAMPLES.and));
+};
+
+const orTwin: Gen = (rng, id) => {
+  const r = twinOf(rng, TWINS.or, 'OR');
+  if (!isJoin(r)) throw new Error('not a two-part rule');
+  return orTapOn(id, ABSTRACT, featOf(r.a), featOf(r.b), shuffledDeck(rng, EXAMPLES.or));
+};
+
+const notAndTwin: Gen = (rng, id) => {
+  const r = twinOf(rng, TWINS.notAnd, 'NOT ( … AND … )');
+  if (r.op !== 'not' || !isJoin(r.a)) throw new Error('not NOT ( … )');
+  return notAndTapOn(id, ABSTRACT, featOf(r.a.a), featOf(r.a.b), shuffledDeck(rng, EXAMPLES.brackets));
+};
+
+const guessTwin: Gen = (rng, id) =>
+  guessOn(rng, id, ABSTRACT, makeRuleGuess(rng, TWINS.guess, { distractors: 2, minCards: 6, maxCards: 6, pool: TAUGHT_POOL, deck: EXAMPLES.guess }));
 
 // ---------- key ideas ----------
 
@@ -1410,25 +1567,31 @@ export function exampleScene(cards: readonly Card[], rule?: Formula): Scene {
   };
 }
 
-const red = colorIs('red'), blue = colorIs('blue'), big = sizeIs('big'), circle = shapeIs('circle');
+const red = colorIs('red'), blue = colorIs('blue'), big = sizeIs('big'), small = sizeIs('small');
+const circle = shapeIs('circle'), square = shapeIs('square');
 
+/**
+ * The worked examples' decks. The OR deck holds the handoff's four sample cards (the big red circle, the small red
+ * square, the big blue circle and the small yellow triangle), so its board can drill the handoff's "big OR red".
+ */
 export const EXAMPLES = {
   sample: [card('big', 'red', 'circle'), card('small', 'blue', 'square'), card('big', 'yellow', 'triangle'),
     card('small', 'red', 'triangle'), card('big', 'blue', 'circle'), card('small', 'yellow', 'square')],
   and: [card('big', 'red', 'circle'), card('small', 'red', 'square'), card('small', 'blue', 'circle'),
     card('big', 'yellow', 'triangle'), card('small', 'red', 'circle'), card('big', 'red', 'triangle')],
   or: [card('small', 'blue', 'circle'), card('big', 'red', 'circle'), card('big', 'blue', 'square'),
-    card('small', 'yellow', 'triangle'), card('big', 'yellow', 'circle'), card('small', 'red', 'square')],
+    card('small', 'yellow', 'triangle'), card('big', 'blue', 'circle'), card('small', 'red', 'square')],
   brackets: [card('big', 'red', 'circle'), card('small', 'red', 'square'), card('big', 'blue', 'triangle'),
     card('small', 'yellow', 'circle'), card('big', 'yellow', 'square'), card('small', 'blue', 'triangle')],
   guess: [card('big', 'red', 'square'), card('small', 'blue', 'circle'), card('big', 'blue', 'triangle'),
     card('small', 'yellow', 'circle'), card('small', 'red', 'triangle'), card('big', 'yellow', 'square')],
 } as const;
 
-/** Rules the key-idea cards show, so tests can check every claim the cards make. */
+/** Rules the key-idea cards and the guided boards show, so tests can check every claim they make. */
 export const EXAMPLE_RULES = {
   red,
   notRed: not(red),
+  notCircle: not(circle),
   redAndCircle: and(red, circle),
   circleOrBlue: or(circle, blue),
   notRedAndBig: not(and(red, big)),
@@ -1437,6 +1600,16 @@ export const EXAMPLE_RULES = {
   notRedOrNotBig: or(not(red), not(big)),
   guess: or(blue, big),
   guessWrong: blue,
+  // The guided boards: a new rule of the same family on the same cards.
+  notBlue: not(blue),
+  notSquare: not(square),
+  redAndBig: and(red, big),
+  bigOrRed: or(big, red),
+  notBlueAndSmall: not(and(blue, small)),
+  notBlueAndNotSmall: and(not(blue), not(small)),
+  notBlueOrSmall: not(or(blue, small)),
+  notBlueOrNotSmall: or(not(blue), not(small)),
+  guessTest: big,
 };
 const E = EXAMPLE_RULES;
 
@@ -1464,16 +1637,18 @@ const IDEAS: Record<string, IdeaCard[]> = {
       body: [
         'NOT red means every card that is not red.',
         'Blue cards fit. Yellow cards fit too. Only the red cards are left out.',
+        'So NOT red is not “the blue ones.” NOT red is not one other color. It takes every color but red.',
       ],
       scene: exampleScene(EXAMPLES.sample, E.notRed),
     },
     {
-      title: 'NOT red is not one other color',
+      title: 'NOT on a shape or a size',
       body: [
-        'Some people think NOT red means blue. It does not.',
-        'NOT red takes every color that is not red. So blue cards fit, and yellow cards fit too.',
-        'NOT a circle takes squares and triangles. NOT big takes the small cards.',
+        'NOT works the same way on a shape. NOT a circle means every card that is not a circle.',
+        'Squares fit. Triangles fit too. Only the circles are left out.',
+        'NOT big takes every card that is not big. That is the small cards.',
       ],
+      scene: exampleScene(EXAMPLES.sample, E.notCircle),
     },
     {
       title: 'Check one card at a time',
@@ -1582,15 +1757,18 @@ const IDEAS: Record<string, IdeaCard[]> = {
       body: [
         'First find the cards that are red OR big. NOT takes the rest.',
         'So a card fits only when it is not red, and it is not big.',
-        'That is the same as NOT red AND NOT big.',
+        'That is the same as NOT red AND NOT big. The same two cards fit: the small yellow circle and the small blue triangle.',
       ],
+      scene: exampleScene(EXAMPLES.brackets, E.notRedOrBig),
     },
     {
       title: 'Watch the switch',
       body: [
         'To move a NOT inside the brackets, put a NOT on each part. Then AND turns into OR, and OR turns into AND.',
         'So NOT (red AND big) means the same as NOT red OR NOT big.',
+        'The same cards fit as for NOT (red AND big). Only the big red circle is left out.',
       ],
+      scene: exampleScene(EXAMPLES.brackets, E.notRedOrNotBig),
     },
   ],
   [L5]: [
@@ -1627,14 +1805,240 @@ const IDEAS: Record<string, IdeaCard[]> = {
   ],
 };
 
+// ---------- try 1's twin rules ----------
+
+/** Two-part rules of one kind (from `join`) whose two parts the deck shows every way: both, one, the other, no part. */
+const pairRules = (deck: readonly Card[], join: (A: Formula, B: Formula) => Formula): Formula[] =>
+  FEATURE_PAIRS.filter(([a, b]) => showsEveryWay(is(a), is(b), deck)).map(([a, b]) => join(is(a), is(b)));
+
+/** Can a rule machine on this deck use the rule: does each part matter, and are there two near-miss taught rules? */
+const guessable = (deck: readonly Card[]) => (t: Formula): boolean => {
+  if (!isJoin(t)) return false;
+  const marks = deck.map((c) => evaluate(t, c));
+  const misses = (g: Formula) => deck.filter((c, i) => evaluate(g, c) !== marks[i]).length;
+  if (misses(t.a) === 0 || misses(t.b) === 0) return false;
+  return TAUGHT_POOL.filter((g) => !sameMeaning(g, t) && misses(g) >= 1 && misses(g) <= 2).length >= 2;
+};
+
+/**
+ * Try 1's twin rules, one list per lesson (see deckTwins): the worked example's family on its deck, marking the
+ * deck differently from the key ideas and the boards. NOT twins use a color or a shape, so "everything else" is
+ * always more than one value.
+ */
+export const TWINS = {
+  not: deckTwins(EXAMPLES.sample, ALL_FEATURES.filter((f) => featuresOf(f.kind).length === 3).map((f) => not(is(f))), [E.notRed, E.notCircle, E.notBlue, E.notSquare], { minFit: 2, minOut: 2 }),
+  and: deckTwins(EXAMPLES.and, pairRules(EXAMPLES.and, and), [E.redAndCircle, E.redAndBig], { minFit: 2, minOut: 2 }),
+  or: deckTwins(EXAMPLES.or, pairRules(EXAMPLES.or, or), [E.circleOrBlue, E.bigOrRed], { minFit: 2, minOut: 2 }),
+  notAnd: deckTwins(
+    EXAMPLES.brackets,
+    pairRules(EXAMPLES.brackets, (A, B) => not(and(A, B))),
+    [E.notRedAndBig, E.notRedAndNotBig, E.notRedOrBig, E.notRedOrNotBig, E.notBlueAndSmall, E.notBlueAndNotSmall, E.notBlueOrSmall, E.notBlueOrNotSmall],
+    { minFit: 2, minOut: 1 },
+  ),
+  guess: deckTwins(EXAMPLES.guess, pairRules(EXAMPLES.guess, or), [E.guess, E.guessWrong, E.guessTest], { minFit: 2, minOut: 2 }).filter(guessable(EXAMPLES.guess)),
+};
+
+// ---------- Do: the guided boards ----------
+//
+// Each board keeps a key idea's picture up: the same six cards, with that rule's marks (the case already shown).
+// The learner marks the same cards, one row per new rule of the same family, by tapping Fits or Not under each card.
+// Every right mark comes from deckRow() / ruleTestRow() in the rule engine (evaluate() and the machine's marks), and
+// every wrong mark gets whyFits(): what the card is, and what the rule needs. No board asks for a final answer.
+
+/** The words for a wrong mark: "The big red circle is not blue, so it fits “NOT blue.”" */
+const cardWords: CardWords = (rule, c) => whyFits(rule, c, The(c), ABSTRACT);
+
+/** The cards a key idea shows. */
+function deckOf(see: IdeaCard): Thing[] {
+  if (see.scene?.kind !== 'things') throw new Error(`${see.title}: no cards to mark`);
+  return see.scene.things;
+}
+
+/** A board on a key idea's picture: one row of Fits / Not marks for each new rule. */
+function deckBoard(see: IdeaCard, o: { id: string; title: string; body: string[]; rows: { rule: Formula; note?: string }[]; done: string }): DrillStep {
+  const deck = deckOf(see);
+  return {
+    id: o.id,
+    title: o.title,
+    body: o.body,
+    scene: see.scene,
+    rows: o.rows.map((r, k) => deckRow(r.rule, deck, cardWords, { id: `${o.id}-r${k + 1}`, label: `Rule: ${R(r.rule)}`, ...(r.note ? { note: r.note } : {}) })),
+    done: o.done,
+  };
+}
+
+/** The values a NOT x rule takes: every other value of x's feature. */
+const othersOf = (rule: Formula) => {
+  const x = featOf(rule);
+  return featuresOf(x.kind).filter((f) => !sameFeature(f, x));
+};
+
+/** "Red cards and yellow cards fit. Only the blue cards are left out." */
+const notNote = (rule: Formula) => `${cap(groups(othersOf(rule), ABSTRACT))} fit. Only the ${group(featOf(rule), ABSTRACT)} are left out.`;
+
+/** The cards of a deck that fit a rule. */
+const fitting = (rule: Formula, deck: readonly Card[]) => deck.filter((c) => evaluate(rule, c));
+
+/** The inside of NOT ( … ): “blue OR small” for “NOT (blue OR small).” */
+function innerOf(rule: Formula): Formula {
+  if (rule.op !== 'not' || !isJoin(rule.a)) throw new Error(`${render(rule)} is not NOT ( … )`);
+  return rule.a;
+}
+
+/** "Only the big red circle and the big red triangle fit. AND needs both parts." */
+function andNote(rule: Formula, deck: readonly Card[]): string {
+  const fit = fitting(rule, deck);
+  return `Only ${names(fit)} ${plural(fit.length, 'fits', 'fit')}. AND needs both parts.`;
+}
+
+/** The first card of a deck that fits both parts of a two-part rule. */
+function bothCard(rule: Formula, deck: readonly Card[]): Card {
+  if (!isJoin(rule)) throw new Error(`${render(rule)} has no two parts`);
+  const c = deck.find((x) => evaluate(rule.a, x) && evaluate(rule.b, x));
+  if (!c) throw new Error(`no card fits both parts of ${render(rule)}`);
+  return c;
+}
+
+/** "Right. The big red circle fits even though it is big and red. …" */
+function orDone(rule: Formula, deck: readonly Card[]): string {
+  if (!isJoin(rule)) throw new Error(`${render(rule)} has no two parts`);
+  const c = bothCard(rule, deck);
+  return `Right. ${The(c)} fits even though it is ${ft(featOf(rule.a))} and ${ft(featOf(rule.b))}. A card that fits both parts still fits OR.`;
+}
+
+/** Brackets change who fits: the cards that fit `withBrackets` but not `without`, named. */
+function bracketDone(withBrackets: Formula, without: Formula, deck: readonly Card[]): string {
+  const changed = deck.filter((c) => evaluate(withBrackets, c) !== evaluate(without, c));
+  if (!changed.length || changed.some((c) => !evaluate(withBrackets, c))) throw new Error('the bracket board needs cards that fit only the bracket rule');
+  return `Right. The brackets changed who fits. ${cap(names(changed))} ${plural(changed.length, 'fits', 'fit')} ${Q(withBrackets, '.')} ${plural(changed.length, 'It does', 'They do')} not fit ${Q(without, '.')}`;
+}
+
+/** Two rules that mean the same: the cards that fit (or the fewer cards left out), and the sameness, named. */
+function sameDone(rule: Formula, twin: Formula, deck: readonly Card[]): string {
+  if (!sameMeaning(rule, twin)) throw new Error(`${render(rule)} and ${render(twin)} do not mean the same`);
+  const fit = fitting(rule, deck), out = deck.filter((c) => !evaluate(rule, c));
+  const who = out.length < fit.length
+    ? `Only ${names(out)} ${plural(out.length, 'is', 'are')} left out.`
+    : `Only ${names(fit)} ${plural(fit.length, 'fits', 'fit')}.`;
+  return `Right. ${who} ${Q(rule)} fits the same cards as ${Q(twin, '.')}`;
+}
+
+/** Guess the rule's board: the machine's marks stay up; the kept rule is shown tested; the learner tests a new rule. */
+function guessBoard(see: IdeaCard): DrillStep {
+  const deck = deckOf(see);
+  const words = {
+    card: cardWords,
+    keep: (r: Formula) => `Each yes card fits ${Q(r, ',')} and each no card does not. No card rules it out, so keep it.`,
+    ruleOut: (r: Formula, t: Thing) => `${The(t)} got a ${t.mark}, but it ${evaluate(r, t) ? 'fits' : 'does not fit'} ${Q(r, '.')} One card that does not match is enough to rule it out.`,
+  };
+  const kept = E.guess, test = E.guessTest, wrong = E.guessWrong;
+  if (firstMismatch(kept, deck)) throw new Error('the worked example’s rule must match every mark');
+  const miss = firstMismatch(test, deck), missWrong = firstMismatch(wrong, deck);
+  if (!miss || !missWrong) throw new Error('the board’s rule and the key idea’s wrong rule must each miss a mark');
+  return {
+    id: 's2.l5-do',
+    title: 'Test a rule',
+    body: [
+      `The machine’s marks stay on the cards. The shown row tests ${Q(kept, '.')} Every card matches its mark, so it is kept.`,
+      `Now test the rule ${Q(test, '.')} Tap Fits or Not for each card. Then keep the rule, or rule it out.`,
+    ],
+    scene: see.scene,
+    rows: [
+      ruleTestRow(kept, deck, words, { id: 's2.l5-do-shown', label: `Test the rule ${Q(kept, '.')}`, given: true, note: `Every card matches its mark. Keep ${Q(kept, '.')}` }),
+      ruleTestRow(test, deck, words, {
+        id: 's2.l5-do-test',
+        label: `Test the rule ${Q(test, '.')}`,
+        note: `${The(miss)} got a ${miss.mark}, but it ${evaluate(test, miss) ? 'fits' : 'does not fit'} ${Q(test, '.')} Rule out ${Q(test, '.')}`,
+      }),
+    ],
+    done: `Right. ${The(miss)} rules out ${Q(test, ',')} just as ${the(missWrong)} ruled out ${Q(wrong, '.')}`,
+  };
+}
+
+/** Each lesson's guided boards, in order. Every board's picture is a key idea's picture. */
+export const DRILLS: Record<string, DrillStep[]> = {
+  [L1]: [
+    deckBoard(IDEAS[L1][2], {
+      id: 's2.l1-do',
+      title: 'Mark the cards',
+      body: [`These are the six cards from the key idea. The ✓ and ✗ marks show ${Q(E.notRed, '.')}`, `Now the rule is ${Q(E.notBlue, '.')} Tap Fits or Not for each card.`],
+      rows: [{ rule: E.notBlue, note: notNote(E.notBlue) }],
+      done: `Right. ${Q(E.notBlue)} takes the ${groups(othersOf(E.notBlue), ABSTRACT)}. NOT is everything else, not one other color.`,
+    }),
+    deckBoard(IDEAS[L1][3], {
+      id: 's2.l1-do-shape',
+      title: 'Now a shape',
+      body: [`The same six cards. The marks show ${Q(E.notCircle, '.')}`, `Now the rule is ${Q(E.notSquare, '.')} Tap Fits or Not for each card.`],
+      rows: [{ rule: E.notSquare, note: notNote(E.notSquare) }],
+      done: `Right. ${Q(E.notSquare)} takes the ${groups(othersOf(E.notSquare), ABSTRACT)}.`,
+    }),
+  ],
+  [L2]: [
+    deckBoard(IDEAS[L2][1], {
+      id: 's2.l2-do',
+      title: 'Mark the cards',
+      body: [`These are the six cards from the key idea. The marks show ${Q(E.redAndCircle, '.')}`, `Now the rule is ${Q(E.redAndBig, '.')} Tap Fits or Not for each card.`],
+      rows: [{ rule: E.redAndBig, note: andNote(E.redAndBig, EXAMPLES.and) }],
+      done: `Right. A card fits ${Q(E.redAndBig)} only when it is red and also big.`,
+    }),
+  ],
+  [L3]: [
+    deckBoard(IDEAS[L3][1], {
+      id: 's2.l3-do',
+      title: 'Mark the cards',
+      body: [`These are the six cards from the key idea. The marks show ${Q(E.circleOrBlue, '.')}`, `Now the rule is ${Q(E.bigOrRed, '.')} Tap Fits or Not for each card.`],
+      rows: [{ rule: E.bigOrRed, note: `In all, ${nFit(fitting(E.bigOrRed, EXAMPLES.or).length, ABSTRACT)}. One part is enough for OR.` }],
+      done: orDone(E.bigOrRed, EXAMPLES.or),
+    }),
+  ],
+  [L4]: [
+    deckBoard(IDEAS[L4][1], {
+      id: 's2.l4-do',
+      title: 'Mark the cards',
+      body: [`These are the six cards from the key ideas. The marks show ${Q(E.notRedAndBig, '.')}`, 'Now use blue and small. Mark each card for each rule. When a rule has brackets, do them first.'],
+      rows: [{ rule: E.notBlueAndSmall }, { rule: E.notBlueAndNotSmall }],
+      done: bracketDone(E.notBlueAndSmall, E.notBlueAndNotSmall, EXAMPLES.brackets),
+    }),
+    deckBoard(IDEAS[L4][3], {
+      id: 's2.l4-do-or',
+      title: 'Now OR inside the brackets',
+      body: [`The marks show ${Q(E.notRedOrBig, '.')}`, `Now the rule is ${Q(E.notBlueOrSmall, '.')} First find the cards that fit ${Q(innerOf(E.notBlueOrSmall), '.')} NOT takes the rest.`],
+      rows: [{ rule: E.notBlueOrSmall }],
+      done: sameDone(E.notBlueOrSmall, E.notBlueAndNotSmall, EXAMPLES.brackets),
+    }),
+    // The switch (key idea 5) on its own picture: a NOT on each part and OR, the same cards as NOT (blue AND small).
+    deckBoard(IDEAS[L4][4], {
+      id: 's2.l4-do-switch',
+      title: 'Now the switch',
+      body: [`The marks show ${Q(E.notRedOrNotBig, '.')} It fits the same cards as ${Q(E.notRedAndBig, '.')}`, `Now the rule is ${Q(E.notBlueOrNotSmall, '.')} Tap Fits or Not for each card.`],
+      rows: [{ rule: E.notBlueOrNotSmall }],
+      done: sameDone(E.notBlueOrNotSmall, E.notBlueAndSmall, EXAMPLES.brackets),
+    }),
+  ],
+  [L5]: [guessBoard(IDEAS[L5][3])],
+};
+
 // ---------- lessons, check, arcade ----------
 
-/** Each lesson's practice run, in teaching order. Skins: plain cards first, then one everyday and one fantasy. */
+/**
+ * Each lesson's quiz, in teaching order: try 1 is the twin on the worked example's cards (plain cards, pictures up),
+ * then the same family in stories, with pictures. A words-only item (which groups NOT x takes, which rule means the
+ * same) comes last, after the deck has been marked. No quiz uses a rule family its lesson did not teach.
+ */
 const LESSON_GENS: Record<string, readonly Gen[]> = {
+  [L1]: [fixedGen(notTwin), notTap, notCount, notMeans],
+  [L2]: [fixedGen(andTwin), andPick, andTap, andCount],
+  [L3]: [fixedGen(orTwin), orYesNo, orNotFit, orTap, orCount],
+  [L4]: [fixedGen(notAndTwin), notOrTap, bracketYesNo, notAndTap, sameMeaningPick],
+  [L5]: [fixedGen(guessTwin), guessEasy, guessOr, guessHard],
+};
+
+/** The Arcade's generators: each lesson's taught families, never the twin (it is the same six cards every time). */
+const ARCADE_GENS: Record<string, readonly Gen[]> = {
   [L1]: [notTap, notMeans, notTap, notCount],
-  [L2]: [andTap, andPick, andNotTap, andCount],
+  [L2]: [andTap, andPick, andCount],
   [L3]: [orTap, orYesNo, orNotFit, orTap, orCount],
-  [L4]: [notAndTap, bracketYesNo, notOrTap, sameMeaningPick, groupTap],
+  [L4]: [notAndTap, bracketYesNo, notOrTap, sameMeaningPick],
   [L5]: [guessEasy, guessOr, guessHard],
 };
 
@@ -1650,6 +2054,7 @@ const lessons: LessonDef[] = [L1, L2, L3, L4, L5].map((lid) => ({
   id: lid,
   title: TITLES[lid],
   ideas: IDEAS[lid],
+  drill: DRILLS[lid],
   practice(rng: Rng): Item[] {
     const gens = LESSON_GENS[lid];
     const skins = lessonSkins(rng, gens.length);
@@ -1657,15 +2062,15 @@ const lessons: LessonDef[] = [L1, L2, L3, L4, L5].map((lid) => ({
   },
 }));
 
-/** The stop check: 9 items, every lesson covered, several conflict items, skins mixed three each. */
+/** The stop check: 9 items, every lesson covered, several conflict items, skins mixed three each. Taught families only. */
 function check(rng: Rng): Item[] {
   const gens: Gen[] = [
     rng.pick([notTap, notTap, notCount, notMeans]),
-    rng.pick([andTap, andNotTap]),
+    andTap,
     rng.pick([andPick, andCount]),
     orTap,
     rng.pick([orYesNo, orNotFit, orCount]),
-    rng.pick([notAndTap, notOrTap, groupTap]),
+    rng.pick([notAndTap, notOrTap]),
     rng.pick([sameMeaningPick, bracketYesNo]),
     guessEasy,
     rng.pick([guessOr, guessHard]),
@@ -1676,9 +2081,20 @@ function check(rng: Rng): Item[] {
 
 /** One Arcade item from anywhere in the stop. */
 function practice(rng: Rng): Item {
-  const gens = LESSON_GENS[rng.pick([L1, L2, L3, L4, L5])];
+  const gens = ARCADE_GENS[rng.pick([L1, L2, L3, L4, L5])];
   const gen = rng.pick(gens);
   return gen(rng, 's2-a1', skinOf(rng, rng.pick<SkinKey>(['abstract', 'everyday', 'fantasy'])));
+}
+
+/**
+ * Rule families stop 2 does not teach yet: A AND NOT B ('blue AND NOT small') and (A OR B) AND NOT C ('(big OR a
+ * circle) AND NOT blue'). No key idea marks a case of them and no board drills them, so no lesson quiz, check, Arcade
+ * item or new example uses them (the handoff: never introduce a new rule family inside the quiz set). They stay built
+ * and tested here for the later lesson that teaches them with its own See, Do and Quiz.
+ */
+export function untaughtItems(rng: Rng): Item[] {
+  const skin = () => skinOf(rng, rng.pick(SKIN_KEYS));
+  return [andNotTap(rng, 'later-and-not', skin()), groupTap(rng, 'later-brackets-first', skin())];
 }
 
 /**
@@ -1687,6 +2103,7 @@ function practice(rng: Rng): Item {
  *     (OR read as AND says no). A missed OR item of another kind gets one of its own kind, then the both-parts card.
  *   - NOT ( … ): the same kind of card against NOT (A AND B) and against NOT (A OR B), so one is yes and one is no.
  *   - Same meaning: one NOT (A AND B) pair and one NOT (A OR B) pair.
+ *   - NOT x, A AND B, and guess the rule: a new random item, never try 1's twin on the worked example's cards.
  * Every other skill uses the default: one new item with the same skill from the same lesson.
  */
 function fresh(missed: Item, rng: Rng): Item[] {
@@ -1705,6 +2122,12 @@ function fresh(missed: Item, rng: Rng): Item[] {
       const first = missed.kind === 'choose' && missed.answer === 'no' ? 'or' : 'and';
       return [bracketYesNoAs(rng, 'new', skin(), first), bracketYesNoAs(rng, 'new', skin(), first === 'and' ? 'or' : 'and')];
     }
+    // Try 1 of these lessons is the twin on the worked example's six cards, and it comes first in every pack. The
+    // default would find it first every time: the same six cards again, often with the rule just missed. A new
+    // example is a new deck (or a new rule machine) of the same family instead.
+    case 's2.not': return [make(notTap)];
+    case 's2.and': return [make(andTap)];
+    case 's2.guess-rule': return [make(rng.pick([guessEasy, guessOr, guessHard]))];
     case 's2.not-both': return [make(notAndTap), make(notOrTap)];
     case 's2.not-either': return [make(notOrTap), make(notAndTap)];
     case 's2.same-meaning': {

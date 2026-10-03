@@ -3,7 +3,8 @@
  * and the rule), so the engine's answer, explanation and feedback are checked against the page itself.
  */
 import { describe, expect, it } from 'vitest';
-import { L4_EXAMPLE, stop1 } from '../../content/stop1';
+import { L4_DRILL, L4_EXAMPLE, L4_FIRST_QUIZ, L4_FIRST_QUIZ_WORK, L5_EXAMPLE, L6_EXAMPLE, L7_EXAMPLE, stop1 } from '../../content/stop1';
+import { checkDrill, marksToTap } from '../drill';
 import { createRng } from '../rng';
 import {
   SIGN_RULES,
@@ -16,6 +17,7 @@ import {
   signDeniesAnswer,
   signHolds,
   signItem,
+  signTwins,
   signWords,
   solutions,
   trueSigns,
@@ -377,19 +379,257 @@ describe('treasure signs', () => {
     }
   });
 
-  it('lesson 4 practice starts with the rule the cards teach and uses every rule', () => {
+  it('T-read: plurals are spelled out (“the other boxes,” never “boxs”) in every hint and explanation, in every skin and rule', () => {
+    const PLURAL: Record<SignSkin, string> = { chest: 'chests', door: 'doors', cave: 'caves', box: 'boxes' };
+    for (const skin of SIGN_SKINS) {
+      expect(signWords(skin).nouns).toBe(PLURAL[skin]);
+      for (let seed = 1; seed <= 40; seed++) {
+        const it = signItem(createRng(seed), { skin, rule: SIGN_RULES[seed % 4] }).item as unknown as Item;
+        expect(it.hint).toBe(`Here is one ${skin}, checked for you. Check the other ${PLURAL[skin]} the same way.`);
+        const text = [it.prompt, it.explain, it.hint ?? '', ...teachStrings(it)].join('\n');
+        expect(text).not.toMatch(/\bboxs\b|\b(chest|door|cave|boxe)ss\b/);
+      }
+    }
+    // The lesson's own quiz, check and arcade items too (a box board is in every practice set).
+    for (let seed = 1; seed <= 40; seed++) {
+      const items = [...stop1.lessons[3].practice(createRng(seed)), ...stop1.check!(createRng(seed)).filter((x) => x.lesson === 's1.l4')];
+      for (const it of items) expect([it.hint ?? '', ...teachStrings(it)].join('\n'), it.id).not.toMatch(/\bboxs\b/);
+      expect(items.some((it) => it.hint === 'Here is one box, checked for you. Check the other boxes the same way.'), `seed ${seed}`).toBe(true);
+    }
+  });
+
+  it('lesson 4 teaches one rule: the chest example stays, “Other rules” is gone, and every quiz, check and arcade item says “Exactly one sign is true.”', () => {
+    const l4 = stop1.lessons[3];
+    expect(l4.ideas.map((c) => c.title)).toEqual(['Three chests', 'The rule', 'Try each chest', 'An example']);
+    const ruleOf = (it: Item) => (it.scene?.kind === 'boxes' ? it.scene.rule : '');
+    for (let seed = 1; seed <= 40; seed++) {
+      for (const it of l4.practice(createRng(seed))) expect(ruleOf(it), it.id).toBe('Exactly one sign is true.');
+      for (const it of stop1.check!(createRng(seed)).filter((x) => x.lesson === 's1.l4')) expect(ruleOf(it)).toBe('Exactly one sign is true.');
+      const a = stop1.practice!(createRng(seed));
+      if (a.lesson === 's1.l4') expect(ruleOf(a)).toBe('Exactly one sign is true.');
+    }
+  });
+
+  it('Do: the same chest board as the example. Silver is shown (False, False, True, 1, Keep); the learner marks Gold (True, True, False, 2, Reject)', () => {
+    const l4 = stop1.lessons[3];
+    const step = l4.drill![0];
+    expect(l4.drill!.length).toBe(1);
+    expect(step).toBe(L4_DRILL);
+    expect(step.scene).toEqual(l4.ideas[3].scene);
+    const [silver, gold] = step.rows;
+    expect(silver.label).toBe('Pretend the treasure is in the Silver chest.');
+    expect(silver.marks.every((m) => m.given)).toBe(true);
+    expect(silver.marks.map((m) => m.answer)).toEqual(['false', 'false', 'true', '1', 'keep']);
+    expect(gold.label).toBe('Pretend the treasure is in the Gold chest.');
+    expect(gold.marks.some((m) => m.given)).toBe(false);
+    expect(gold.marks.map((m) => m.answer)).toEqual(['true', 'true', 'false', '2', 'reject']);
+    // Re-solved from the words on the board.
+    const boxes = step.scene!.kind === 'boxes' ? step.scene!.boxes : [];
+    const read = boxes.map((b, i) => readSign('chest', i, b.sign));
+    expect(gold.marks.slice(0, 3).map((m) => m.answer)).toEqual(read.map((f) => String(f(0))));
+    expect(silver.marks.slice(0, 3).map((m) => m.answer)).toEqual(read.map((f) => String(f(1))));
+    // No answer buttons on this board: nothing asks which chest.
+    expect(JSON.stringify(step)).not.toMatch(/Which chest/);
+    // Right taps pass; a wrong Silver-sign tap names the first mismatch in plain words.
+    const right = Object.fromEntries(marksToTap(step).map((m) => [m.id, m.answer]));
+    expect(checkDrill(step, right).done).toBe(true);
+    const wrong = checkDrill(step, { ...right, 'case0-sign1': 'false' });
+    expect(wrong.done).toBe(false);
+    expect(wrong.message).toBe('If the treasure is in the Gold chest, the Silver chest sign is true. It says, “The treasure is not in this chest.” The treasure is not in the Silver chest.');
+    // Every wrong option of every mark has its own words, at the reading level.
+    for (const m of marksToTap(step)) {
+      for (const o of m.options) if (o.id !== m.answer) expect(m.why[o.id], `${m.id}:${o.id}`).toBeTruthy();
+      for (const t of Object.values(m.why)) {
+        expect(longestSentence(t).words, t).toBeLessThanOrEqual(READING.maxSentenceWords);
+      }
+    }
+    const text = [step.title, ...step.body, step.done, ...step.rows.flatMap((r) => [r.label, r.note ?? '', ...r.marks.flatMap((m) => Object.values(m.why))])].join(' ');
+    expect(fkGrade(text), text).toBeLessThanOrEqual(READING.maxGrade);
+  });
+
+  it('Quiz try 1 is the frozen cave board every time, and its answer buttons wait until every case is marked', () => {
+    for (let seed = 1; seed <= 20; seed++) {
+      const first = stop1.lessons[3].practice(createRng(seed))[0];
+      if (first.kind !== 'choose' || first.scene?.kind !== 'boxes') throw new Error('not a sign item');
+      expect(first.prompt).toBe('Read the signs and the rule. Which cave has the dragon egg?');
+      expect(first.scene.boxes.map((b) => b.sign)).toEqual(['The dragon egg is not in the Moss cave.', 'The dragon egg is in the Moss cave.', 'The dragon egg is not in the Ice cave.']);
+      expect(first.scene.rule).toBe('Exactly one sign is true.');
+      expect(first.choices.find((c) => c.id === first.answer)!.label).toBe('Ice cave');
+      const work = first.workFirst!;
+      expect(work).toBe(L4_FIRST_QUIZ_WORK);
+      expect(work.rows.every((r) => r.marks.every((m) => !m.given))).toBe(true);
+      // Ice: True, False, False, 1, Keep. Fire: True, False, True, 2, Reject. Moss: False, True, True, 2, Reject.
+      expect(work.rows.map((r) => r.marks.map((m) => m.answer))).toEqual([
+        ['true', 'false', 'false', '1', 'keep'],
+        ['true', 'false', 'true', '2', 'reject'],
+        ['false', 'true', 'true', '2', 'reject'],
+      ]);
+      const read = first.scene.boxes.map((b, i) => readSign('cave', i, b.sign));
+      work.rows.forEach((r, t) => expect(r.marks.slice(0, 3).map((m) => m.answer)).toEqual(read.map((f) => String(f(t)))));
+    }
+    expect(L4_FIRST_QUIZ.answer).toBe(0);
+    expect(solutions(L4_FIRST_QUIZ.signs, 'one')).toEqual([0]);
+  });
+
+  it('Quiz tries 2-4: a door board, a box board and a chest twin with one sign changed, in any order', () => {
+    const orders = new Set<string>();
     for (let seed = 1; seed <= 40; seed++) {
       const items = stop1.lessons[3].practice(createRng(seed));
-      const rules = items.map((it) => (it.scene?.kind === 'boxes' ? it.scene.rule : ''));
-      expect(rules[0]).toBe('Exactly one sign is true.');
-      expect(new Set(items.map((it) => it.skill)).size).toBe(2);
-      const kinds: SignRule[] = [];
-      for (const it of items) {
-        if (it.scene?.kind !== 'boxes') continue;
-        const r = it.scene.rule;
-        kinds.push(r.startsWith('Exactly one') ? 'one' : r.startsWith('Exactly two') ? 'two' : r.startsWith('Every') ? 'none' : 'owner');
+      expect(items.length).toBe(4);
+      const skinOf = (it: Item) => (it.kind === 'choose' ? SIGN_SKINS.find((k) => signWords(k).name(0) === it.choices[0].label)! : null);
+      const rest = items.slice(1).map(skinOf);
+      expect([...rest].sort()).toEqual(['box', 'chest', 'door']);
+      orders.add(rest.join());
+      const twin = items.find((it) => skinOf(it) === 'chest')!;
+      if (twin.scene?.kind !== 'boxes') throw new Error('no boxes');
+      const example = signBoxes(L4_EXAMPLE, 'chest').map((b) => b.sign);
+      const changed = twin.scene.boxes.filter((b, i) => b.sign !== example[i]);
+      expect(changed.length, JSON.stringify(twin.scene.boxes)).toBe(1);
+      // Its answer is never Silver, the example's answer.
+      expect(twin.kind === 'choose' && twin.choices.find((c) => c.id === twin.answer)!.label).not.toBe('Silver chest');
+      for (const it of items.slice(1)) expect(it.workFirst).toBeUndefined();
+    }
+    expect(orders.size).toBeGreaterThan(1);
+    expect(signTwins(L4_EXAMPLE).every((t) => solutions(t.signs, 'one').length === 1)).toBe(true);
+  });
+
+  it('the Hint shows one case already marked, and never the answer case', () => {
+    for (let seed = 1; seed <= 40; seed++) {
+      for (const it of stop1.lessons[3].practice(createRng(seed))) {
+        if (it.kind !== 'choose') continue;
+        expect(it.hint).not.toMatch(/Count the true signs\. Then try the next/);
+        const c = it.hintCase!;
+        expect(c.truths!.length).toBe(4);
+        expect(c.truths![3]).toEqual({ who: 'Fits the rule', value: false });
+        const answerName = it.choices.find((x) => x.id === it.answer)!.label;
+        expect(c.label).not.toContain(answerName);
+        expect(c.note).toMatch(/Reject /);
       }
-      expect(new Set(kinds).size).toBe(4);
     }
   });
 });
+
+describe('the other sign rules: one lesson each, See -> Do -> Quiz (skill-drill handoff)', () => {
+  const SPECS: { id: string; rule: SignRule; text: string; example: typeof L5_EXAMPLE }[] = [
+    { id: 's1.l5', rule: 'none', text: 'Every sign is false.', example: L5_EXAMPLE },
+    { id: 's1.l6', rule: 'two', text: 'Exactly two signs are true.', example: L6_EXAMPLE },
+    { id: 's1.l7', rule: 'owner', text: 'The sign on the chest with the treasure is true. The other signs are false.', example: L7_EXAMPLE },
+  ];
+  const lessonOf = (id: string) => stop1.lessons.find((l) => l.id === id)!;
+  /** The rule on a board, with the owner rule's box and prize words made the same in every skin. */
+  const ruleOf = (it: Item) =>
+    (it.scene?.kind === 'boxes' ? it.scene.rule : '').replace(/the (door|cave|box) with the (prize|dragon egg) is true/, 'the chest with the treasure is true');
+  /** Whether the rule fits with the treasure in box t, from the signs as the page words them. */
+  const fitsFromWords = (boxes: readonly SignBox[], skin: SignSkin, rule: SignRule, t: number) => {
+    const truth = boxes.map((b, i) => readSign(skin, i, b.sign)(t));
+    const n = truth.filter(Boolean).length;
+    return rule === 'none' ? n === 0 : rule === 'two' ? n === 2 : rule === 'one' ? n === 1 : truth[t] && n === 1;
+  };
+
+  it('Stop 1 now has seven lessons; the sign rules come one per lesson, after Treasure signs', () => {
+    expect(stop1.lessons.map((l) => l.id)).toEqual(['s1.l1', 's1.l2', 's1.l3', 's1.l4', 's1.l5', 's1.l6', 's1.l7']);
+    expect(stop1.lessons.slice(4).map((l) => l.title)).toEqual(['Every sign is false', 'Exactly two signs are true', 'The owner’s sign']);
+  });
+
+  it.each(SPECS)('$id See: the worked example is computed from its words and concludes the one chest that fits', ({ id, rule, text, example }) => {
+    const l = lessonOf(id);
+    const card = l.ideas.find((c) => c.title === 'An example')!;
+    expect(l.ideas[l.ideas.length - 1]).toBe(card);
+    if (card.scene?.kind !== 'boxes') throw new Error('no boxes');
+    expect(card.scene.rule).toBe(text);
+    const fits = [0, 1, 2].filter((t) => fitsFromWords(card.scene!.kind === 'boxes' ? card.scene!.boxes : [], 'chest', rule, t));
+    expect(fits).toEqual([example.answer]);
+    expect(solutions(example.signs, rule)).toEqual([example.answer]);
+    expect(card.body[card.body.length - 1]).toBe(signConclusion(example, 'chest'));
+    expect(card.body.length).toBe(4);
+    for (const line of card.body) expect(longestSentence(line).words, line).toBeLessThanOrEqual(READING.maxSentenceWords);
+  });
+
+  it.each(SPECS)('$id Do: the same board; the kept chest is shown, the learner marks a rejected one, every mark from the words', ({ id, example }) => {
+    const l = lessonOf(id);
+    const step = l.drill![0];
+    expect(l.drill!.length).toBe(1);
+    expect(step.scene).toEqual(l.ideas[l.ideas.length - 1].scene);
+    const [shown, mine] = step.rows;
+    expect(shown.marks.every((m) => m.given)).toBe(true);
+    expect(mine.marks.some((m) => m.given)).toBe(false);
+    const w = signWords('chest');
+    expect(shown.label).toBe(`Pretend the treasure is in ${w.the(example.answer)}.`);
+    const reject = [0, 1, 2].find((b) => b !== example.answer)!;
+    expect(mine.label).toBe(`Pretend the treasure is in ${w.the(reject)}.`);
+    const boxes = step.scene!.kind === 'boxes' ? step.scene!.boxes : [];
+    for (const [row, t] of [[shown, example.answer], [mine, reject]] as const) {
+      const truth = boxes.map((b, i) => readSign('chest', i, b.sign)(t));
+      expect(row.marks.slice(0, 3).map((m) => m.answer)).toEqual(truth.map(String));
+      expect(row.marks[3].answer).toBe(String(truth.filter(Boolean).length));
+      expect(row.marks[4].answer).toBe(t === example.answer ? 'keep' : 'reject');
+    }
+    expect(checkDrill(step, Object.fromEntries(marksToTap(step).map((m) => [m.id, m.answer]))).done).toBe(true);
+    expect(JSON.stringify(step)).not.toMatch(/Which chest/);
+  });
+
+  it.each(SPECS)('$id Quiz: a twin of the example first (a new answer), then a door, a cave and a box, all with this rule', ({ id, rule, text, example }) => {
+    const l = lessonOf(id);
+    const shownSets = [L4_EXAMPLE, L4_FIRST_QUIZ, L5_EXAMPLE, L6_EXAMPLE, L7_EXAMPLE].map((p) => JSON.stringify(signBoxes(p, 'chest').map((b) => b.sign)));
+    for (let seed = 1; seed <= 30; seed++) {
+      const items = l.practice(createRng(seed));
+      expect(items.length).toBe(4);
+      for (const it of items) {
+        expect(ruleOf(it), it.id).toBe(text);
+        if (it.kind !== 'choose' || it.scene?.kind !== 'boxes') throw new Error('not a sign item');
+        const skin = SIGN_SKINS.find((k) => signWords(k).name(0) === it.choices[0].label)!;
+        const fits = [0, 1, 2].filter((t) => fitsFromWords((it.scene as { boxes: SignBox[] }).boxes, skin, rule, t));
+        expect(fits.map((t) => (it.scene as { boxes: SignBox[] }).boxes[t].id), it.id).toEqual([it.answer]);
+        expect(it.hintCase, it.id).toBeDefined();
+      }
+      const [twin, ...rest] = items;
+      expect(twin.fixed).toBe(true);
+      if (twin.kind !== 'choose' || twin.scene?.kind !== 'boxes') throw new Error('no twin');
+      const ex = signBoxes(example, 'chest').map((b) => b.sign);
+      expect(twin.scene.boxes.filter((b, i) => b.sign !== ex[i]).length).toBe(1);
+      expect(twin.answer).not.toBe(signBoxes(example, 'chest')[example.answer].id);
+      const skins = rest.map((it) => (it.kind === 'choose' ? SIGN_SKINS.find((k) => signWords(k).name(0) === it.choices[0].label) : null));
+      expect([...skins].sort()).toEqual(['box', 'cave', 'door']);
+      // A random board is never a worked example (or the frozen cave) in new words.
+      for (const it of rest) {
+        if (it.scene?.kind !== 'boxes' || it.kind !== 'choose') continue;
+        const skin = SIGN_SKINS.find((k) => signWords(k).name(0) === it.choices[0].label)!;
+        const asChest = JSON.stringify(signsOnBoard(it.scene.boxes, skin));
+        expect(shownSets.map((x) => JSON.stringify(signsFromTexts(JSON.parse(x)))).includes(asChest)).toBe(false);
+      }
+    }
+  });
+
+  it('the stop check has one sign puzzle per sign lesson, each with its own rule; the Arcade and new examples keep the lesson’s rule', () => {
+    const want: Record<string, string> = { 's1.l4': 'Exactly one sign is true.', 's1.l5': 'Every sign is false.', 's1.l6': 'Exactly two signs are true.', 's1.l7': 'The sign on the chest with the treasure is true. The other signs are false.' };
+    const ruleText = ruleOf;
+    for (let seed = 1; seed <= 60; seed++) {
+      const check = stop1.check!(createRng(seed));
+      expect(check.length).toBe(10);
+      for (const id of Object.keys(want)) {
+        const signs = check.filter((x) => x.lesson === id);
+        expect(signs.length, `${seed} ${id}`).toBe(1);
+        expect(ruleText(signs[0])).toBe(want[id]);
+      }
+      const a = stop1.practice!(createRng(seed));
+      if (want[a.lesson]) expect(ruleText(a)).toBe(want[a.lesson]);
+    }
+    for (const spec of SPECS) {
+      const missed = lessonOf(spec.id).practice(createRng(3))[1];
+      const set = freshCheckSet(stop1, missed, 7, [], 1);
+      expect(set.length).toBe(1);
+      expect(set[0].lesson).toBe(spec.id);
+      expect(ruleOf(set[0])).toBe(ruleOf(missed));
+    }
+  });
+});
+
+/** The signs of a board, read back from its words (any skin), as chest-independent sign objects. */
+function signsOnBoard(boxes: readonly SignBox[], skin: SignSkin): Sign[] {
+  const w = signWords(skin);
+  return boxes.map((b, i) => {
+    const forms: Sign[] = [{ t: 'here' }, { t: 'notHere' }, ...[0, 1, 2].filter((x) => x !== i).flatMap((x): Sign[] => [{ t: 'in', x }, { t: 'notIn', x }])];
+    return forms.find((f) => w.signText(f) === b.sign)!;
+  });
+}
+const signsFromTexts = (texts: string[]): Sign[] => signsOnBoard(texts.map((sign, i) => ({ id: `b${i + 1}`, name: '', sign })), 'chest');

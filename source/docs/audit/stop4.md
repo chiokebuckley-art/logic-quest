@@ -1,5 +1,10 @@
 # Stop 4 · Grid Detective: wrong-answer audit
 
+> Since the skill-drill handoff (see `drill-stop4.md`), every lesson has guided boards before its quiz, and every hint
+> shows one marked case (`hintCase`). Lesson 5's proofs are one-part grids only: the two-part rows below
+> (`proofPuzzle (two-part grids)`) still describe feedback the engine builds and tests, but no quiz, check, Arcade item
+> or new example asks them, because no card or board tests a linking clue alone yet.
+
 Every Stop 4 item now carries `teach` (rule, terms, cases, remember, a simpler example), and every wrong choice of
 every choose item has its own `ChoiceFeedback` that names its gap and shows a counterexample, following the handoff
 "Make wrong answers teachable moments" (v1.0). The cases are boxes, rows or columns described in words, or whole ways

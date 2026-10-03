@@ -71,13 +71,30 @@ export interface LessonRunnerProps {
   seed: number;
   readAloud: boolean;
   onAnswer(record: AnswerRecord): void;
-  /** All key-idea cards read and every practice item finished. */
+  /**
+   * The lesson is passed: the guided boards were marked right, every planned try is finished, and the pass rule
+   * (LessonDef.pass, default 3 right on the first try with no hint) is met. Reading the cards never calls this.
+   */
   onComplete(): void;
   onExit(): void;
-  /** Pick up a lesson left partway: the next try (0-based) and the first-try wins so far. Skips the key ideas. */
-  start?: { next: number; firstTry: number };
-  /** After each try: the next try (0-based) and the first-try wins so far, so the host can save the place. */
-  onProgress?(next: number, firstTry: number): void;
+  /** The guided boards (the Do step) were marked right. The host records it; the lesson is not done yet. */
+  onDrilled?(): void;
+  /** Pick up a lesson left partway (see LessonProgress). Skips the key ideas, and the boards when they were done. */
+  start?: LessonProgress;
+  /** After the boards, after a first miss, and after each try, so the host can save the place. */
+  onProgress?(progress: LessonProgress): void;
+  /** The pass rule can no longer be met in this run (no more quiz items): start the lesson again with new items. */
+  onRestart?(): void;
+}
+
+/** Where a lesson run is: the next quiz try (0-based), first-try wins, the boards, and each quiz answer. */
+export interface LessonProgress {
+  next: number;
+  firstTry: number;
+  drilled?: boolean;
+  results?: { clean: boolean; tags: string[] }[];
+  /** The try (0-based) whose first answer was wrong before the app closed: it no longer counts as a first try. */
+  missed?: number;
 }
 
 export interface CheckRunnerProps {

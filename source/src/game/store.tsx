@@ -163,7 +163,13 @@ export interface Actions {
   removePlayer(id: string): void;
   setPin(id: string, pin: string): boolean;
   removePin(id: string): void;
+  /**
+   * Mark a lesson done. A lesson with guided boards is done only after markDrilled for it: opening or reading the
+   * cards never passes a lesson.
+   */
   completeLesson(stopId: string, lessonId: string): void;
+  /** The learner marked a lesson's guided boards right (the Do step). */
+  markDrilled(lessonId: string): void;
   /** Remember (or forget, with null) the lesson in progress. */
   setLessonRun(run: saves.LessonRun | null): void;
   finishCheck(stopId: string, kind: CheckKind, items: Item[], records: AnswerRecord[]): CheckOutcome | null;
@@ -351,8 +357,20 @@ export function StoreProvider({ children, kv: kvProp }: { children: ReactNode; k
         dispatch({ type: 'save', fn: (d) => ({ ...d, lessonRun: run }) });
       },
 
+      markDrilled: (lessonId) => {
+        dispatch({ type: 'save', fn: (d) => saves.markDrilled(d, lessonId) });
+      },
+
       completeLesson: (stopId, lessonId) => {
-        dispatch({ type: 'save', fn: (d) => ({ ...d, lessonRun: d.lessonRun?.lessonId === lessonId ? null : d.lessonRun, stops: { ...d.stops, [stopId]: mastery.completeLesson(d.stops[stopId], lessonId) } }) });
+        const lesson = stopById(stopId)?.lessons.find((l) => l.id === lessonId);
+        dispatch({
+          type: 'save',
+          fn: (d) => {
+            // The guided boards come first: without them the lesson is not passed, whatever called this.
+            if (lesson?.drill?.length && !d.drilled.includes(lessonId)) return d;
+            return { ...d, lessonRun: d.lessonRun?.lessonId === lessonId ? null : d.lessonRun, stops: { ...d.stops, [stopId]: mastery.completeLesson(d.stops[stopId], lessonId) } };
+          },
+        });
       },
 
       finishCheck: (stopId, kind, items, records) => {
