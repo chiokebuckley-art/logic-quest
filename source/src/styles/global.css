@@ -344,7 +344,7 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 .tile-btn:hover { border-color: var(--brass); }
 .tile-value { font-family: var(--font-display); font-weight: 700; font-size: 22px; line-height: 1.2; }
 .tile-label { font-size: 12px; color: var(--text-2); }
-.path-strip { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 4px; }
+.path-strip { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; }
 .path-dot { height: 14px; border-radius: 7px; background: #6b74a8; }
 .path-dot.gold { background: var(--brass); }
 .path-dot.passed { background: var(--teal); }

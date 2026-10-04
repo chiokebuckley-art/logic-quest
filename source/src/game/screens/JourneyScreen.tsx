@@ -1,5 +1,5 @@
 /**
- * Journey (1c): the 12 stops on one rail. Main track (1–10), side track (11–12) and a Pattern Lab chip.
+ * Journey (1c): the 13 stops on one rail. Main track (1–11), side track (12–13) and a Pattern Lab chip.
  * Tapping a stop opens its Stop page, which holds everything about that stop.
  */
 import { nextStep, viewAll, type StopView } from '../../engine/journey/mastery';
@@ -71,7 +71,7 @@ export function JourneyScreen({ route }: { route?: Extract<Route, { name: 'journ
   if (!save) return null;
   const track = route?.track ?? 'main';
   const all = viewAll(STOPS, save.stops, today);
-  const views = all.filter(({ stop }) => (track === 'side' ? stop.n >= 11 : stop.n <= 10));
+  const views = all.filter(({ stop }) => (track === 'side' ? stop.n >= 12 : stop.n <= 11));
   const next = nextStep(STOPS, save.stops, today);
   const counts = stopCounts(save.stops);
 
@@ -85,7 +85,7 @@ export function JourneyScreen({ route }: { route?: Extract<Route, { name: 'journ
       </div>
       <div className="sl-chips" role="tablist" aria-label="Track">
         <button type="button" role="tab" aria-selected={track === 'main'} className="sl-chip c-gold" onClick={() => actions.navigate({ name: 'journey' })}>Main track</button>
-        <button type="button" role="tab" aria-selected={track === 'side'} className="sl-chip c-gold" onClick={() => actions.navigate({ name: 'journey', track: 'side' })}>Side track · 11, 12</button>
+        <button type="button" role="tab" aria-selected={track === 'side'} className="sl-chip c-gold" onClick={() => actions.navigate({ name: 'journey', track: 'side' })}>Side track · 12, 13</button>
         <button type="button" className="sl-chip c-violet" onClick={() => actions.navigate({ name: 'library', kind: 'lab' })}>Pattern Lab</button>
       </div>
 

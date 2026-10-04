@@ -148,6 +148,8 @@ interface DrillGridProps {
 /** A grid board: rows by columns of boxes. Given boxes are drawn marked; the learner taps the others. */
 function DrillGrid({ step, picks, wrong, locked, onPick }: DrillGridProps) {
   const cols = step.columns ?? [];
+  /** A row name with a long word ("Sprinkler"): a wider name column, so the word never breaks at 320px. */
+  const longRows = step.rows.some((r) => r.label.split(/\s+/).some((w) => w.length >= 8));
   const refs = useRef<Record<string, HTMLButtonElement | null>>({});
   const [said, setSaid] = useState('');
   const onKey = (e: KeyboardEvent<HTMLButtonElement>, r: number, c: number) => {
@@ -200,7 +202,7 @@ function DrillGrid({ step, picks, wrong, locked, onPick }: DrillGridProps) {
         Tap a box once for <strong className="play-no-word"><span aria-hidden="true">✗ </span>no</strong>, twice for{' '}
         <strong className="play-yes-word"><span aria-hidden="true">✓ </span>yes</strong>, and a third time to clear it.
       </p>
-      <table className={`play-grid play-drill-grid${cols.length >= 4 ? ' play-grid--many' : cols.length === 3 ? ' play-drill-grid--wide' : ''}`}>
+      <table className={`play-grid play-drill-grid${cols.length >= 4 ? ' play-grid--many' : cols.length === 3 ? ' play-drill-grid--wide' : ''}${longRows ? ' play-drill-grid--longrows' : ''}`}>
         {step.caption && <caption className="play-grid-cap">{step.caption}</caption>}
         <thead>
           <tr>

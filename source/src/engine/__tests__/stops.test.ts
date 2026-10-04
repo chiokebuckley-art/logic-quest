@@ -113,6 +113,10 @@ function caseProblems(c: TeachCase, where: string): string[] {
 
 const only = process.env.STOP ? Number(process.env.STOP) : null;
 const built = STOPS.filter((s) => s.ready && (only === null || s.n === only));
+/** LESSON=s7.l2: check one lesson only (while a stop is being built). Stop-wide tests (the check, the Arcade) are skipped. */
+const onlyLesson = process.env.LESSON ?? null;
+const lessonsOf = (stop: StopDef) => stop.lessons.filter((l) => onlyLesson === null || l.id === onlyLesson);
+const stopWide = onlyLesson === null ? it : it.skip;
 
 function permutations<T>(xs: T[]): T[][] {
   if (xs.length <= 1) return [xs];
@@ -276,6 +280,7 @@ describe.each(built.map((s) => [s.n, s] as const))('stop %i', (_n, stop) => {
     expect(stop.lessons.length).toBeLessThanOrEqual(7);
     stop.lessons.forEach((l, i) => {
       expect(l.id).toBe(`s${stop.n}.l${i + 1}`);
+      if (!lessonsOf(stop).includes(l)) return;
       expect(l.ideas.length, l.id).toBeGreaterThanOrEqual(3);
       expect(l.ideas.length, l.id).toBeLessThanOrEqual(6);
       for (const c of l.ideas) expect(c.body.join(' ').trim().length, `${l.id} ${c.title}`).toBeGreaterThan(0);
@@ -285,7 +290,7 @@ describe.each(built.map((s) => [s.n, s] as const))('stop %i', (_n, stop) => {
   });
 
   it('lesson practice: 3-5 valid items, the same for the same seed', () => {
-    for (const l of stop.lessons) {
+    for (const l of lessonsOf(stop)) {
       for (let seed = 1; seed <= 40; seed++) {
         const items = l.practice(createRng(seed));
         expect(items.length, l.id).toBeGreaterThanOrEqual(3);
@@ -301,7 +306,7 @@ describe.each(built.map((s) => [s.n, s] as const))('stop %i', (_n, stop) => {
     }
   });
 
-  it('check: 8-10 valid items covering every lesson, with a conflict item, new on every seed', () => {
+  stopWide('check: 8-10 valid items covering every lesson, with a conflict item, new on every seed', () => {
     const seen = new Set<string>();
     for (let seed = 1; seed <= 300; seed++) {
       const items = stop.check!(createRng(seed));
@@ -318,12 +323,12 @@ describe.each(built.map((s) => [s.n, s] as const))('stop %i', (_n, stop) => {
     expect(seen.size).toBeGreaterThanOrEqual(280);
   });
 
-  it('arcade practice gives valid items', () => {
+  stopWide('arcade practice gives valid items', () => {
     for (let seed = 1; seed <= 100; seed++) expect(problems(stop, stop.practice!(createRng(seed)))).toEqual([]);
   });
 
   it(`reads at a 6th-grade level (Flesch-Kincaid <= ${READING.maxGrade}, sentences <= ${READING.maxSentenceWords} words)`, () => {
-    for (const l of stop.lessons) {
+    for (const l of lessonsOf(stop)) {
       const ideas = l.ideas.flatMap(cardText).join('\n');
       const practice = prose([1, 2, 3, 4, 5].flatMap((s) => l.practice(createRng(s))));
       for (const [what, text] of [['ideas', ideas], ['practice', practice]] as const) {
@@ -332,6 +337,7 @@ describe.each(built.map((s) => [s.n, s] as const))('stop %i', (_n, stop) => {
         expect(long.words, `${l.id} ${what}: "${long.sentence}"`).toBeLessThanOrEqual(READING.maxSentenceWords);
       }
     }
+    if (onlyLesson !== null) return;
     const check = prose([1, 2, 3].flatMap((s) => stop.check!(createRng(s))));
     expect(fkGrade(check), 'check grade').toBeLessThanOrEqual(READING.maxGrade);
   });
@@ -339,7 +345,7 @@ describe.each(built.map((s) => [s.n, s] as const))('stop %i', (_n, stop) => {
 
 describe.each(built.map((s) => [s.n, s] as const))('stop %i: See -> Do -> Quiz', (_n, stop) => {
   it('guided boards come before the quiz: computed marks, words for every wrong mark, the worked example’s board', () => {
-    for (const l of stop.lessons) {
+    for (const l of lessonsOf(stop)) {
       if (!drillFor(l.id)) continue;
       expect(l.drill?.length ?? 0, `${l.id} has guided boards`).toBeGreaterThan(0);
       l.drill!.forEach((st, j) => expect(drillProblems(st, seeBoards(l), `${l.id} board ${j + 1}`)).toEqual([]));
@@ -356,7 +362,7 @@ describe.each(built.map((s) => [s.n, s] as const))('stop %i: See -> Do -> Quiz',
   });
 
   it('every hint shows a marked case; a scaffolded first quiz is marked on its own board; each pass group is in every pack', () => {
-    for (const l of stop.lessons) {
+    for (const l of lessonsOf(stop)) {
       if (!drillFor(l.id)) continue;
       for (let seed = 1; seed <= 20; seed++) {
         const items = l.practice(createRng(seed));
@@ -374,7 +380,9 @@ describe.each(built.map((s) => [s.n, s] as const))('stop %i: See -> Do -> Quiz',
   });
 });
 
-it('the Journey lists 12 stops in order', () => {
-  expect(STOPS.map((s) => s.n)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
-  expect(STOPS.slice(0, 6).every((s) => s.ready) || only !== null || process.env.ALLOW_PLACEHOLDERS === '1').toBe(true);
+it('the Journey lists 13 stops in order; stops 1-7 are built', () => {
+  expect(STOPS.map((s) => s.n)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+  expect(STOPS.map((s) => s.id)).toEqual(STOPS.map((s) => `s${s.n}`));
+  expect(STOPS.slice(0, 7).every((s) => s.ready) || only !== null || process.env.ALLOW_PLACEHOLDERS === '1').toBe(true);
+  expect(STOPS.slice(7).some((s) => s.ready)).toBe(false);
 });

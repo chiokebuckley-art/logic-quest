@@ -188,7 +188,7 @@ export interface Teach {
 interface ItemBase {
   /** Unique within one generated set. */
   id: string;
-  /** Stop number, 1-12. */
+  /** Stop number, 1-13. */
   stop: number;
   /** Lesson where this item's idea is taught, e.g. 's1.l2'. "Learn this again" sends the player there. */
   lesson: string;

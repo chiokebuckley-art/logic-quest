@@ -29,7 +29,7 @@ export function GIcon({ name, size = 22, color }: { name: GameIcon; size?: numbe
 /** Artwork and place name for each stop (the Pattern Lab destinations, reused for stops without their own). */
 const STOP_PLACE: Record<string, string> = {
   s1: 'signal-camp', s2: 'switch-caverns', s3: 'ladder-cliffs', s4: 'fog-marsh', s5: 'trickster-market', s6: 'of-rules',
-  s7: 'twin-isles', s8: 'switch-caverns', s9: 'signal-camp', s10: 'of-rules', s11: 'trickster-market', s12: 'chance-dock',
+  s7: 'fog-marsh', s8: 'twin-isles', s9: 'switch-caverns', s10: 'signal-camp', s11: 'of-rules', s12: 'trickster-market', s13: 'chance-dock',
 };
 
 export function stopPlace(stopId: string): { art: string; name: string } {

@@ -86,7 +86,7 @@ export function StopScreen({ route }: { route: Extract<Route, { name: 'stop' }> 
         </ol>
       )}
 
-      {view.status === 'locked' && <p className="sl-note"><Icon name="lock" size={14} /> {view.label}. You can still look at the Pattern Lab events below.</p>}
+      {view.status === 'locked' && <p className="sl-note"><Icon name="lock" size={14} /> {view.label}.{events.length ? ' You can still look at the Pattern Lab events below.' : ''}</p>}
       {view.status === 'soon' && <p className="sl-note">This stop is coming in a later version.{events.length ? ' Its Pattern Lab events are open now as a preview.' : ''}</p>}
 
       <div className="sl-list">

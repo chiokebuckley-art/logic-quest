@@ -1,5 +1,21 @@
 # LOGIC QUEST
 
+**v0.6.0 — Ways to Think:** a new Stop 7 with five lessons, one for each way of thinking that gives a good guess
+but not a proof. Each lesson is See, Do, Quiz, and every quiz has a question on when that way of thinking fails.
+
+- **Pattern guesses.** Count a bag to tell Must, Likely, Unlikely and Can’t. A streak is a good guess, never a
+  proof, and nothing is ever “due” when each draw goes back.
+- **The best explanation.** Mark which ideas fit each clue, keep the one that fits every clue with the fewest extra
+  things, and change your mind when a new clue rules it out.
+- **Cause or just together?** A fair test changes one thing at a time. Two things that go together may both come
+  from a third thing.
+- **Fair choices.** Three checks from the story's facts: honest, fair to the owner or the promise, hurts no one. A
+  strong wish does not change the facts.
+- **Gut feelings.** A fast guess to start with. Count before you trust it: big, eye-catching things are not
+  always the most.
+- The stops that are still coming move down one: All, Some, None is now Stop 8, and the side track is Stops 12
+  and 13.
+
 **v0.5.0 — The case board:** the treasure sign lessons (Stop 1, Lessons 4–7) now teach on one picture board.
 
 - **See it one chest at a time.** The example shows the Gold chest, then Silver, then Bronze. One tap stamps one sign
@@ -119,7 +135,7 @@ npm run dev        # http://localhost:5192
 
 ## How it plays
 
-- **The Journey** has 12 stops, in first-principles order, from "True or False?" to "Clues & Chances". The
+- **The Journey** has 13 stops, in first-principles order, from "True or False?" to "Clues & Chances". The
   plan for all of them is in [`../docs/logic-quest-plan.md`](../docs/logic-quest-plan.md).
 - **Learn first: See, Do, Quiz.** Every lesson opens with short key-idea cards, which can be read aloud, ending on a
   worked case. Then you mark a case yourself on the same board. Then come 3–5 tries

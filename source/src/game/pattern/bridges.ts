@@ -27,8 +27,8 @@ export const DESTINATIONS = [
   { name: 'Ladder Cliffs', art: 'ladder-cliffs', stop: 's3', events: ['LC-01','LC-02'], purpose: 'Use position and order clues.', paths: ['Explorer','Trailblazer','Logician'] },
   { name: 'Bridge of Rules', art: 'of-rules', stop: 's6', events: ['BR-01'], purpose: 'Match a relationship; check which way it works.', paths: ['Trailblazer','Logician'] },
   { name: 'Twin Isles', art: 'twin-isles', stop: 's6', events: ['TI-01'], purpose: 'Compare relations across two settings.', paths: ['Trailblazer','Logician'] },
-  { name: 'Trickster Market', art: 'trickster-market', stop: 's11', events: ['TM-01','TM-02'], purpose: 'Look for a counterexample. Test rival claims.', paths: ['Logician'] },
-  { name: 'Chance Dock', art: 'chance-dock', stop: 's12', events: ['CD-01','CD-02'], purpose: 'Separate an observation from a guaranteed result.', paths: ['Logician'] },
+  { name: 'Trickster Market', art: 'trickster-market', stop: 's12', events: ['TM-01','TM-02'], purpose: 'Look for a counterexample. Test rival claims.', paths: ['Logician'] },
+  { name: 'Chance Dock', art: 'chance-dock', stop: 's13', events: ['CD-01','CD-02'], purpose: 'Separate an observation from a guaranteed result.', paths: ['Logician'] },
 ] as const;
 
 export interface Token { shape: 'circle' | 'square' | 'triangle'; color: 'teal' | 'gold'; striped?: boolean; label?: string }

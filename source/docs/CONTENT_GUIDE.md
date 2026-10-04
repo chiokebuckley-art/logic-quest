@@ -124,6 +124,26 @@ All of this is player-facing text, so the reading-level rules below apply to it 
 and it requires `teach` on every item and `feedback` on every wrong choice in every lesson of every built stop. Each
 stop's audit worksheet (every distractor, what was missing, the counterexample now shown) is in `docs/audit/`.
 
+## Ways to Think (Stop 7): a good guess is not a proof
+
+Stop 7 teaches ways of thinking that give a good guess, not a proof: pattern guesses, the best explanation, causes,
+fair choices and gut feelings. Each lesson is its own module (`src/content/stop7/<name>.ts`, with its puzzles in
+`src/engine/puzzles/<name>.ts`) and follows the same rules as every lesson, plus these:
+
+- **Show where it fails.** Every quiz pack holds one question tagged `can-fail` (the pass rule asks for it): a
+  streak broken by a new draw, a best guess ruled out by a new clue, a third thing that causes both, a wish that
+  pushes against the facts, a strong feeling that the count proves wrong.
+- **Same words for the same ideas** across the stop: “a good guess”, “a proof”, “for sure”, “likely”, “check it”.
+  Must / Likely / Unlikely / Can’t come from counts (more than half is Likely; never an exact half).
+- **Answers come from a model**, as everywhere else: counts in a bag, which idea fits which clue and its extra things,
+  a table of tests where only one thing changes, three checks per choice from the story's facts, counts of big and
+  small things.
+- **Fair choices stay kid-sized:** found things with a name tag, a promise to give something back, a turn, a broken
+  cup. The three checks are honest, fair to the person (or keeps the promise) and hurts no one. No grown-up ethics
+  words.
+- **Gut feelings are not always wrong.** Some items have the count agree with the gut: the feeling was a good start,
+  and only the count showed it was right.
+
 ## Question kinds
 
 - `choose`: one right choice. Give `feedback` (and so `whyWrong`) for each wrong choice.
@@ -139,7 +159,8 @@ stop's audit worksheet (every distractor, what was missing, the counterexample n
   `pickTips` for cards that should not be picked.
 - Scenes: `things`, `boxes`, `clues`, `text`, `speakers` (speech bubbles) and `grid` (a half-filled grid, drawn as
   a picture for worked examples).
-- `seconds`: a longer check time for big items (150–180 for grids and three islanders).
+- `seconds`: a longer check time for big items (150–180 for grids and three islanders; 120–150 for the long
+  explanation stories in Stop 7, Lesson 2).
 
 Skill tags (`sN.short-name`) appear on the Grown-ups screen. Add a plain name for each new tag to `SKILL_NAMES` in
 `src/game/progressStats.ts`. Every miss becomes a Wrong-Answer Notebook card for its skill, so each skill must

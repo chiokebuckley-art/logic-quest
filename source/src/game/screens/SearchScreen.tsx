@@ -108,7 +108,8 @@ export function SearchScreen({ route }: { route: Extract<Route, { name: 'search'
   if (!save) return null;
 
   const hits = q.trim() ? index.map((e) => ({ e, s: score(e, q) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s) : [];
-  const top = hits.find((x) => x.e.group === 'stop')?.e ?? null;
+  // The top card is a stop only when it matches a real word (a typo match alone, like “cause” for “case”, scores below 2).
+  const top = hits.find((x) => x.e.group === 'stop' && x.s >= 2)?.e ?? null;
   const open = (e: Entry) => {
     if (q.trim()) recents = [q.trim(), ...recents.filter((r) => r !== q.trim())].slice(0, 4);
     actions.navigate(e.route);

@@ -19,8 +19,10 @@ src/
     journey/mastery.ts   Journey rules: lessons first, 100% pass, not yet, lock-in, week check, next step
     save/save.ts         players, PINs, saves, answer stats, export/import, CSV
   content/
-    stops.ts             the 12-stop Journey registry
+    stops.ts             the 13-stop Journey registry
     stop1.ts … stop6.ts  lessons (key-idea cards + practice) and the stop checks
+    stop7.ts, stop7/     Ways to Think: one module per lesson (LessonModule in stop7/common.ts: the lesson, its two
+                         check items, an Arcade item, new examples), put together by stop7.ts
   game/
     store.tsx            React context: players, the active save, screen, autosave
     components/          play components (ItemView, LessonRunner, CheckRunner, …) and chrome (Hud, Nav)

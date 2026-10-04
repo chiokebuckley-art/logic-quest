@@ -86,7 +86,8 @@
 .play-head-text {
   display: flex;
   flex-direction: column;
-  min-width: 0;
+  /* Never narrower than its longest word: a long title word wraps whole, and the dots give up room instead. */
+  min-width: auto;
   flex: 1 1 auto;
   line-height: 1.2;
 }
@@ -110,6 +111,11 @@
   flex-wrap: wrap;
   gap: 6px;
   flex-shrink: 0;
+}
+.play-head .play-dots {
+  flex-shrink: 1;
+  min-width: 0;
+  justify-content: flex-end;
 }
 .play-dot {
   width: 22px;
@@ -1892,6 +1898,15 @@ button.play-cell:hover:not([aria-disabled='true']) {
 }
 .play-drill-grid--wide .play-grid-corner {
   width: 64px;
+}
+/* Row names with a long word ("Sprinkler"): a wider name column and a smaller name, never a word cut in two. */
+.play-drill-grid.play-drill-grid--longrows .play-grid-corner {
+  width: 92px;
+}
+.play-drill-grid--longrows th[scope='row'] {
+  font-size: 13px;
+  overflow-wrap: normal;
+  hyphens: manual;
 }
 .play-drill-twin {
   margin: 0;
