@@ -57,6 +57,7 @@ export function MeScreen() {
         <Row lead={<GIcon name="gauge" color="var(--lime)" />} title="My progress" meta="by stop & day ›" metaTone="muted" onClick={() => actions.navigate({ name: 'progress' })} />
         <Row lead={<GIcon name="medal" color="var(--violet)" />} title="Pattern Lab badges" meta={`${badges.length ? badges.join(', ') : 'none yet'} ›`} metaTone="muted" onClick={() => actions.navigate({ name: 'library', kind: 'lab' })} />
         <Row lead={<GIcon name="home" color="var(--cyan)" />} title="Players & PINs" meta={<span className="sl-ellipsis">{names} ›</span>} metaTone="muted" onClick={() => actions.navigate({ name: 'players', mode: 'list' })} />
+        <Row lead={<GIcon name="cloud-sync" color="var(--teal)" />} title="Sync across devices" meta={player.sync ? 'on ›' : 'off ›'} metaTone="muted" onClick={() => actions.navigate({ name: 'settings', section: 'sync' })} />
         <Row lead={<GIcon name="lab" color="var(--gold)" />} title="Grown-ups" meta="check ›" metaTone="muted" onClick={() => actions.navigate({ name: 'grownups' })} />
         <Row lead={<GIcon name="settings" color="var(--text-2)" />} title="Read aloud · calm timer" meta={`${save.settings.readAloud ? 'on' : 'off'} · ${save.settings.timer ? 'on' : 'off'} ›`} metaTone="muted" onClick={() => actions.navigate({ name: 'settings' })} />
         <Row lead={<GIcon name="scroll" color="var(--text-2)" />} title="Export / import" meta="JSON ›" metaTone="muted" onClick={() => actions.navigate({ name: 'settings' })} />

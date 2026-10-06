@@ -149,6 +149,25 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
   background: rgba(60, 255, 157, 0.14); color: var(--teal-soft); font-weight: 600; font-size: 14px; text-align: center;
 }
 
+/* Sync messages ("Loaded newer progress from the cloud"): shown for a moment above the page. */
+.sync-notice {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  min-height: 44px; padding: 6px 6px 6px 14px; border-bottom: 1px solid rgba(34, 230, 255, 0.45);
+  background: rgba(34, 230, 255, 0.12); color: var(--text); font-size: 14px; line-height: 1.35;
+}
+.sync-notice:not(.on) { min-height: 0; padding: 0; border: 0; }
+.sync-notice-x {
+  flex: none; width: 44px; height: 44px; border: 0; border-radius: 10px; background: transparent;
+  color: var(--text-2); font-size: 22px; line-height: 1; cursor: pointer;
+}
+.sync-code {
+  margin: 0; padding: 12px 10px; border: 1px dashed var(--teal); border-radius: 12px;
+  background: rgba(60, 255, 157, 0.08); color: var(--teal-soft); text-align: center;
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace; font-size: 22px; font-weight: 700;
+  letter-spacing: 0.1em; overflow-wrap: anywhere; user-select: all;
+}
+.sync-input { font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace; letter-spacing: 0.08em; text-transform: uppercase; }
+
 /* ---------- base pieces ---------- */
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;

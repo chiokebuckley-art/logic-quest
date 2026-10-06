@@ -46,7 +46,7 @@ export function GrownUpsScreen() {
             <Row lead={<GIcon name="home" color="var(--gold)" />} title="Players & PINs" sub="Rename, PINs, remove a player" meta="›" onClick={() => actions.navigate({ name: 'settings' })} />
             <Row lead={<GIcon name="compass" color="var(--violet)" />} title="Path" sub="Explorer · Trailblazer · Logician" meta="›" onClick={() => actions.navigate({ name: 'library', kind: 'lab' })} />
             <Row lead={<GIcon name="hourglass" color="var(--text-2)" />} title="Calm timer · read aloud" sub="Play settings" meta="›" onClick={() => actions.navigate({ name: 'settings' })} />
-            <Row lead={<GIcon name="cloud-sync" color="var(--text-2)" />} title="Sync across devices" sub="Use Export / import in Settings for now" meta="coming v0.5" metaTone="muted" />
+            <Row lead={<GIcon name="cloud-sync" color="var(--teal)" />} title="Sync across devices" sub="Play the same player on another device" meta="›" onClick={() => actions.navigate({ name: 'settings', section: 'sync' })} />
           </div>
         </>
       ) : (

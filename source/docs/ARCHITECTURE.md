@@ -18,13 +18,14 @@ src/
     notebook.ts          the Wrong-Answer Notebook: misses come back as fresh questions until fixed
     journey/mastery.ts   Journey rules: lessons first, 100% pass, not yet, lock-in, week check, next step
     save/save.ts         players, PINs, saves, answer stats, export/import, CSV
+    save/sync.ts         cloud sync: LQ codes, config, gzip packing, pull/push, reconcile (syncLink.ts: the link)
   content/
     stops.ts             the 13-stop Journey registry
     stop1.ts … stop6.ts  lessons (key-idea cards + practice) and the stop checks
     stop7.ts, stop7/     Ways to Think: one module per lesson (LessonModule in stop7/common.ts: the lesson, its two
                          check items, an Arcade item, new examples), put together by stop7.ts
   game/
-    store.tsx            React context: players, the active save, screen, autosave
+    store.tsx            React context: players, the active save, screen, autosave, cloud sync
     components/          play components (ItemView, LessonRunner, CheckRunner, …) and chrome (Hud, Nav)
     screens/             Home, Journey, Stop, Library, Me, Search, Lesson, Check, Arcade, Progress/Grown-ups, Notebook, Players, Settings
     hooks/               active-time clock, update check
@@ -131,5 +132,32 @@ same extra items).
 
 Every save carries `game: "logic-quest"`, so saves from other family games are refused. Top-level fields that
 this version does not know (added by a newer version) are carried through untouched. So an older tab that saves
-does not wipe them. Sync across devices will
-use the shared Cloudflare worker with `LQ` codes (planned for v0.5.0).
+does not wipe them. A missing or damaged save loads as a fresh one dated 0, so sync never takes it for news.
+
+## Sync across devices
+
+A synced player carries `sync: {code, rev, at}` in the registry: the secret code, the server revision this device
+last saw, and that save's time. The server (`wordraiders/sync/worker.mjs`, shared with Engineering Quest) keeps one
+save per code and refuses a push whose `baseRev` is not its current revision, handing back the newer save instead.
+
+- **What travels:** `exportSave(player, save)` packed with gzip and base64 (`gz1:`). Never the PIN. A cloud copy is
+  read back with `importSave`, so a save from another game, or a damaged one, is refused.
+- **When:** the store pulls when the sync server is found (for the player already playing), when a linked player is
+  picked, and when the game comes back to the front after 20 seconds or more. A change schedules a push 15 seconds
+  later; hiding or closing the game sends it at once (`keepalive` when the body is small enough), and picking another
+  player sends a snapshot of the outgoing player's save first. Pushes and pulls run one at a time.
+- **Times:** `localChangedAt` is when play last changed the active player's save. It only moves forward, it is the
+  time stamped on the save file, and it is the `savedAt` a push sends. So the cloud records when a copy was played,
+  not when it was pushed. `link.at` is the time of the copy this device last pushed or took.
+- **Which copy wins** (`reconcile`): this device has changed since it last synced when its last change is later than
+  `link.at`. Nothing saved here (time 0) → take the cloud copy. Cloud moved on and this device did not → take it.
+  This device changed and the cloud did not → push. Both changed → the copy played later wins. A push that meets a
+  conflict takes the cloud copy when it is the later one, and otherwise pushes again on top of it. It never pushes
+  over a copy it could not read, and it leaves the cloud alone if sync was turned off meanwhile.
+- **Not a change:** a save just loaded or just taken from the cloud is not written again (the `baseline` ref).
+  Changes the game makes by itself (`quietSaves`: settling a check left open, counting active time) are written
+  under the last real change's time and start no push, so a device left open never beats one that was played.
+- **Limits:** a cloud copy that unpacks to more than 3 MB is refused, and a save keeps at most 200 KB of fields from
+  a newer version. Server errors reach the player as plain words (`sync.MSG`), never as the server's own text.
+- **Address:** `localStorage["logic-quest.sync.url"]`, then `sync.json` next to the build, then the built-in default.
+  `off` in either place hides sync.

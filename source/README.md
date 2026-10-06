@@ -1,5 +1,18 @@
 # LOGIC QUEST
 
+**v0.7.0 — Sync across devices:** play the same player on a phone, a tablet and a computer, the way Engineering
+Quest does.
+
+- **Turn it on once.** Me → **Sync across devices** → **Turn on sync** (a grown-up answers a times question first).
+  The player gets a secret code such as `LQ4K-9TQ2-MHB7`.
+- **Link the other device.** On the other device, tap Me → Switch player → **Link a player from another device**
+  (on a new device, that button is on the first screen), then type the code. The player arrives with all their
+  progress.
+- **It keeps itself in step.** A device checks the cloud when the game opens, when the player is picked and when the
+  game comes back to the front. It saves to the cloud about 15 seconds after a change, and at once when you leave
+  the game or switch player. When both devices changed, the one played later wins.
+- **What travels:** the player's name, color and progress. Never the PIN: a PIN stays on each device.
+
 **v0.6.0 — Ways to Think:** a new Stop 7 with five lessons, one for each way of thinking that gives a good guess
 but not a proof. Each lesson is See, Do, Quiz, and every quiz has a question on when that way of thinking fails.
 
@@ -159,6 +172,32 @@ npm run dev        # http://localhost:5192
   first-try accuracy by skill, what needs practice and what is strong, plus a CSV download.
 - **Players:** "Who's playing?" holds several players on one device, each with an optional 4-digit PIN. Settings
   can export a player to a file and import it on another device.
+- **Sync across devices:** see below.
+
+## Sync across devices
+
+Progress normally lives in each device's browser. **Me → Sync across devices → Turn on sync** (behind the
+grown-up question) gives the current player a secret 12-character sync code such as `LQ4K-9TQ2-MHB7`. On any
+other phone, tablet or computer, tap Me → Switch player → **Link a player from another device** (on a new device it
+is on the first screen) and type the code: the player appears with all their progress. From then on every device
+pulls when the game opens, when that player is picked (after their PIN, if they have one) and when the game comes
+back to the front, and pushes about 15 seconds after a change (at once when the game is hidden or closed, or another
+player is picked). The cloud keeps one save per code with a revision counter, so a device holding an older copy is
+handed the newer save rather than overwriting it; when both devices changed, the copy that was played later wins.
+Only play counts: a device left open, or one that tidies up a check left open, never beats a device that was
+played. Linking always adds a new player on that device (a name already in use gets a
+number); it never replaces a player who is already there. **Turn off** stops syncing on that device only; the cloud
+copy stays.
+
+What travels is the player's export file (name, color and save), gzipped, well under the server's 400 KB cap. The
+PIN never leaves the device. Anyone who has the code can load the player, so keep it private. A browser that cannot
+unzip (Safari before 16.4) cannot sync, and says so; it can still use save files.
+
+The game shares the family sync service (a small Cloudflare Worker with a database, see `wordraiders/sync/`), the
+same one Engineering Quest uses. Logic Quest codes start with `LQ`; every save also carries `game: "logic-quest"`,
+so a save from another game is refused. To point the game at a different server, put its address in `sync.json`
+next to the build (`{"url":"https://..."}`) or in `localStorage["logic-quest.sync.url"]`; the value `off` hides
+sync. Code: `src/engine/save/sync.ts` (codes, packing, server calls, reconcile), wiring in `src/game/store.tsx`.
 
 ## For developers
 

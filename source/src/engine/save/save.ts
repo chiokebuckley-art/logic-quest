@@ -2,10 +2,11 @@ import { freshBridge, parseBridge, type BridgeProgress } from '../../game/patter
 /**
  * Players and saves, kept in the browser's localStorage (the WORDRAIDERS model): a registry of named
  * players, each with an optional 4-digit PIN, and one save per player. Every save carries
- * game: 'logic-quest' so a save from another family game is refused on import (and later on sync).
+ * game: 'logic-quest' so a save from another family game is refused on import and on sync.
  */
 import type { StopProgress } from '../journey/mastery';
 import type { Notebook } from '../notebook';
+import { parseLink, type SyncLink } from './syncLink';
 
 export const REGISTRY_KEY = 'logic-quest.players.v1';
 export const saveKeyFor = (id: string) => `logic-quest.save.${id}`;
@@ -21,6 +22,8 @@ export interface Player {
   pin?: string;
   createdAt: number;
   lastPlayed: number;
+  /** Set while this device syncs the player with the cloud (see sync.ts). */
+  sync?: SyncLink;
 }
 
 export interface Registry {
@@ -124,7 +127,8 @@ const isObj = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 
 const KNOWN_KEYS: ReadonlySet<string> = new Set(Object.keys(newSave(0)));
 /** Up to this many other top-level fields are kept, each at most this long as JSON. */
 const MAX_EXTRA_KEYS = 20;
-const MAX_EXTRA_JSON = 200_000;
+/** All the newer-version fields together. Generous for real fields, small enough that a save can never fill storage. */
+const MAX_EXTRA_TOTAL = 200_000;
 const isDay = (s: unknown): s is string => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
 const strs = (x: unknown, max = 64): string[] => (Array.isArray(x) ? x.filter((s): s is string => typeof s === 'string').slice(0, max) : []);
 const num = (x: unknown, min = 0, max = 1e9) => (typeof x === 'number' && Number.isFinite(x) ? Math.min(max, Math.max(min, Math.floor(x))) : min);
@@ -226,12 +230,14 @@ export function parseSave(raw: unknown): SaveData | null {
   // Fields from a newer version are carried through untouched, so an older tab that saves does not wipe them.
   const extra = s as unknown as Record<string, unknown>;
   let kept = 0;
+  let size = 0;
   for (const [key, value] of Object.entries(raw)) {
     if (KNOWN_KEYS.has(key) || key in Object.prototype || kept >= MAX_EXTRA_KEYS || !/^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(key)) continue;
     let json: string | undefined;
     try { json = JSON.stringify(value); } catch { continue; }
-    if (json === undefined || json.length > MAX_EXTRA_JSON) continue;
+    if (json === undefined || size + json.length > MAX_EXTRA_TOTAL) continue;
     extra[key] = JSON.parse(json) as unknown;
+    size += json.length;
     kept++;
   }
   return s;
@@ -249,6 +255,7 @@ export function parseRegistry(raw: unknown): Registry {
       pin: typeof p.pin === 'string' && p.pin.startsWith('fnv:') ? p.pin : undefined,
       createdAt: num(p.createdAt, 0, 8.64e15),
       lastPlayed: num(p.lastPlayed, 0, 8.64e15),
+      ...(parseLink(p.sync) ? { sync: parseLink(p.sync) } : {}),
     });
   }
   const active = typeof raw.active === 'string' && players.some((p) => p.id === raw.active) ? raw.active : undefined;
@@ -261,7 +268,8 @@ const readJson = (kv: KV, key: string): unknown => {
 
 export function loadRegistry(kv: KV): Registry { return parseRegistry(readJson(kv, REGISTRY_KEY)); }
 export function saveRegistry(kv: KV, reg: Registry): void { kv.setItem(REGISTRY_KEY, JSON.stringify(reg)); }
-export function loadSave(kv: KV, id: string): SaveData { return parseSave(readJson(kv, saveKeyFor(id))) ?? newSave(); }
+/** A missing or damaged save loads as a fresh one dated 0 ("never saved"), so cloud sync never takes it for news. */
+export function loadSave(kv: KV, id: string): SaveData { return parseSave(readJson(kv, saveKeyFor(id))) ?? newSave(0); }
 export function writeSave(kv: KV, id: string, data: SaveData, now = Date.now()): void {
   kv.setItem(saveKeyFor(id), JSON.stringify({ ...data, savedAt: now }));
 }

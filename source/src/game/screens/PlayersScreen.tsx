@@ -1,6 +1,7 @@
-/** "Who's playing?": pick a player (with PIN pad), make a new one, or import a save. */
+/** "Who's playing?": pick a player (with PIN pad), make a new one, import a save, or link a synced player. */
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { COLORS, MAX_PLAYERS, checkPin, isPin, loadSave, type Player } from '../../engine/save/save';
+import { CODE_LENGTH, CODE_PREFIX, normalizeCode } from '../../engine/save/sync';
 import { STOPS } from '../../content/stops';
 import { frontierStop } from '../progressStats';
 import { useStore, type Route } from '../store';
@@ -8,7 +9,7 @@ import { Icon } from '../components/Icon';
 import { initial } from '../components/Hud';
 
 type PlayersRoute = Extract<Route, { name: 'players' }>;
-type Mode = 'list' | 'new' | 'import';
+type Mode = 'list' | 'new' | 'import' | 'link';
 
 const COLOR_NAMES: Record<string, string> = {
   '#9d6bff': 'Purple',
@@ -26,7 +27,7 @@ export function PlayersScreen({ route }: { route: PlayersRoute }) {
   const [pinFor, setPinFor] = useState<string | null>(route.pinFor ?? null);
 
   // Nobody left (for example after removing the last player): go straight to New player.
-  const shown: Mode = players.length ? mode : mode === 'import' ? 'import' : 'new';
+  const shown: Mode = players.length ? mode : mode === 'import' || mode === 'link' ? mode : 'new';
   const pinPlayer = pinFor ? players.find((p) => p.id === pinFor) ?? null : null;
 
   const stopNumbers = useMemo(() => {
@@ -52,8 +53,9 @@ export function PlayersScreen({ route }: { route: PlayersRoute }) {
     );
   }
 
-  if (shown === 'new') return <NewPlayer first={!players.length} onCancel={() => setMode('list')} onImport={() => setMode('import')} />;
+  if (shown === 'new') return <NewPlayer first={!players.length} onCancel={() => setMode('list')} onImport={() => setMode('import')} onLink={() => setMode('link')} />;
   if (shown === 'import') return <ImportSave onCancel={() => setMode(players.length ? 'list' : 'new')} />;
+  if (shown === 'link') return <LinkPlayer onCancel={() => setMode(players.length ? 'list' : 'new')} />;
 
   return (
     <div className="page">
@@ -65,7 +67,7 @@ export function PlayersScreen({ route }: { route: PlayersRoute }) {
             key={p.id}
             type="button"
             className="player-card"
-            aria-label={`${p.name}, Stop ${stopNumbers[p.id] ?? 1}${p.pin ? ', has a PIN' : ''}${p.id === current?.id ? ', playing now' : ''}`}
+            aria-label={`${p.name}, Stop ${stopNumbers[p.id] ?? 1}${p.pin ? ', has a PIN' : ''}${p.sync ? ', synced' : ''}${p.id === current?.id ? ', playing now' : ''}`}
             onClick={() => choose(p)}
           >
             <span className="avatar lg" style={{ background: p.color }} aria-hidden="true">{initial(p.name)}</span>
@@ -73,6 +75,7 @@ export function PlayersScreen({ route }: { route: PlayersRoute }) {
             <span className="row small soft-text" style={{ gap: 6 }}>
               Stop {stopNumbers[p.id] ?? 1}
               {p.pin && <Icon name="lock" size={14} />}
+              {p.sync && <Icon name="cloud" size={14} />}
             </span>
           </button>
         ))}
@@ -88,6 +91,7 @@ export function PlayersScreen({ route }: { route: PlayersRoute }) {
         <button type="button" className="btn ghost" onClick={() => setMode('import')}>
           <Icon name="upload" size={18} /> Import a save
         </button>
+        {players.length < MAX_PLAYERS && <LinkButton onClick={() => setMode('link')} />}
         {current && (
           <button type="button" className="btn ghost" onClick={() => actions.navigate({ name: 'journey' })}>
             <Icon name="back" size={18} /> Back to {current.name}’s Journey
@@ -164,7 +168,7 @@ function PinPad({ player, onOk, onCancel }: { player: Player; onOk(): void; onCa
 
 // ---------- New player ----------
 
-function NewPlayer({ first, onCancel, onImport }: { first: boolean; onCancel(): void; onImport(): void }) {
+function NewPlayer({ first, onCancel, onImport, onLink }: { first: boolean; onCancel(): void; onImport(): void; onLink(): void }) {
   const { state, actions } = useStore();
   const used = new Set(state.registry.players.map((p) => p.color));
   const [name, setName] = useState('');
@@ -235,6 +239,7 @@ function NewPlayer({ first, onCancel, onImport }: { first: boolean; onCancel(): 
           <button type="button" className="btn ghost" onClick={onImport}>
             <Icon name="upload" size={18} /> Import a save
           </button>
+          <LinkButton onClick={onLink} />
         </div>
       </form>
     </div>
@@ -290,6 +295,70 @@ function ImportSave({ onCancel }: { onCancel(): void }) {
       <div className="panel">
         <ImportBox play />
       </div>
+      <button type="button" className="btn ghost" onClick={onCancel}>Back</button>
+    </div>
+  );
+}
+
+// ---------- Link a synced player ----------
+
+/** Shown only when this copy of the game can sync. */
+function LinkButton({ onClick }: { onClick(): void }) {
+  const { sync } = useStore();
+  if (!sync.available) return null;
+  return (
+    <button type="button" className="btn ghost" onClick={onClick}>
+      <Icon name="cloud" size={18} /> Link a player from another device
+    </button>
+  );
+}
+
+function LinkPlayer({ onCancel }: { onCancel(): void }) {
+  const { sync, actions } = useStore();
+  const [code, setCode] = useState('');
+  const [error, setError] = useState('');
+  const ready = normalizeCode(code).length === CODE_LENGTH;
+  // Codes never use 0, 1, I or O (they look like other letters), so say so as soon as one is typed.
+  const odd = /[01IO]/.test(code);
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setError('');
+    const err = await actions.linkPlayer(code);
+    if (err) setError(err);
+  };
+
+  return (
+    <div className="page">
+      <h2 className="page-title">LINK A PLAYER</h2>
+      <p className="soft-text">Play as the same player here and on another device. Progress syncs both ways.</p>
+      {sync.loading || sync.available ? (
+        <form className="panel" onSubmit={(e) => void submit(e)} noValidate>
+          <p className="small soft-text">
+            On the other device, pick the player and open <b>Me</b> → <b>Sync across devices</b>. Turn sync on there, then type the code it shows.
+          </p>
+          <label className="field">
+            Sync code
+            <input
+              className="input sync-input"
+              value={code}
+              placeholder={`${CODE_PREFIX}4K-9TQ2-MHB7`}
+              autoCapitalize="characters"
+              autoCorrect="off"
+              autoComplete="off"
+              spellCheck={false}
+              maxLength={16}
+              onChange={(e) => { setCode(e.target.value.toUpperCase()); setError(''); }}
+            />
+          </label>
+          <p role="alert" className="error">{error || (odd ? 'Sync codes never use 0, 1, I or O. Look at that letter again.' : '')}</p>
+          <button type="submit" className="btn primary block big" disabled={!ready || odd || sync.busy}>
+            {sync.busy ? 'Linking…' : 'Link player'}
+          </button>
+        </form>
+      ) : (
+        <p className="panel small soft-text">Sync is switched off in this copy of the game. Use a save file instead: Import a save.</p>
+      )}
       <button type="button" className="btn ghost" onClick={onCancel}>Back</button>
     </div>
   );

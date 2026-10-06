@@ -137,7 +137,6 @@ export function LibraryScreen({ route }: { route: Extract<Route, { name: 'librar
             <Row key={stop.id} lead={<span className="sl-disc d-muted">{stop.n}</span>} title={stop.title} sub={stop.idea} meta="soon" metaTone="muted" onClick={() => actions.navigate({ name: 'stop', stopId: stop.id })} />
           ))}
           <Row lead={<span className="sl-disc d-muted">⚡</span>} title="Blitz and Conquer" sub="Faster Arcade modes" meta="later" metaTone="muted" />
-          <Row lead={<span className="sl-disc d-muted">☁</span>} title="Sync across devices" sub="Play on more than one device" meta="v0.5" metaTone="muted" />
         </div>
       )}
     </div>

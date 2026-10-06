@@ -4,6 +4,10 @@ import { completeBridge, type AgePath } from './pattern/bridges';
  * React context + useReducer. The reducer is pure; action helpers compute anything that needs the
  * clock or randomness (days, PIN salts, new ids) and do the localStorage side effects.
  * The save is written 250 ms after the last change, and at once when the page is hidden.
+ * Cloud sync (engine/save/sync.ts): a linked player pulls when the app opens, when the player is picked and when
+ * the app comes back to the front, and pushes a little after each change. The later save wins: "later" is when play
+ * last changed a copy, which is also the time stamped on its save file. Changes the game makes by itself (settling a
+ * check left open, counting active time) are saved but are not news for sync.
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react';
 import * as mastery from '../engine/journey/mastery';
@@ -11,6 +15,8 @@ import type { CheckKind, CheckOutcome } from '../engine/journey/mastery';
 import * as saves from '../engine/save/save';
 import * as notebook from '../engine/notebook';
 import type { KV, Player, Registry, SaveData, Settings } from '../engine/save/save';
+import * as sync from '../engine/save/sync';
+import type { Fetch, RemoteSave, SyncLink } from '../engine/save/sync';
 import type { Item } from '../engine/types';
 import { stopById } from '../content/stops';
 import type { AnswerRecord } from './components/contracts';
@@ -24,7 +30,7 @@ export type LessonFrom = 'journey' | 'learn' | 'check' | 'stop' | 'library' | 'h
 export type LibraryKind = 'all' | 'ideas' | 'practice' | 'lab' | 'soon';
 
 export type Route =
-  | { name: 'players'; mode?: 'list' | 'new' | 'import'; pinFor?: string }
+  | { name: 'players'; mode?: 'list' | 'new' | 'import' | 'link'; pinFor?: string }
   | { name: 'pattern'; workshop?: boolean; event?: string }
   | { name: 'home' }
   | { name: 'journey'; track?: 'main' | 'side' }
@@ -42,7 +48,8 @@ export type Route =
   | { name: 'progress' }
   /** The Wrong-Answer Notebook. `fix`: fixing the ready cards (the tab bar hides, like practice). */
   | { name: 'notebook'; fix?: boolean }
-  | { name: 'settings' };
+  /** `section: 'sync'` scrolls to Sync across devices. */
+  | { name: 'settings'; section?: 'sync' };
 
 export type Tab = 'home' | 'journey' | 'arcade' | 'library' | 'me';
 
@@ -113,6 +120,12 @@ function playersRoute(reg: Registry, pinFor?: string): Route {
   return { name: 'players', mode: reg.players.length ? 'list' : 'new', pinFor };
 }
 
+/**
+ * Saves the game changed by itself, not by play: settling a check left open, and counting active time. They are
+ * written, but under the time of the last real change, and they start no push.
+ */
+const quietSaves = new WeakSet<SaveData>();
+
 /** A check left open by a reload or a closed app counts as leaving it (see mastery.settleOpenCheck). */
 function settleOpenChecks(save: SaveData): SaveData {
   let stops: SaveData['stops'] | null = null;
@@ -122,8 +135,14 @@ function settleOpenChecks(save: SaveData): SaveData {
     stops ??= { ...save.stops };
     stops[id] = mastery.settleOpenCheck(stop, p, mastery.journeyDay(Date.now()));
   }
-  return stops ? { ...save, stops } : save;
+  if (!stops) return save;
+  const out = { ...save, stops };
+  quietSaves.add(out);
+  return out;
 }
+
+/** The save to treat as unchanged after a load: null when settling an open check changed it, so it is written. */
+const baselineFor = (save: SaveData | null) => (save && !quietSaves.has(save) ? save : null);
 
 function initState(kv: KV): State {
   const registry = saves.loadRegistry(kv);
@@ -152,6 +171,13 @@ function uniqueName(players: readonly Player[], name: string): string {
 }
 
 // ---------- context ----------
+
+/** How a push ended: the cloud has this copy, this device took the cloud's later copy instead, or it did not work. */
+type PushOutcome = 'pushed' | 'took' | 'failed';
+/** How a pull ended: the same as a push, or nothing to do. */
+type PullOutcome = PushOutcome | 'same';
+/** A player's save and the time play last changed it, captured when a push is asked for. */
+interface Snapshot { save: SaveData; changedAt: number }
 
 export interface Actions {
   navigate(route: Route): void;
@@ -193,10 +219,38 @@ export interface Actions {
   importSave(text: string, play: boolean): { name: string } | { error: string };
   /** The active player's export file, or null. */
   exportSave(): string | null;
+  /** Start syncing the active player: makes a sync code and pushes the save. True when the cloud has it. */
+  turnOnSync(): Promise<boolean>;
+  /** Stop syncing the active player on this device. The cloud copy stays. */
+  turnOffSync(): void;
+  /** Pull now (and push when this device has newer changes). */
+  syncNow(): Promise<void>;
+  /** Bring a player from another device by its sync code. Resolves to an error message, or null when linked. */
+  linkPlayer(code: string): Promise<string | null>;
+  dismissNotice(): void;
+}
+
+/** Cloud sync for the active player, for Settings. */
+export interface SyncInfo {
+  /** False while the sync server is being looked up, and when sync has been switched off by config. */
+  available: boolean;
+  /** True while the game is still looking up the sync server. */
+  loading: boolean;
+  busy: boolean;
+  /** A short status line: offline, server trouble, or empty. */
+  note: string;
+  /** The active player's link, when they sync. */
+  link: SyncLink | null;
+  /** When this device last checked with the cloud for the active player (0: not yet since they were picked). */
+  checkedAt: number;
 }
 
 export interface Store {
   state: State;
+  /** Cloud sync for the active player. */
+  sync: SyncInfo;
+  /** A short message to show for a moment ("Loaded newer progress from the cloud."), or ''. */
+  notice: string;
   /** The Journey day right now (updated every 30 s). */
   today: string;
   player: Player | null;
@@ -208,11 +262,42 @@ export interface Store {
 
 const Ctx = createContext<Store | null>(null);
 
-export function StoreProvider({ children, kv: kvProp }: { children: ReactNode; kv?: KV }) {
+const browserFetch: Fetch = (input, init) => fetch(input, init);
+
+export function StoreProvider({ children, kv: kvProp, fetchFn = browserFetch }: { children: ReactNode; kv?: KV; fetchFn?: Fetch }) {
   const kv = useMemo(() => kvProp ?? browserKV(), [kvProp]);
   const [state, dispatch] = useReducer(reducer, kv, initState);
   const stateRef = useRef(state);
   stateRef.current = state;
+
+  // ----- cloud sync state -----
+  /** undefined while loading; null when sync is switched off. */
+  const [syncCfg, setSyncCfg] = useState<{ url: string } | null | undefined>(undefined);
+  const [syncBusy, setSyncBusy] = useState(false);
+  const [syncNote, setSyncNote] = useState('');
+  const [notice, setNotice] = useState('');
+  const [checkedAt, setCheckedAt] = useState(0);
+  const syncCfgRef = useRef<{ url: string } | null>(null);
+  const cfgReady = useRef<Promise<{ url: string } | null>>(Promise.resolve(null));
+  /** The save as loaded or taken from the cloud. A different object means play changed it. */
+  const baseline = useRef<SaveData | null>(baselineFor(state.save));
+  /** When play last changed the active player's save (its file's savedAt after a load; 0 when nothing is saved). */
+  const localChangedAt = useRef(state.save?.savedAt ?? 0);
+  const pushTimer = useRef<number | null>(null);
+  const lastPull = useRef(0);
+  /** Change the player list, and mirror it in stateRef at once so the sync code that runs next sees it. */
+  const commitRegistry = useCallback((registry: Registry) => {
+    dispatch({ type: 'registry', registry });
+    stateRef.current = { ...stateRef.current, registry };
+  }, []);
+  /** Sync calls run one at a time, so two pushes never race each other with the same revision. */
+  const syncQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const syncFns = useRef<{ push(id: string, keepalive?: boolean, snap?: Snapshot): Promise<PushOutcome>; pull(id: string): Promise<PullOutcome> }>({
+    push: async () => 'failed',
+    pull: async () => 'failed',
+  });
+  /** Is this player still synced with this code on this device? (Sync may be turned off while a call is out.) */
+  const linkedTo = useCallback((id: string, code: string) => stateRef.current.registry.players.find((x) => x.id === id)?.sync?.code === code, []);
 
   const [today, setToday] = useState(todayNow);
   useEffect(() => {
@@ -221,24 +306,35 @@ export function StoreProvider({ children, kv: kvProp }: { children: ReactNode; k
   }, []);
 
   // ----- autosave -----
-  const pending = useRef<{ id: string; data: SaveData } | null>(null);
+  /** The next write: the save, and the time to stamp on it (when play last changed it). */
+  const pending = useRef<{ id: string; data: SaveData; at: number } | null>(null);
   const timer = useRef<number | null>(null);
   const flush = useCallback(() => {
     if (timer.current !== null) { window.clearTimeout(timer.current); timer.current = null; }
     const p = pending.current;
     pending.current = null;
-    if (p) saves.writeSave(kv, p.id, p.data);
+    if (p) saves.writeSave(kv, p.id, p.data, p.at);
   }, [kv]);
 
-  // A save that just arrived from another tab is already in storage: do not write it straight back.
+  // A save that just arrived from another tab is already in storage: do not write it straight back. A save just
+  // loaded (or taken from the cloud) is not a change either, so it is not written again with a new time.
   const adopted = useRef<SaveData | null>(null);
   useEffect(() => {
     if (!state.playerId || !state.save) return;
-    if (adopted.current === state.save) return;
-    pending.current = { id: state.playerId, data: state.save };
+    if (adopted.current === state.save || baseline.current === state.save) return;
+    // Play changed the save: its time moves on, and never backwards (another device's clock may run ahead). A change
+    // the game made by itself keeps the last real change's time.
+    const quiet = quietSaves.has(state.save);
+    if (!quiet) localChangedAt.current = Math.max(Date.now(), localChangedAt.current + 1);
+    pending.current = { id: state.playerId, data: state.save, at: localChangedAt.current };
     if (timer.current !== null) window.clearTimeout(timer.current);
     timer.current = window.setTimeout(flush, 250);
-  }, [state.save, state.playerId, flush]);
+    // A linked player pushes a little after the last change.
+    const id = state.playerId;
+    if (!quiet && state.registry.players.find((p) => p.id === id)?.sync && pushTimer.current === null) {
+      pushTimer.current = window.setTimeout(() => { pushTimer.current = null; void syncFns.current.push(id); }, sync.PUSH_DELAY_MS);
+    }
+  }, [state.save, state.playerId, flush]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const onVis = () => { if (document.visibilityState === 'hidden') flush(); };
@@ -274,6 +370,8 @@ export function StoreProvider({ children, kv: kvProp }: { children: ReactNode; k
         }
       } else if (s.playerId && e.key === saves.saveKeyFor(s.playerId) && e.newValue) {
         const incoming = saves.loadSave(kv, s.playerId);
+        // The other tab's play counts as this device's play: a pull here must not swap it for an older cloud copy.
+        localChangedAt.current = Math.max(localChangedAt.current, incoming.savedAt);
         pending.current = null;
         if (timer.current !== null) { window.clearTimeout(timer.current); timer.current = null; }
         adopted.current = incoming;
@@ -286,16 +384,41 @@ export function StoreProvider({ children, kv: kvProp }: { children: ReactNode; k
 
   // ----- actions -----
   const actions = useMemo<Actions>(() => {
-    const setRegistry = (registry: Registry) => dispatch({ type: 'registry', registry });
+    const setRegistry = commitRegistry;
     const withPlayer = (reg: Registry, id: string, fn: (p: Player) => Player): Registry => ({
       ...reg,
       players: reg.players.map((p) => (p.id === id ? fn(p) : p)),
     });
-    const login = (registry: Registry, id: string, save: SaveData) => {
+    /** Start playing as a player. `pull: false` when the save has just come from the cloud. */
+    const login = (registry: Registry, id: string, save: SaveData, changedAt = save.savedAt, pull = true) => {
+      // A change still waiting to go up goes now, before the next player takes over.
+      const out = stateRef.current;
+      if (pushTimer.current !== null && out.playerId && out.playerId !== id && out.save) {
+        void syncFns.current.push(out.playerId, false, { save: out.save, changedAt: localChangedAt.current });
+      }
       flush();
+      clearPush();
       const now = Date.now();
       const reg = { ...withPlayer(registry, id, (p) => ({ ...p, lastPlayed: now })), active: id };
+      baseline.current = baselineFor(save);
+      localChangedAt.current = changedAt;
+      setSyncNote('');
+      setCheckedAt(0);
       dispatch({ type: 'login', registry: reg, playerId: id, save, route: { name: 'home' } });
+      stateRef.current = { ...stateRef.current, registry: reg, playerId: id, save };
+      // A linked player checks the cloud as soon as they are picked.
+      if (pull && reg.players.find((p) => p.id === id)?.sync) void syncFns.current.pull(id);
+    };
+    const clearPush = () => {
+      if (pushTimer.current !== null) { window.clearTimeout(pushTimer.current); pushTimer.current = null; }
+    };
+    const setLink = (id: string, link: SyncLink | null) => {
+      const reg = stateRef.current.registry;
+      setRegistry(withPlayer(reg, id, (p) => {
+        const next = { ...p };
+        delete next.sync;
+        return link ? { ...next, sync: link } : next;
+      }));
     };
 
     return {
@@ -324,6 +447,12 @@ export function StoreProvider({ children, kv: kvProp }: { children: ReactNode; k
         const clean = name.trim().slice(0, 24);
         if (!clean) return;
         setRegistry(withPlayer(stateRef.current.registry, id, (p) => ({ ...p, name: clean })));
+        // The name travels with a synced player: push it soon.
+        const s = stateRef.current;
+        if (id === s.playerId && s.registry.players.find((p) => p.id === id)?.sync) {
+          localChangedAt.current = Math.max(Date.now(), localChangedAt.current + 1);
+          if (pushTimer.current === null) pushTimer.current = window.setTimeout(() => { pushTimer.current = null; void syncFns.current.push(id); }, sync.PUSH_DELAY_MS);
+        }
       },
 
       removePlayer: (id) => {
@@ -430,7 +559,8 @@ export function StoreProvider({ children, kv: kvProp }: { children: ReactNode; k
 
       addActive: (seconds) => {
         const day = todayNow();
-        dispatch({ type: 'save', fn: (d) => saves.addActive(d, day, seconds) });
+        // Counting time is not play: it is saved, but it does not make this copy newer for sync.
+        dispatch({ type: 'save', fn: (d) => { const next = saves.addActive(d, day, seconds); if (next !== d) quietSaves.add(next); return next; } });
       },
 
       setPatternPath: (path) => {
@@ -461,11 +591,261 @@ export function StoreProvider({ children, kv: kvProp }: { children: ReactNode; k
         const p = s.registry.players.find((x) => x.id === s.playerId);
         return p && s.save ? saves.exportSave(p, s.save) : null;
       },
+
+      turnOnSync: async () => {
+        const s = stateRef.current;
+        const id = s.playerId;
+        const cfg = syncCfgRef.current ?? (await cfgReady.current);
+        if (!id || !cfg || !s.save) return false;
+        if (!sync.canSync()) { setNotice(sync.MSG.tooOld); return false; }
+        setSyncBusy(true);
+        clearPush();
+        setLink(id, { code: sync.newSyncCode(), rev: 0, at: 0 });
+        const res = await syncFns.current.push(id);
+        setSyncBusy(false);
+        if (res === 'pushed') { setNotice('Sync is on. Type the code on your other devices.'); return true; }
+        setLink(id, null);
+        setSyncNote('');
+        setNotice('Sync is not on yet: the game could not reach the cloud. Try again in a moment.');
+        return false;
+      },
+
+      turnOffSync: () => {
+        const id = stateRef.current.playerId;
+        if (!id) return;
+        clearPush();
+        setLink(id, null);
+        setSyncNote('');
+        setCheckedAt(0);
+        setNotice('This device no longer syncs this player. The cloud copy stays.');
+      },
+
+      syncNow: async () => {
+        const id = stateRef.current.playerId;
+        if (!id || !stateRef.current.registry.players.find((p) => p.id === id)?.sync) return;
+        setSyncBusy(true);
+        // A change still waiting goes in this sync: the pull sees it and pushes.
+        clearPush();
+        const res = await syncFns.current.pull(id);
+        setSyncBusy(false);
+        if (res === 'same' || res === 'pushed') setNotice('Synced. This device and the cloud have the same progress.');
+      },
+
+      linkPlayer: async (typed) => {
+        if (/[01io]/i.test(typed)) return 'Sync codes never use 0, 1, I or O. Look at that letter again.';
+        const code = sync.normalizeCode(typed);
+        if (!sync.validCode(code)) return 'A sync code has 12 letters and numbers, like LQ4K-9TQ2-MHB7.';
+        if (sync.codeGame(code) === 'engineering-quest') return 'That code is for Engineering Quest. Logic Quest codes start with LQ.';
+        const cfg = syncCfgRef.current ?? (await cfgReady.current);
+        if (!cfg) return 'Sync is switched off in this copy of the game.';
+        if (!sync.canSync()) return sync.MSG.tooOld;
+        const here = stateRef.current.registry.players.find((p) => p.sync?.code === code);
+        if (here) return `${here.name} is already on this device. Pick them on the Who’s playing? screen.`;
+        if (stateRef.current.registry.players.length >= saves.MAX_PLAYERS) return `This device holds up to ${saves.MAX_PLAYERS} players. Remove one first.`;
+        setSyncBusy(true);
+        try {
+          const remote = await sync.pullSave(cfg.url, code, fetchFn);
+          if (!remote) return 'No player found for that code. Check it on the other device: Me → Sync across devices.';
+          const got = await sync.readRemote(remote.data);
+          if ('error' in got) return got.error;
+          const reg0 = stateRef.current.registry;
+          if (reg0.players.length >= saves.MAX_PLAYERS) return `This device holds up to ${saves.MAX_PLAYERS} players. Remove one first.`;
+          if (reg0.players.some((p) => p.sync?.code === code)) return 'That player is already on this device.';
+          const name = uniqueName(reg0.players, got.name);
+          const { reg, player } = saves.addPlayer(reg0, name, got.color, Date.now(), Math.random());
+          const linked = withPlayer(reg, player.id, (p) => ({ ...p, sync: { code, rev: remote.rev, at: remote.savedAt } }));
+          saves.writeSave(kv, player.id, got.data, remote.savedAt);
+          lastPull.current = Date.now();
+          login(linked, player.id, settleOpenChecks(got.data), remote.savedAt, false);
+          setCheckedAt(Date.now());
+          setNotice(`${name} is linked. Progress now syncs on this device.`);
+          return null;
+        } catch (e) {
+          const msg = sync.friendly(e);
+          return msg === sync.MSG.offline ? 'Could not reach the cloud. Check the connection and try again.' : msg;
+        } finally {
+          setSyncBusy(false);
+        }
+      },
+
+      dismissNotice: () => setNotice(''),
     };
-  }, [kv, flush]);
+  }, [kv, flush, fetchFn, commitRegistry]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ----- cloud sync: pull when a player opens or the app comes back, push a little after every change -----
+
+  /**
+   * Replace this device's copy of the active player with the cloud's. False when that player is no longer on screen
+   * or no longer synced with this code. Throws (with words for the player) when the cloud copy cannot be read here.
+   */
+  const adoptRemote = useCallback(async (id: string, code: string, remote: RemoteSave): Promise<boolean> => {
+    const got = await sync.readRemote(remote.data);
+    if ('error' in got) throw new Error(got.error);
+    if (stateRef.current.playerId !== id || !linkedTo(id, code)) return false;
+    if (pushTimer.current !== null) { window.clearTimeout(pushTimer.current); pushTimer.current = null; }
+    // Drop a pending local write: the cloud copy replaces it.
+    if (pending.current?.id === id) pending.current = null;
+    if (timer.current !== null) { window.clearTimeout(timer.current); timer.current = null; }
+    const data = got.data;
+    baseline.current = data;
+    localChangedAt.current = remote.savedAt;
+    saves.writeSave(kv, id, data, remote.savedAt);
+    dispatch({ type: 'replaceSave', save: data });
+    stateRef.current = { ...stateRef.current, save: data };
+    // The player's name and colour travel too (a name taken by another player here is left as it is).
+    const reg = stateRef.current.registry;
+    const nameFree = !reg.players.some((p) => p.id !== id && p.name.toLowerCase() === got.name.toLowerCase());
+    commitRegistry({
+      ...reg,
+      players: reg.players.map((p) => (p.id === id ? { ...p, color: got.color, name: nameFree ? got.name : p.name, sync: { code, rev: remote.rev, at: remote.savedAt } } : p)),
+    });
+    setSyncNote('');
+    setCheckedAt(Date.now());
+    setNotice(`Loaded newer progress from the cloud (saved ${sync.ago(Date.now() - remote.savedAt)}).`);
+    return true;
+  }, [kv, commitRegistry, linkedTo]);
+
+  /**
+   * Send a player's save to the cloud: the active player's current save, or a snapshot taken when the player was
+   * switched away from. The cloud records when play last changed that copy.
+   */
+  const pushNow = useCallback(async (id: string, keepalive = false, snap?: Snapshot): Promise<PushOutcome> => {
+    const cfg = syncCfgRef.current ?? (await cfgReady.current);
+    const s = stateRef.current;
+    const p = s.registry.players.find((x) => x.id === id);
+    const shot = snap ?? (s.playerId === id && s.save ? { save: s.save, changedAt: localChangedAt.current } : null);
+    if (!cfg || !p?.sync || !shot) return 'failed';
+    const { code, rev } = p.sync;
+    const changedAt = shot.changedAt || Date.now();
+    const active = () => stateRef.current.playerId === id;
+    const note = (text: string) => { if (active()) setSyncNote(text); };
+    let body: string;
+    try { body = await sync.packPlayer(p, shot.save); } catch { note(sync.MSG.trouble); return 'failed'; }
+    const done = (newRev: number): PushOutcome => {
+      if (!linkedTo(id, code)) return 'failed';
+      const cur = stateRef.current.registry;
+      commitRegistry({ ...cur, players: cur.players.map((x) => (x.id === id ? { ...x, sync: { code, rev: newRev, at: changedAt } } : x)) });
+      if (active()) { setSyncNote(''); setCheckedAt(Date.now()); }
+      return 'pushed';
+    };
+    const res = await sync.pushSave(cfg.url, code, body, rev, changedAt, fetchFn, keepalive);
+    if (res.ok) return done(res.rev);
+    if (!('conflict' in res)) { note(sync.friendly(res.error)); return 'failed'; }
+    const r = res.conflict;
+    // Our own copy came back (an earlier push got through, but its answer did not): nothing to take.
+    if (r.data === body) return done(r.rev);
+    // Sync was turned off here while the push was out: leave the cloud alone.
+    if (!linkedTo(id, code)) return 'failed';
+    if (r.data && r.savedAt >= changedAt) {
+      // Another device played later: take its copy. A player who is not on screen takes it on their next pull.
+      if (!active()) return 'failed';
+      try { return (await adoptRemote(id, code, r)) ? 'took' : 'failed'; } catch (e) {
+        // Never push over a copy this device could not read.
+        note(e instanceof Error ? e.message : sync.MSG.trouble);
+        return 'failed';
+      }
+    }
+    // This copy is the later one: put it on top of the cloud's.
+    const again = await sync.pushSave(cfg.url, code, body, r.rev, changedAt, fetchFn, keepalive);
+    if (again.ok) return done(again.rev);
+    note('conflict' in again ? sync.MSG.trouble : sync.friendly(again.error));
+    return 'failed';
+  }, [adoptRemote, commitRegistry, linkedTo, fetchFn]);
+
+  /** Look at the cloud copy for the active player and take it, push ours, or do nothing (sync.reconcile). */
+  const pullNow = useCallback(async (id: string): Promise<PullOutcome> => {
+    const cfg = syncCfgRef.current ?? (await cfgReady.current);
+    const link = stateRef.current.registry.players.find((x) => x.id === id)?.sync;
+    if (!cfg || !link) return 'failed';
+    lastPull.current = Date.now();
+    let remote: RemoteSave | null;
+    try {
+      remote = await sync.pullSave(cfg.url, link.code, fetchFn);
+    } catch (e) {
+      if (stateRef.current.playerId === id) setSyncNote(sync.friendly(e));
+      return 'failed';
+    }
+    // The player was switched, or sync turned off, while the pull was out.
+    if (stateRef.current.playerId !== id || !linkedTo(id, link.code)) return 'failed';
+    const fresh = stateRef.current.registry.players.find((x) => x.id === id)?.sync ?? link;
+    const what = sync.reconcile(fresh, localChangedAt.current, remote);
+    if (what === 'use-remote' && remote) {
+      try {
+        return (await adoptRemote(id, fresh.code, remote)) ? 'took' : 'failed';
+      } catch (e) {
+        setSyncNote(e instanceof Error ? e.message : sync.MSG.trouble);
+        return 'failed';
+      }
+    }
+    if (what === 'push') return pushNow(id);
+    setSyncNote('');
+    setCheckedAt(Date.now());
+    return 'same';
+  }, [adoptRemote, pushNow, linkedTo, fetchFn]);
+
+  useEffect(() => {
+    const queued = <T,>(fn: () => Promise<T>): Promise<T> => {
+      const run = syncQueue.current.then(fn, fn);
+      syncQueue.current = run.catch(() => undefined);
+      return run;
+    };
+    syncFns.current = { push: (id, keepalive, snap) => queued(() => pushNow(id, keepalive, snap)), pull: (id) => queued(() => pullNow(id)) };
+  }, [pushNow, pullNow]);
+
+  // Find the sync server once, then check the cloud for the player already playing.
+  useEffect(() => {
+    let live = true;
+    const base = typeof import.meta !== 'undefined' && import.meta.env?.BASE_URL ? import.meta.env.BASE_URL : './';
+    const pr = sync.loadSyncConfig(fetchFn, typeof window === 'undefined' ? undefined : { getItem: (k) => kv.getItem(k) }, base);
+    cfgReady.current = pr;
+    void pr.then((c) => {
+      syncCfgRef.current = c;
+      if (!live) return;
+      setSyncCfg(c);
+      const s = stateRef.current;
+      if (c && s.playerId && s.registry.players.find((p) => p.id === s.playerId)?.sync) void syncFns.current.pull(s.playerId);
+    });
+    return () => { live = false; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Leaving: send a pending push now. Coming back after a while: check the cloud.
+  useEffect(() => {
+    const linked = () => {
+      const s = stateRef.current;
+      return s.playerId && syncCfgRef.current && s.registry.players.find((p) => p.id === s.playerId)?.sync ? s.playerId : null;
+    };
+    const flushPush = () => {
+      const id = linked();
+      if (!id || pushTimer.current === null) return;
+      window.clearTimeout(pushTimer.current);
+      pushTimer.current = null;
+      flush();
+      // Straight out, not behind other sync calls: the page may be about to go.
+      void pushNow(id, true);
+    };
+    const onVis = () => {
+      if (document.visibilityState === 'hidden') { flushPush(); return; }
+      const id = linked();
+      if (id && Date.now() - lastPull.current > sync.PULL_GAP_MS && pushTimer.current === null) void syncFns.current.pull(id);
+    };
+    document.addEventListener('visibilitychange', onVis);
+    window.addEventListener('pagehide', flushPush);
+    return () => {
+      document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('pagehide', flushPush);
+    };
+  }, [pushNow, flush]);
+
+  // A notice shows for a moment.
+  useEffect(() => {
+    if (!notice) return;
+    const t = window.setTimeout(() => setNotice(''), 6000);
+    return () => window.clearTimeout(t);
+  }, [notice]);
 
   const player = state.registry.players.find((p) => p.id === state.playerId) ?? null;
-  const value = useMemo<Store>(() => ({ state, today, player, save: state.save, actions, kv }), [state, today, player, actions, kv]);
+  const syncInfo = useMemo<SyncInfo>(() => ({ available: !!syncCfg, loading: syncCfg === undefined, busy: syncBusy, note: syncNote, link: player?.sync ?? null, checkedAt }), [syncCfg, syncBusy, syncNote, player, checkedAt]);
+  const value = useMemo<Store>(() => ({ state, today, player, save: state.save, actions, kv, sync: syncInfo, notice }), [state, today, player, actions, kv, syncInfo, notice]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

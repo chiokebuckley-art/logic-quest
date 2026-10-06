@@ -85,7 +85,7 @@ function Screen({ route }: { route: Route }) {
 }
 
 function Shell() {
-  const { state, player, save, actions } = useStore();
+  const { state, player, save, actions, notice } = useStore();
   const update = useUpdateCheck();
   useActiveTime(!!player, actions.addActive);
 
@@ -109,6 +109,11 @@ function Shell() {
           A new version of Logic Quest is ready. Tap to update.
         </button>
       )}
+      {/* The live region is always in the page, so a screen reader hears each message as it arrives. */}
+      <div className={`sync-notice${notice ? ' on' : ''}`}>
+        <span className="grow" role="status" aria-live="polite">{notice}</span>
+        {notice && <button type="button" className="sync-notice-x" aria-label="Close message" onClick={actions.dismissNotice}>×</button>}
+      </div>
       <main className="app-main" ref={mainRef}>
         <Screen key={state.routeSeq} route={route} />
       </main>

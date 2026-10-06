@@ -1,6 +1,7 @@
-/** Settings: the player, play options, save files, players on this device, and the version. */
-import { useState, type FormEvent } from 'react';
+/** Settings: the player, play options, sync, save files, players on this device, and the version. */
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { checkPin, isPin, type Player, type Settings } from '../../engine/save/save';
+import { ago, canSync, formatCode, MSG } from '../../engine/save/sync';
 import { fileSlug } from '../progressStats';
 import { downloadText, useStore } from '../store';
 import { CURRENT_BUILD, useUpdateCheck } from '../hooks/useUpdateCheck';
@@ -14,7 +15,7 @@ export function SettingsScreen() {
   return (
     <div className="page sl-page">
       <div className="row between">
-        {player ? <PageHead title="Settings" sub="Player, play options, save files, players" back="Me" onBack={() => actions.navigate({ name: 'me' })} /> : <h2 className="page-title">SETTINGS</h2>}
+        {player ? <PageHead title="Settings" sub="Player, play options, sync, save files, players" back="Me" onBack={() => actions.navigate({ name: 'me' })} /> : <h2 className="page-title">SETTINGS</h2>}
         {!player && (
           <button type="button" className="btn ghost" onClick={() => actions.navigate({ name: 'players', mode: 'list' })}>
             <Icon name="back" size={18} /> Players
@@ -23,6 +24,7 @@ export function SettingsScreen() {
       </div>
       {player && save && <YouPanel player={player} />}
       {player && save && <PlayPanel settings={save.settings} onChange={actions.updateSettings} />}
+      {player && save && <SyncPanel player={player} />}
       <SavePanel />
       <DevicePlayers />
       <AboutPanel />
@@ -162,6 +164,95 @@ function PlayPanel({ settings, onChange }: { settings: Settings; onChange(patch:
   );
 }
 
+// ---------- cloud sync ----------
+
+function SyncPanel({ player }: { player: Player }) {
+  const { state, sync, actions } = useStore();
+  const [ask, setAsk] = useState(false);
+  const [confirmOff, setConfirmOff] = useState(false);
+  const [copied, setCopied] = useState('');
+  const ref = useRef<HTMLElement>(null);
+  const headRef = useRef<HTMLHeadingElement>(null);
+  const offRef = useRef<HTMLButtonElement>(null);
+  const link = sync.link;
+
+  // Me (or Grown-ups) → Sync across devices lands here. A frame later, after the page has scrolled to the top.
+  const jump = state.route.name === 'settings' && state.route.section === 'sync';
+  useEffect(() => {
+    if (!jump) return;
+    const f = window.requestAnimationFrame(() => ref.current?.scrollIntoView({ block: 'start' }));
+    return () => window.cancelAnimationFrame(f);
+  }, [jump]);
+
+  const copy = async (code: string) => {
+    try {
+      await navigator.clipboard.writeText(formatCode(code));
+      setCopied('Copied.');
+    } catch {
+      setCopied('Copy did not work here. Write the code down instead.');
+    }
+  };
+  // Focus goes back to the panel's heading when the part that had it goes away.
+  const turnOn = () => { setAsk(false); headRef.current?.focus(); void actions.turnOnSync(); };
+
+  return (
+    <section className="panel" id="sync" aria-labelledby="sync-title" ref={ref}>
+      <h3 id="sync-title" className="section-title" ref={headRef} tabIndex={-1}>SYNC ACROSS DEVICES</h3>
+      {sync.loading ? (
+        <p className="small soft-text">Looking for the sync server…</p>
+      ) : !sync.available ? (
+        <p className="small soft-text">Sync is switched off in this copy of the game. Use the save file below to move to another device.</p>
+      ) : !canSync() ? (
+        <p className="small soft-text">{MSG.tooOld}</p>
+      ) : link ? (
+        <>
+          <p className="small soft-text">
+            {player.name} syncs with the cloud. On another phone, tablet or computer, open Logic Quest and tap <b>Me</b> → <b>Switch player</b> → <b>Link a player from another device</b>. On a new device, that button is on the first screen. Then type this code.
+          </p>
+          <p className="sync-code"><span className="sr-only">Sync code: </span>{formatCode(link.code)}</p>
+          <div className="row wrap">
+            <button type="button" className="btn" onClick={() => void copy(link.code)}>
+              <Icon name="copy" size={18} /> Copy code
+            </button>
+            <button type="button" className="btn" disabled={sync.busy} onClick={() => void actions.syncNow()}>
+              <Icon name="refresh" size={18} /> {sync.busy ? 'Syncing…' : 'Sync now'}
+            </button>
+            <button type="button" className="btn ghost" ref={offRef} onClick={() => setConfirmOff(true)}>Turn off</button>
+          </div>
+          {confirmOff && (
+            <div className="panel flat" role="alertdialog" aria-labelledby="sync-off-q" style={{ gap: 10 }}>
+              <p id="sync-off-q">Stop syncing {player.name} on this device? The cloud copy stays, and other devices keep syncing.</p>
+              <div className="row wrap">
+                <button type="button" className="btn danger" autoFocus onClick={() => { setConfirmOff(false); actions.turnOffSync(); headRef.current?.focus(); }}>Yes, turn off</button>
+                <button type="button" className="btn ghost" onClick={() => { setConfirmOff(false); offRef.current?.focus(); }}>Keep syncing</button>
+              </div>
+            </div>
+          )}
+          <p className="small muted">
+            {sync.checkedAt ? `Last synced ${ago(Date.now() - sync.checkedAt)}. ` : ''}Keep the code private: anyone who has it can play as {player.name}. A PIN stays on each device, so set one on the other device too.
+          </p>
+          <p role="status" aria-live="polite" className="small soft-text">{[copied, sync.note].filter(Boolean).join(' ')}</p>
+        </>
+      ) : (
+        <>
+          <p className="small soft-text">
+            Play as {player.name} on more than one phone, tablet or computer. Turn sync on here, then type the code it shows on the other device. Each device checks the cloud when the game opens and saves to it as you play. The newest save wins.
+          </p>
+          <p className="small muted">The cloud keeps {player.name}’s name, color and progress, never the PIN.</p>
+          {ask ? (
+            <GrownUpGate autoFocus onOpen={turnOn} />
+          ) : (
+            <button type="button" className="btn primary" disabled={sync.busy} onClick={() => setAsk(true)}>
+              <Icon name="cloud" size={18} /> {sync.busy ? 'Connecting…' : `Turn on sync for ${player.name}`}
+            </button>
+          )}
+          <p role="status" aria-live="polite" className="small soft-text">{sync.note}</p>
+        </>
+      )}
+    </section>
+  );
+}
+
 // ---------- save files ----------
 
 function SavePanel() {
@@ -193,7 +284,7 @@ function SavePanel() {
  * A grown-up check before anyone can remove a PIN or a player. Like the PIN itself, it slows down a curious
  * sibling rather than being real security: a two-digit times two-digit sum, typed in.
  */
-export function GrownUpGate({ onOpen }: { onOpen(): void }) {
+export function GrownUpGate({ onOpen, autoFocus = false }: { onOpen(): void; autoFocus?: boolean }) {
   const pair = () => [13 + Math.floor(Math.random() * 17), 13 + Math.floor(Math.random() * 17)] as const;
   const [[a, b], setQ] = useState(pair);
   const [answer, setAnswer] = useState('');
@@ -211,7 +302,7 @@ export function GrownUpGate({ onOpen }: { onOpen(): void }) {
       <div className="row wrap" style={{ alignItems: 'flex-end' }}>
         <label className="field">
           What is {a} × {b}?
-          <input className="input" value={answer} inputMode="numeric" autoComplete="off" maxLength={4} onChange={(e) => { setAnswer(e.target.value.replace(/\D/g, '')); setMsg(''); }} />
+          <input className="input" value={answer} inputMode="numeric" autoComplete="off" maxLength={4} autoFocus={autoFocus} onChange={(e) => { setAnswer(e.target.value.replace(/\D/g, '')); setMsg(''); }} />
         </label>
         <button type="submit" className="btn" disabled={!answer}>Open</button>
       </div>
