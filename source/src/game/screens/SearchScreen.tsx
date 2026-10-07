@@ -11,6 +11,7 @@ import { DESTINATIONS } from '../pattern/bridges';
 import { skillName } from '../progressStats';
 import { useStore, type Route } from '../store';
 import { GIcon, StopArt, type GameIcon } from '../components/kit';
+import { lessonWorld, stopWorld } from '../../content/world';
 
 type Group = 'stop' | 'ideas' | 'practice' | 'lab' | 'fix' | 'settings';
 
@@ -42,7 +43,11 @@ export function searchIndex(save: SaveData, today: string): Entry[] {
       const go: Route = view.status === 'locked' ? { name: 'stop', stopId: stop.id } : { name: 'lesson', stopId: stop.id, lessonId: lesson.id, from: 'library' };
       out.push({ group: 'ideas', title: lesson.title, body: `${stop.title} lesson ${k + 1}`, meta: `S${stop.n} · L${k + 1}`, route: go });
       for (const card of lesson.ideas) out.push({ group: 'ideas', title: card.title, body: `${card.body.join(' ')} ${lesson.title}`, meta: `S${stop.n} · L${k + 1}`, route: go });
+      const w = lessonWorld(lesson.id);
+      if (w) out.push({ group: 'ideas', title: `${lesson.title}: in real life`, body: `real life used jobs ${w.why} ${w.uses.map((u) => `${u.who} ${u.text}`).join(' ')}`, meta: `S${stop.n} · L${k + 1}`, route: { name: 'library', kind: 'real', stop: stop.id } });
     });
+    const line = stopWorld(stop.id);
+    if (line && !stop.lessons.length) out.push({ group: 'ideas', title: `${stop.title}: in real life`, body: `real life used ${line}`, meta: `S${stop.n}`, route: { name: 'library', kind: 'real', stop: stop.id } });
     if (stop.practice) {
       const open = !!save.stops[stop.id]?.passDay;
       out.push({ group: 'practice', title: `${stop.title} puzzles`, body: `practice arcade ${stop.idea}`, meta: open ? 'open' : 'opens at pass', route: open ? { name: 'arcade', practice: stop.id } : { name: 'stop', stopId: stop.id } });

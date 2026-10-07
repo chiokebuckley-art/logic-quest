@@ -27,6 +27,7 @@ import { ReadAloudButton } from './ReadAloud';
 export { ReadAloudButton };
 import { SceneView, type ClueState } from './SceneView';
 import { PlayIcon, ThingCard } from './ThingCard';
+import { skillWorld } from '../../content/world';
 
 // ---------- pure helpers ----------
 
@@ -252,6 +253,8 @@ export function ItemView(props: ItemViewProps & ItemViewExtraProps) {
 
 function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, nextLabel = 'Next', autoFocus = true, stage = 'first', afterHelpLabel = nextLabel, canMoveOn = false, onMiss, priorMiss = false }: ItemViewProps & ItemViewExtraProps) {
   const learn = mode === 'learn';
+  /** "In real life": where this skill is used, shown with the reason after a right answer (like Engineering Quest's line). */
+  const realLine = learn ? skillWorld(item.skill, item.id) : undefined;
   const uid = useId().replace(/[^A-Za-z0-9_-]/g, '');
   const promptId = `${uid}-prompt`;
   const hintId = `${uid}-hint`;
@@ -742,6 +745,11 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
           )}
           {stage === 'fresh' && help.current.hint && <p className="play-feedback-note">You used a hint, so this idea will come back in your notebook for another try later.</p>}
           <p>{item.explain}</p>
+          {realLine && (
+            <p className="play-world">
+              <span className="play-world-label">In real life</span> {realLine}
+            </p>
+          )}
           <button ref={panelBtnRef} type="button" className="play-btn play-btn--teal play-btn--block" onClick={next}>
             {stage === 'first' && misses > 0 ? afterHelpLabel : nextLabel}
           </button>

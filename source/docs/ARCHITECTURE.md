@@ -24,6 +24,8 @@ src/
     stop1.ts … stop6.ts  lessons (key-idea cards + practice) and the stop checks
     stop7.ts, stop7/     Ways to Think: one module per lesson (LessonModule in stop7/common.ts: the lesson, its two
                          check items, an Arcade item, new examples), put together by stop7.ts
+    world/               Real life: per stop (s1.ts … s7.ts, soon.ts) the stop's line, each lesson's why and three
+                         uses, and an "In real life" line per skill; index.ts has the lookups the screens use
   game/
     store.tsx            React context: players, the active save, screen, autosave, cloud sync
     components/          play components (ItemView, LessonRunner, CheckRunner, …) and chrome (Hud, Nav)
@@ -89,6 +91,19 @@ A wrong answer is a teaching moment (see "Wrong answers: teach first" in `CONTEN
   Otherwise the skill goes to the notebook. `help` keeps the explanation, the retry and the new examples apart.
   The save tallies them per skill and day in `SaveData.help` (also in the CSV). Choices with no explanation of
   their own are listed in `SaveData.gaps` for repair.
+
+## Real life
+
+`content/world/` says where each idea is used outside the game (see CONTENT_GUIDE.md, "Real life"). The screens read
+it through `content/world/index.ts`:
+
+- `lessonWorld(id).why`: on the lesson's first key-idea card (`IdeaCards`, "Why it matters") and on its last screen.
+- `lessonWorld(id).uses`: the passed lesson's last screen (`LessonRecap`, "Where this is used"), the Library's Real
+  life view (by stop), and search.
+- `skillWorld(skill, item.id)`: the "In real life" line under the reason after a right answer (`ItemView`, learn mode:
+  lessons, practice, the notebook). The same item always gets the same line.
+- `stopWorld(id)`: the stop page ("In real life", with each lesson's why) and the Library.
+- `useOfTheDay(done, today)`: Home's "Remember why", one use a day from the lessons the player has done.
 
 ## The Journey
 

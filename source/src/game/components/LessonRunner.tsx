@@ -16,6 +16,7 @@ import { IdeaCards } from './IdeaCards';
 import { PlayHeader, type DotState } from './ItemView';
 import { LearnItem } from './LearnItem';
 import { ROUTINE } from '../pattern/bridges';
+import { lessonWorld } from '../../content/world';
 
 /** The thinking routine shared with Pattern Lab, as one line under the key idea. */
 function RoutineLine() {
@@ -90,6 +91,7 @@ export interface LessonRecapProps {
 /** The short screen at the end of a lesson. */
 export function LessonRecap({ stop, lesson, tries, firstTry, passed = true, onDone, onRestart }: LessonRecapProps) {
   const k = stop.lessons.findIndex((l) => l.id === lesson.id);
+  const world = lessonWorld(lesson.id);
   const nextLesson = k >= 0 ? stop.lessons[k + 1] : undefined;
   const headRef = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
@@ -123,6 +125,7 @@ export function LessonRecap({ stop, lesson, tries, firstTry, passed = true, onDo
           </ul>
         </div>
       )}
+      {passed && world && <RealLife world={world} />}
       {passed && (
         <p className="play-note">
           {nextLesson ? (
@@ -138,6 +141,25 @@ export function LessonRecap({ stop, lesson, tries, firstTry, passed = true, onDo
         {passed ? 'Done' : onRestart ? 'Start the lesson again' : 'Leave for now'}
       </button>
     </div>
+  );
+}
+
+/** Where the lesson's idea is used, and why it matters: the last screen of a passed lesson. */
+export function RealLife({ world }: { world: NonNullable<ReturnType<typeof lessonWorld>> }) {
+  return (
+    <section className="play-real" aria-labelledby="real-title">
+      <h3 id="real-title" className="play-subhead">Where this is used</h3>
+      <ul className="play-real-list">
+        {world.uses.map((u) => (
+          <li key={u.who}>
+            <strong>{u.who}.</strong> {u.text}
+          </li>
+        ))}
+      </ul>
+      <p className="play-why">
+        <span className="play-why-label">Keep in mind</span> {world.why}
+      </p>
+    </section>
   );
 }
 
@@ -279,6 +301,7 @@ export function LessonRunner({ stop, lesson, seed, readAloud, onAnswer, onComple
           doneLabel={cardsDone(step.s).label}
           doneNote={cardsDone(step.s).note}
           after={<RoutineLine />}
+          why={here.from === 0 ? lessonWorld(lesson.id)?.why : undefined}
           onDone={() => nextStage(step.s)}
         />
       )}

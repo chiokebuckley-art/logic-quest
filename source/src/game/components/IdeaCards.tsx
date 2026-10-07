@@ -21,9 +21,11 @@ export interface IdeaCardsExtraProps {
   /** When these cards are a stretch of a lesson's cards: the first one's number, and how many the lesson has. */
   numberFrom?: number;
   numberOf?: number;
+  /** "Why it matters" (content/world), shown on the lesson's first card only. */
+  why?: string;
 }
 
-export function IdeaCards({ cards, readAloud, onDone, doneLabel = 'Try it', kicker = 'Key idea', after, doneNote, numberFrom = 1, numberOf }: IdeaCardsProps & IdeaCardsExtraProps) {
+export function IdeaCards({ cards, readAloud, onDone, doneLabel = 'Try it', kicker = 'Key idea', after, doneNote, numberFrom = 1, numberOf, why }: IdeaCardsProps & IdeaCardsExtraProps) {
   const [i, setI] = useState(0);
   /** Worked cases shown one step at a time: steps showing, by card. A card seen before stays fully shown. */
   const [shownSteps, setShownSteps] = useState<Record<number, number>>({});
@@ -58,6 +60,7 @@ export function IdeaCards({ cards, readAloud, onDone, doneLabel = 'Try it', kick
   }
 
   const last = i >= count - 1;
+  const showWhy = !!why && i === 0 && numberFrom === 1;
   const go = (to: number) => {
     moved.current = true;
     setI(Math.max(0, Math.min(count - 1, to)));
@@ -75,7 +78,7 @@ export function IdeaCards({ cards, readAloud, onDone, doneLabel = 'Try it', kick
   const speechText = () => {
     const scene = card.scene ? sceneSpeech(card.scene, revealed) : [];
     const text = card.body.map(asSentence);
-    return [asSentence(card.title), ...(steps.length ? [...text, ...scene] : [...scene, ...text])];
+    return [asSentence(card.title), ...(steps.length ? [...text, ...scene] : [...scene, ...text]), ...(showWhy ? ['Why it matters.', why!] : [])];
   };
 
   return (
@@ -93,6 +96,11 @@ export function IdeaCards({ cards, readAloud, onDone, doneLabel = 'Try it', kick
       {steps.length > 0 && body}
       {card.scene && <SceneView scene={card.scene} revealed={revealed} />}
       {steps.length === 0 && body}
+      {showWhy && (
+        <p className="play-why">
+          <span className="play-why-label">Why it matters</span> {why}
+        </p>
+      )}
       {count > 1 && <Dots states={cards.map((_, k) => (k < i ? 'done' : k === i ? 'now' : 'todo'))} label={`Card ${i + 1} of ${count}`} />}
       {after}
       <div className="play-actions">

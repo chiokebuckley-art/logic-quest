@@ -1,17 +1,21 @@
 /**
- * Library (1h): the cross-stop index. Ideas (every lesson and key-idea card, to re-read), Practice (passed stops),
- * Pattern Lab (Workshop, events, badges) and Soon. Replaces the old Learn tab.
+ * Library (1h): the cross-stop index. Ideas (every lesson and key-idea card, to re-read), Real life (where each idea
+ * is used, and why it matters), Practice (passed stops), Pattern Lab (Workshop, events, badges) and Soon. Replaces
+ * the old Learn tab.
  */
+import { useEffect } from 'react';
 import { viewAll } from '../../engine/journey/mastery';
 import { STOPS } from '../../content/stops';
 import { useStore, type LibraryKind, type Route } from '../store';
 import { Icon } from '../components/Icon';
 import { PageHead, Row, SearchButton, StopArt } from '../components/kit';
 import { BridgeProgressCard, PatternBridgeHome } from '../pattern/PatternBridge';
+import { lessonWorld, stopWorld } from '../../content/world';
 
 const KINDS: { kind: LibraryKind; label: string; tone: string }[] = [
   { kind: 'all', label: 'All', tone: 'gold' },
   { kind: 'ideas', label: 'Ideas', tone: 'cyan' },
+  { kind: 'real', label: 'Real life', tone: 'mint' },
   { kind: 'practice', label: 'Practice', tone: 'lime' },
   { kind: 'lab', label: 'Pattern Lab', tone: 'violet' },
   { kind: 'soon', label: 'Soon', tone: 'muted' },
@@ -21,6 +25,12 @@ const DISC: Record<string, string> = { mastered: 'mint', lockedIn: 'gold', passe
 
 export function LibraryScreen({ route }: { route: Extract<Route, { name: 'library' }> }) {
   const { save, today, actions } = useStore();
+  // Real life opened for one stop: scroll to it once the page is drawn.
+  useEffect(() => {
+    if (route.kind !== 'real' || !route.stop) return;
+    const f = window.requestAnimationFrame(() => document.getElementById(`real-stop-${route.stop}`)?.scrollIntoView({ block: 'start' }));
+    return () => window.cancelAnimationFrame(f);
+  }, [route.kind, route.stop]);
   if (!save) return null;
   const kind = route.kind ?? 'all';
   const views = viewAll(STOPS, save.stops, today);
@@ -69,7 +79,7 @@ export function LibraryScreen({ route }: { route: Extract<Route, { name: 'librar
     <div className="page sl-page">
       <PageHead title="Library" />
       <SearchButton onOpen={() => actions.navigate({ name: 'search' })} placeholder="Find anything" />
-      <div className="sl-seg" role="tablist" aria-label="Kind">
+      <div className="sl-seg sl-seg--grid" role="tablist" aria-label="Kind">
         {KINDS.map((k) => (
           <button key={k.kind} type="button" role="tab" aria-selected={kind === k.kind} className={`sl-seg-btn c-${k.tone}`} onClick={() => actions.navigate({ name: 'library', kind: k.kind })}>
             {k.label}
@@ -83,6 +93,59 @@ export function LibraryScreen({ route }: { route: Extract<Route, { name: 'librar
           {practiceCards(false)}
           <h3 className="sl-label">All ideas · by stop</h3>
           {ideasByStop}
+          <h3 className="sl-label t-mint">In real life</h3>
+          <div className="sl-list">
+            <Row
+              lead={<span className="sl-disc d-mint" aria-hidden="true">★</span>}
+              title="Where each idea is used"
+              sub="Real examples from school, games and jobs, and why each idea matters"
+              meta="Open"
+              metaTone="mint"
+              onClick={() => actions.navigate({ name: 'library', kind: 'real' })}
+            />
+          </div>
+        </>
+      )}
+
+      {kind === 'real' && (
+        <>
+          <p className="sl-sub">Where each idea is used in real life, and why it matters. Read them again to keep them in mind.</p>
+          {STOPS.map((stop) => {
+            const line = stopWorld(stop.id);
+            if (!line) return null;
+            // A coming stop has its one line and no lessons yet: nothing to open.
+            if (!stop.lessons.some((l) => lessonWorld(l.id))) {
+              return (
+                <section key={stop.id} id={`real-stop-${stop.id}`} className="sl-real sl-real-soon" aria-label={`Stop ${stop.n} · ${stop.title}`}>
+                  <span className="sl-label t-mint">Stop {stop.n} · {stop.title}{stop.ready ? '' : ' · coming soon'}</span>
+                  <span className="sl-real-line">{line}</span>
+                </section>
+              );
+            }
+            return (
+              <details key={stop.id} id={`real-stop-${stop.id}`} className="sl-real sl-real-stop" open={route.stop === stop.id}>
+                <summary>
+                  <span className="sl-label t-mint">Stop {stop.n} · {stop.title}{stop.ready ? '' : ' · coming soon'}</span>
+                  <span className="sl-real-line">{line}</span>
+                </summary>
+                {stop.lessons.map((lesson, k) => {
+                  const w = lessonWorld(lesson.id);
+                  if (!w) return null;
+                  return (
+                    <div key={lesson.id} className="sl-real-lesson">
+                      <h4 className="sl-real-title">Lesson {k + 1} · {lesson.title}</h4>
+                      <p className="sl-real-why"><span className="sl-real-why-label">Why it matters</span> {w.why}</p>
+                      <ul className="sl-real-list">
+                        {w.uses.map((u) => (
+                          <li key={u.who}><strong>{u.who}.</strong> {u.text}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  );
+                })}
+              </details>
+            );
+          })}
         </>
       )}
 

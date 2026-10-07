@@ -166,6 +166,40 @@ Skill tags (`sN.short-name`) appear on the Grown-ups screen. Add a plain name fo
 `src/game/progressStats.ts`. Every miss becomes a Wrong-Answer Notebook card for its skill, so each skill must
 appear in its lesson's practice sets. That is where the fresh repair question comes from.
 
+## Real life: where each idea is used, and why
+
+Every ready stop has a real-life file, `src/content/world/sN.ts` (types in `world/types.ts`), the way Engineering
+Quest shows where engineers meet each skill. It holds:
+
+- **`stop`**: one sentence on where the stop's big idea is used (stop page, Library). Coming stops have theirs in
+  `world/soon.ts`.
+- **`lessons[id].why`**: why the idea matters, the thing to keep in mind (1–2 sentences, ≤ 30 words). It shows on
+  the lesson's first card ("Why it matters") and again on its last screen ("Keep in mind").
+- **`lessons[id].uses`**: three real uses of exactly that idea, each `{ who, kind, text }`: at least one `life` (a
+  kid's everyday life: school, home, games, shops, sports) and one `work` (a job). Three different `who`s (≤ 5 words),
+  each text ≤ 3 short sentences and ≤ 40 words. They show on the lesson's last screen ("Where this is used"), in the
+  Library's Real life view, in search, and one a day on Home ("Remember why").
+- **`skills[skill]`**: 1–2 lines for every skill the stop can ask about, shown under the reason after a right
+  answer as "In real life: …" (never start a line with those words). Each shows that skill's exact move.
+
+The rules that matter most are not mechanical:
+
+- **True, today.** No invented numbers, no named people, brands, apps or places: roles only ("Nurses", "Referees",
+  "You, at the store").
+- **Exactly the lesson's logic.** Not "related to" it. Everyday words can differ from the game's (everyday "or" often
+  means one but not both; spoken "if" often means "only if"): pick an example where the logic matches, or say the
+  difference out loud. A loose example teaches the wrong idea.
+- **Concrete and varied.** Who, the situation, and what the idea lets them do or stops going wrong. A job at most
+  twice in a stop; no situation repeated anywhere in the game.
+- **Kid-safe and plain.** No alcohol, smoking, gambling, weapons, crime, police, war or dating; doctors, vets and
+  firefighters in calm, everyday terms. Curly quotes and apostrophes only.
+
+The contract test checks coverage, shapes, lengths, curly quotes, banned words, repeats and the reading level:
+
+```bash
+npx vitest run src/engine/__tests__/world.test.ts -t "stop 2"
+```
+
 ## Reading level
 
 The first players read at a 6th-grade level. Every lesson's cards, prompts and explanations must score a

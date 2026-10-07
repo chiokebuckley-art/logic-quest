@@ -13,6 +13,7 @@ import { Eyebrow, SearchButton, StopArt } from '../components/kit';
 import { art } from '../pattern/PatternBridge';
 import { EVENT_IDS } from '../pattern/bridges';
 import { RepairCard, TodayMeter } from './JourneyScreen';
+import { useOfTheDay } from '../../content/world';
 
 const CHECK_NAME: Record<CheckKind, string> = { pass: 'Stop check', lockin: 'Lock-in check', week: 'Week check' };
 
@@ -171,6 +172,8 @@ export function HomeScreen() {
         </section>
       )}
 
+      <RememberWhy lessonIds={STOPS.flatMap((s) => save.stops[s.id]?.lessonsDone ?? [])} today={today} onMore={(stopId) => actions.navigate({ name: 'library', kind: 'real', stop: stopId })} />
+
       <button type="button" className="sl-row sl-lab-row" onClick={() => actions.navigate(bridge.workshop ? { name: 'library', kind: 'lab' } : { name: 'pattern', workshop: true })}>
         <img src={art('badge-pattern-scout')} alt="" className={`sl-badge${bridge.workshop ? '' : ' dim'}`} />
         <span className="sl-row-main">
@@ -180,5 +183,24 @@ export function HomeScreen() {
         <span className="sl-row-meta t-violet">Open</span>
       </button>
     </div>
+  );
+}
+
+/** One real-life use from a lesson the player has done: a different one each day, to keep the ideas in mind. */
+function RememberWhy({ lessonIds, today, onMore }: { lessonIds: readonly string[]; today: string; onMore(stopId: string): void }) {
+  const pick = useOfTheDay(lessonIds, today);
+  if (!pick) return null;
+  const stop = STOPS.find((s) => s.lessons.some((l) => l.id === pick.lessonId));
+  const lesson = stop?.lessons.find((l) => l.id === pick.lessonId);
+  return (
+    <section className="sl-real sl-real-home" aria-labelledby="remember-title">
+      <h3 id="remember-title" className="sl-label t-mint">Remember why · in real life</h3>
+      <p className="sl-real-line"><strong>{pick.use.who}.</strong> {pick.use.text}</p>
+      {stop && lesson && (
+        <button type="button" className="sl-link" onClick={() => onMore(stop.id)}>
+          From {lesson.title} · more examples
+        </button>
+      )}
+    </section>
   );
 }

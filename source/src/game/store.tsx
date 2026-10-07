@@ -27,7 +27,7 @@ import type { AnswerRecord } from './components/contracts';
 export type LessonFrom = 'journey' | 'learn' | 'check' | 'stop' | 'library' | 'home';
 
 /** The Library's kind filter. */
-export type LibraryKind = 'all' | 'ideas' | 'practice' | 'lab' | 'soon';
+export type LibraryKind = 'all' | 'ideas' | 'real' | 'practice' | 'lab' | 'soon';
 
 export type Route =
   | { name: 'players'; mode?: 'list' | 'new' | 'import' | 'link'; pinFor?: string }
@@ -36,7 +36,8 @@ export type Route =
   | { name: 'journey'; track?: 'main' | 'side' }
   /** One page per stop: lessons, checks, practice, Pattern Lab events and repair cards. */
   | { name: 'stop'; stopId: string }
-  | { name: 'library'; kind?: LibraryKind }
+  /** `stop`: open that stop's section (the Real life view). */
+  | { name: 'library'; kind?: LibraryKind; stop?: string }
   | { name: 'me' }
   | { name: 'grownups' }
   | { name: 'search'; q?: string }

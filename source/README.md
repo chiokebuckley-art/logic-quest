@@ -1,5 +1,18 @@
 # LOGIC QUEST
 
+**v0.8.0 — Real life:** every idea now comes with where it is used outside the game, and why it matters, the way
+Engineering Quest shows where engineers use each skill.
+
+- **Why it matters.** Each lesson's first card says why the idea is worth knowing, in one or two sentences.
+- **In real life.** After each right answer, one line shows that exact move in real life: a ride's height rule
+  for “at least”, a waiter's “soup or salad” for OR, a red card that might be a diamond for an if–then rule run
+  backward.
+- **Where this is used.** A finished lesson ends with three real uses, at least one from everyday life (school,
+  games, home, shops) and one from a job (doctors, programmers, referees, pilots and many more).
+- **Keep it in mind.** Each stop page has an “In real life” section, the Library has a new **Real life** view with
+  every example by stop, search finds lessons by where they are used, and Home shows one example a day from the
+  lessons you have done (“Remember why”).
+
 **v0.7.0 — Sync across devices:** play the same player on a phone, a tablet and a computer, the way Engineering
 Quest does.
 
@@ -172,6 +185,9 @@ npm run dev        # http://localhost:5192
   first-try accuracy by skill, what needs practice and what is strong, plus a CSV download.
 - **Players:** "Who's playing?" holds several players on one device, each with an optional 4-digit PIN. Settings
   can export a player to a file and import it on another device.
+- **Real life:** every lesson says why its idea matters and where it is used (three real uses on its last screen),
+  each right answer adds an “In real life” line, and the Library's Real life view, the stop pages and Home's
+  “Remember why” keep them in view. The content lives in `src/content/world/` (see docs/CONTENT_GUIDE.md).
 - **Sync across devices:** see below.
 
 ## Sync across devices

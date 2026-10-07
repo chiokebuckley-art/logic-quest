@@ -12,6 +12,7 @@ import { useStore, type Route } from '../store';
 import { Icon } from '../components/Icon';
 import { Eyebrow, KindTag, Row, stopPlace } from '../components/kit';
 import { stopAction } from './JourneyScreen';
+import { lessonWorld, stopWorld } from '../../content/world';
 
 const CHECK_NAME: Record<CheckKind, string> = { pass: 'Stop check', lockin: 'Lock-in check', week: 'Week check' };
 
@@ -85,6 +86,8 @@ export function StopScreen({ route }: { route: Extract<Route, { name: 'stop' }> 
           ))}
         </ol>
       )}
+
+      <RealLifeSection stopId={stop.id} lessons={stop.lessons} onMore={() => actions.navigate({ name: 'library', kind: 'real', stop: stop.id })} />
 
       {view.status === 'locked' && <p className="sl-note"><Icon name="lock" size={14} /> {view.label}.{events.length ? ' You can still look at the Pattern Lab events below.' : ''}</p>}
       {view.status === 'soon' && <p className="sl-note">This stop is coming in a later version.{events.length ? ' Its Pattern Lab events are open now as a preview.' : ''}</p>}
@@ -170,5 +173,35 @@ export function StopScreen({ route }: { route: Extract<Route, { name: 'stop' }> 
         )}
       </div>
     </div>
+  );
+}
+
+/** The stop's real-life line, and each lesson's "why" (content/world). The Library's Real life view has every example. */
+function RealLifeSection({ stopId, lessons, onMore }: { stopId: string; lessons: readonly { id: string; title: string }[]; onMore(): void }) {
+  const line = stopWorld(stopId);
+  if (!line) return null;
+  const whys = lessons.map((l, k) => ({ k, title: l.title, why: lessonWorld(l.id)?.why })).filter((x) => x.why);
+  return (
+    <section className="sl-real" aria-labelledby={`real-${stopId}`}>
+      <h3 id={`real-${stopId}`} className="sl-label t-mint">In real life</h3>
+      <p className="sl-real-line">{line}</p>
+      {whys.length > 0 && (
+        <details className="sl-real-more">
+          <summary>Why each lesson matters</summary>
+          <ul className="sl-real-list">
+            {whys.map((x) => (
+              <li key={x.k}>
+                <strong>Lesson {x.k + 1} · {x.title}.</strong> {x.why}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      {whys.length > 0 && (
+        <button type="button" className="sl-link" onClick={onMore}>
+          See where each idea is used
+        </button>
+      )}
+    </section>
   );
 }
