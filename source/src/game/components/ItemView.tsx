@@ -27,7 +27,9 @@ import { ReadAloudButton } from './ReadAloud';
 export { ReadAloudButton };
 import { SceneView, type ClueState } from './SceneView';
 import { PlayIcon, ThingCard } from './ThingCard';
+import { NumberPad } from './NumberPad';
 import { skillWorld } from '../../content/world';
+import { ConfusedPanel } from './Distinction';
 
 // ---------- pure helpers ----------
 
@@ -94,8 +96,10 @@ export function answerFor(
   chosen: readonly string[],
   slots: readonly (string | null)[],
   marks: Marks = {},
+  digits = '',
 ): Answer | null {
   switch (item.kind) {
+    case 'number': return digits ? { kind: 'number', value: Number(digits) } : null;
     case 'choose': return pick ? { kind: 'choose', id: pick } : null;
     case 'tapall': return { kind: 'tapall', ids: [...chosen] };
     case 'order': return { kind: 'order', ids: slots.filter((s): s is string => s !== null) };
@@ -105,8 +109,9 @@ export function answerFor(
 }
 
 /** Can Check (or Next, in a check) be pressed yet? Choose: a pick. Order: a full line. Assign: one tick per row. */
-export function canSubmitFor(item: Item, pick: string | null, slots: readonly (string | null)[], marks: Marks = {}): boolean {
+export function canSubmitFor(item: Item, pick: string | null, slots: readonly (string | null)[], marks: Marks = {}, digits = ''): boolean {
   switch (item.kind) {
+    case 'number': return digits.length > 0;
     case 'choose': return pick !== null;
     case 'order': return slots.every((s) => s !== null);
     case 'assign': return assignReady(item, marks);
@@ -115,10 +120,26 @@ export function canSubmitFor(item: Item, pick: string | null, slots: readonly (s
   }
 }
 
+/** What fills a faded frame's blank: the picked choice's label, or the typed number. */
+function frameFill(item: Item, pick: string | null, digits: string, midSentence = false): string {
+  if (item.kind === 'number') return digits;
+  if (item.kind !== 'choose' || !pick) return '';
+  const label = item.choices.find((c) => c.id === pick)?.label ?? '';
+  // A choice label starts with a capital; inside the sentence it reads in lower case ("The unit is red, blue.").
+  return midSentence && /^[A-Z][a-z]/.test(label) ? label[0].toLowerCase() + label.slice(1) : label;
+}
+
+/** Is the blank at `k` inside a sentence (words before it, not ending in a full stop)? */
+function midSentenceAt(parts: readonly string[], k: number): boolean {
+  const before = parts.slice(0, k).join('').trim();
+  return before.length > 0 && !/[.!?]$/.test(before);
+}
+
 /** The line under Check while it waits. Empty when Check can be pressed. */
 export function waitNoteFor(item: Item, ready: boolean): string {
   if (ready) return '';
   switch (item.kind) {
+    case 'number': return 'Type a number to go on.';
     case 'order': return 'Place everyone to go on.';
     case 'assign': {
       if (item.layout === 'toggles') {
@@ -264,11 +285,18 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
   const [chosen, setChosen] = useState<string[]>([]);
   const [slots, setSlots] = useState<Slots>(() => (item.kind === 'order' ? item.names.map(() => null) : []));
   const [marks, setMarks] = useState<Marks>({});
+  /** The digits typed on the number pad (number items). */
+  const [digits, setDigits] = useState('');
+  /** The optional confidence tap (Observatory items): 0 unsure, 1 fairly sure, 2 very sure. */
+  const [conf, setConf] = useState<0 | 1 | 2 | null>(null);
   /** Learn mode, after a wrong Check on an assign item: the broken clues (grid) or speakers (toggles). Cleared on the next change. */
   const [flagged, setFlagged] = useState<number[] | null>(null);
   const [phase, setPhase] = useState<Phase>('answer');
   const [misses, setMisses] = useState(0);
   const [hintOpen, setHintOpen] = useState(false);
+  /** "I’m confused" is open (learn mode; it counts as help, like the hint). */
+  const [confusedOpen, setConfusedOpen] = useState(false);
+  const confusedBtn = useRef<HTMLButtonElement>(null);
   /** Learn mode: the item's guided board (workFirst) is marked right, so the answer buttons can show. */
   const [workDone, setWorkDone] = useState(() => !learn || !item.workFirst);
   /** The item's board is a case board: it draws the scene itself and stays up, marked, once it is done. */
@@ -302,8 +330,8 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
 
   const locked = learn ? phase !== 'answer' : submitted;
   const timed = !learn && typeof timeLimit === 'number' && timeLimit > 0;
-  const answer = answerFor(item, pick, chosen, slots, marks);
-  const canSubmit = canSubmitFor(item, pick, slots, marks);
+  const answer = answerFor(item, pick, chosen, slots, marks, digits);
+  const canSubmit = canSubmitFor(item, pick, slots, marks, digits);
 
   const record = (correct: boolean, firstTry: boolean, given: Answer | null, timedOut = false): AnswerRecord => ({
     itemId: item.id,
@@ -315,6 +343,8 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
     ms: Math.max(0, solvedMs.current ?? Date.now() - startedAt),
     ...(timedOut ? { timedOut: true } : {}),
     ...(given && !timedOut ? { answer: given } : {}),
+    ...(conf !== null ? { conf } : {}),
+    ...(item.phase ? { phase: item.phase } : {}),
     ...(learn
       ? {
           help: {
@@ -397,6 +427,7 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
   const tryAgain = () => {
     if (item.kind === 'choose') setPick(null);
     if (item.kind === 'tapall' || item.kind === 'multi') setChosen([]);
+    if (item.kind === 'number') setDigits('');
     setPhase('answer');
     setLive('Try the question again. You can review the explanation.');
   };
@@ -521,6 +552,17 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
   } else if (item.kind === 'multi') {
     const toggle = (id: string) => setChosen((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
     controls = <MultiView item={item} chosen={chosen} locked={locked} revealed={revealed} onToggle={toggle} />;
+  } else if (item.kind === 'number') {
+    controls = (
+      <div className="play-stack-sm">
+        {revealed && (
+          <p className="play-help" role="status">
+            {phase === 'right' ? `Right: ${item.answer}${item.unit ? ` ${item.unit}` : ''}.` : `The rule gives ${item.answer}${item.unit ? ` ${item.unit}` : ''}.`}
+          </p>
+        )}
+        <NumberPad value={digits} onChange={setDigits} onSubmit={() => { if (learn) check(); else if (!submitted) submitCheck(false); }} digits={item.digits ?? 3} locked={locked} unit={item.unit} labelledBy={promptId} />
+      </div>
+    );
   } else {
     const nameOf = (id: string) => item.names.find((n) => n.id === id)?.label ?? id;
     const n = slots.length;
@@ -622,6 +664,17 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
       <p className="play-prompt" id={promptId} ref={promptRef} tabIndex={-1}>
         {item.prompt}
       </p>
+      {item.frame && (
+        <p className="play-frame" aria-label={`Fill the blank: ${item.frame.replace(/_{2,}/g, 'blank')}`}>
+          {item.frame.split(/(_{2,})/).map((part, k, parts) =>
+            /^_{2,}$/.test(part) ? (
+              <span key={k} className="play-frame-blank" aria-hidden="true">{frameFill(item, pick, digits, midSentenceAt(parts, k)) || '___'}</span>
+            ) : (
+              <span key={k}>{part}</span>
+            ),
+          )}
+        </p>
+      )}
 
       {item.scene && !sceneInControls && !caseWork && !(learn && scratchOpen) && <SceneView scene={item.scene} clueState={clueState} />}
 
@@ -630,10 +683,13 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
           step={item.workFirst}
           embedded
           readAloud={readAloud}
-          kicker="First, mark the cases"
+          kicker={item.workFirst.kicker ?? (item.workFirst.layout === 'cases' ? 'First, mark the cases' : 'First, mark the board')}
           doneLabel="Now answer the question"
           autoFocus={false}
           settled={workDone}
+          onHelp={() => {
+            help.current.hint = true;
+          }}
           onWrong={() => {
             // A wrong mark on the item's own board: the item is no longer a first try (saved at once, so leaving
             // and coming back does not give a clean try).
@@ -660,7 +716,7 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
               setScratchUsed(true);
             }}
           >
-            {scratchOpen ? 'Hide the case board' : 'Use the case board'}
+            {scratchOpen ? `Hide ${item.scratchLabel ?? 'the case board'}` : `Use ${item.scratchLabel ?? 'the case board'}`}
           </button>
           {scratchUsed && (
             <div hidden={!scratchOpen}>
@@ -672,6 +728,16 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
 
       {(!learn || !item.workFirst || workDone) && controls}
 
+      {learn && phase === 'answer' && workDone && item.phase && (
+        <div className="play-conf" role="group" aria-label="How sure are you? This is optional and never counts against you.">
+          <span>How sure?</span>
+          {(['Unsure', 'Fairly sure', 'Very sure'] as const).map((label, k) => (
+            <button key={label} type="button" className="play-conf-btn" aria-pressed={conf === k} onClick={() => setConf(conf === k ? null : (k as 0 | 1 | 2))}>
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
       {learn && phase === 'answer' && workDone && (
         <>
           {explained && (
@@ -693,6 +759,17 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
               </div>
             </div>
           )}
+          {confusedOpen && item.confused && (
+            <ConfusedPanel
+              questions={item.confused}
+              closing={item.confusedClosing ?? item.workFirst?.words?.closing ?? item.scratch?.words?.closing}
+              backLabel="Back to the question"
+              onClose={() => {
+                setConfusedOpen(false);
+                requestAnimationFrame(() => confusedBtn.current?.focus());
+              }}
+            />
+          )}
           <div className="play-actions">
             {item.hint && (
               <button
@@ -706,6 +783,20 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
                 }}
               >
                 Hint
+              </button>
+            )}
+            {item.confused && !confusedOpen && (
+              <button
+                ref={confusedBtn}
+                type="button"
+                className="play-btn play-btn--ghost play-confused-btn"
+                aria-expanded={confusedOpen}
+                onClick={() => {
+                  help.current.hint = true;
+                  setConfusedOpen(true);
+                }}
+              >
+                <PlayIcon name="help" size={18} /> I’m confused
               </button>
             )}
             <button type="button" className="play-btn play-btn--primary play-btn--grow" disabled={!canSubmit} onClick={check}>

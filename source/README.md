@@ -1,5 +1,62 @@
 # LOGIC QUEST
 
+**v0.10.0 — The Pattern Observatory:** a side constellation of pattern recognition, from the owner’s handoff
+*Pattern Recognition from First Principles* (v2). Four rings, ten places, one routine. It opens from the start and
+never blocks the main track.
+
+- **Four rings, ten places.** Ring 1 First Lights (Star Chain, Repair Bench, Echo Bells: a chain is made by
+  repeating a block, and the unit is the shortest block that repeats all the way). Ring 2 Rule Rise (Growing
+  Staircase, Rule Machine, Clock Tower: a stated construction gives the far step; two rules that agree on one input
+  are told apart by a separating test; item positions and elapsed days are two ways of counting). Ring 3 Deep Sky
+  (Mirror Pool, Matrix Gate, Analogy Bridge: a fold keeps every point’s partner; a tile must fit the row rule and
+  the column rule; an analogy keeps the relation, not the look). Ring 4 Proof Lantern (proved, a guess, or false;
+  counterexamples and separating tests; why a stated construction guarantees its pattern).
+- **One routine on every screen.** Notice → Describe → Compare → Test → Predict → Explain, lit for the phase you are
+  in. Every place runs See → Explain → Do → Transfer → Review: a worked example with the steps visible, a “why”
+  question, a faded example then the same task with no frame, the same structure in new materials, and fresh
+  questions on later days.
+- **A number pad.** Numeric answers are typed on big keys in the app, so a tablet’s keyboard never opens.
+- **Help is not grading.** Hints and retries are welcome. A repaired item counts as supported; a fresh twin counts as
+  independent. A first try, once recorded, never changes.
+- **An evidence profile per place.** Practiced · Lesson complete · Independent (6 fresh questions, 5 right, no
+  hints) · Transferred (2 unfamiliar contexts) · Retained (4 fresh questions at about 2 days, 1 week and 3 weeks).
+  Three clean answers complete a lesson; they are a gate, not mastery.
+- **Find your level.** A short diagnostic, about five minutes with no timer, suggests a starting level per track
+  (L1 Starter to L4 Prover). Each place then picks its quiz at your level on its track. Levels are never ages. A
+  grown-up can change them.
+- **Places open on skills, not stop numbers.** A place that needs a skill from another lesson opens when that lesson
+  is done, when the diagnostic showed the skill, or after a three-question primer.
+- **Plain labels for grown-ups.** Settings can name the places Repeating units, Growth rules, Functions, Cycles,
+  Spatial rules and Evidence.
+- **Pattern Lab bridges.** The repeat bridge now varies its block (AB, ABB, ABC), Twin Isles has content of its own,
+  and bridges record first tries. With the owner’s OK, the bridges and the shared chip now use the Observatory’s routine order.
+
+**v0.9.0 — Teach the hidden distinction:** a learner can know every word in a question and still be confused,
+because two ideas have collapsed into one. The treasure signs showed it: “the treasure is in this chest” was read as
+“this chest’s sign is true”. This release audits every lesson for that kind of gap and fixes every serious one.
+
+- **The audit.** `docs/audit/hidden-distinctions.md` goes through all 37 lessons and lists 114 places where a
+  lesson leans on a distinction or a step it never taught, from P0 (a fundamentally wrong idea) to P3 (polish).
+  Every P0 and P1 is fixed in this release; the P2 and P3 items are listed with their fix.
+- **Before you start.** Each hard distinction now gets a card with two cases side by side that differ in one thing,
+  then a tiny board where you do the two cases yourself, before the first real puzzle. For example: where the
+  treasure is vs whether a sign is true; the rule vs the stamps; a speaker’s kind (what the words must be) vs
+  whether the words are true; a cause that works every time vs the only cause; tests vs records; a case that
+  breaks a rule vs a case that can’t happen; a cross in this column vs a cross elsewhere in the kid’s row.
+- **The reason, in words.** No stamp or mark shows only True or False any more. Under it sit three rows: what it
+  says, what the test world says, whether they fit. The test world itself stays on screen (“Pretend the treasure is
+  in the Gold chest”, “Test world: Ava is a knave”), with the rule’s need next to the count.
+- **Steps that fade.** The first board and the first quiz show the whole method with the current step lit; later
+  boards drop the scaffolding, and it comes back for a case you got wrong.
+- **A mix-up, not a mistake.** When a pattern of wrong marks points to two ideas taken as one, the game says so
+  first (“You may be treating X and Y as the same thing. They are different, because…”), then shows the concrete
+  case. The old “that mark is wrong” message is gone from every board.
+- **“I’m confused.”** Every board and every quiz question that rests on a distinction has a button that asks one
+  to three short questions to find the mixed-up idea and teach it apart. It never gives the answer, and using it
+  counts as help, like a hint.
+- **A rule for every app.** The approach is written down as a design rule for Logic Quest, Engineering Quest and
+  WORDRAIDERS: `docs/design-rule-hidden-distinctions.md` at the repo root.
+
 **v0.8.0 — Real life:** every idea now comes with where it is used outside the game, and why it matters, the way
 Engineering Quest shows where engineers use each skill.
 

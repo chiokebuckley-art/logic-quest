@@ -8,6 +8,8 @@ import type { Scene } from '../../engine/types';
 import { PlayIcon, ThingCard } from './ThingCard';
 import { boxTint, RuleBanner } from './boxes';
 import { CaseScene } from './CaseBoard';
+import { ContrastView } from './Distinction';
+import { ObservatoryScene } from './scenes/ObservatoryScene';
 
 export { RuleBanner };
 
@@ -76,6 +78,8 @@ export function SceneView({ scene, clueState, labelId, revealed }: SceneViewProp
   switch (scene.kind) {
     case 'cases':
       return <CaseScene scene={scene} revealed={revealed} labelId={labelId} />;
+    case 'contrast':
+      return <ContrastView scene={scene} labelId={labelId} />;
     case 'things':
       return (
         <ul className="play-things play-scene" aria-label="Cards, from first to last" id={labelId}>
@@ -164,6 +168,11 @@ export function SceneView({ scene, clueState, labelId, revealed }: SceneViewProp
               <span className="play-fact-tag">What is true</span> {scene.fact}
             </p>
           )}
+          {scene.test && (
+            <p className="play-fact play-fact--test">
+              <span className="play-fact-tag">Test world</span> {scene.test}
+            </p>
+          )}
           <ul className="play-speaker-list" aria-label="Who says what">
             {scene.speakers.map((sp, i) => (
               <SpeakerCard key={sp.id} name={sp.name} says={sp.says} index={i} />
@@ -173,6 +182,15 @@ export function SceneView({ scene, clueState, labelId, revealed }: SceneViewProp
       );
     case 'grid':
       return <GridPicture scene={scene} labelId={labelId} />;
+    case 'chain':
+    case 'staircase':
+    case 'machine':
+    case 'clock':
+    case 'mirror':
+    case 'matrix':
+    case 'bridge':
+    case 'lantern':
+      return <ObservatoryScene scene={scene} revealed={revealed} labelId={labelId} />;
   }
 }
 

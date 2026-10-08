@@ -1,4 +1,5 @@
 import { freshBridge, parseBridge, type BridgeProgress } from '../../game/pattern/bridges';
+import { newEvidence, parseEvidence, type Evidence } from '../evidence';
 /**
  * Players and saves, kept in the browser's localStorage (the WORDRAIDERS model): a registry of named
  * players, each with an optional 4-digit PIN, and one save per player. Every save carries
@@ -105,6 +106,11 @@ export interface SaveData {
    * only after this. Top level, so an older copy of the app carries it through untouched.
    */
   drilled: string[];
+  /**
+   * The Pattern Observatory's evidence profile (engine/evidence.ts): what each place has shown, the answer log,
+   * the diagnostic, primers passed, plain labels. One top-level key, so an older copy carries it through untouched.
+   */
+  evidence: Evidence;
 }
 
 export interface KV {
@@ -116,7 +122,7 @@ export interface KV {
 export const DEFAULT_SETTINGS: Settings = { timer: true, readAloud: true, reduceMotion: false };
 
 export function newSave(now = Date.now()): SaveData {
-  return { patternBridge: freshBridge(), game: 'logic-quest', v: SAVE_VERSION, savedAt: now, stops: {}, stats: {}, active: {}, settings: { ...DEFAULT_SETTINGS }, notebook: {}, fixedCount: 0, help: {}, gaps: [], lessonRun: null, drilled: [] };
+  return { patternBridge: freshBridge(), game: 'logic-quest', v: SAVE_VERSION, savedAt: now, stops: {}, stats: {}, active: {}, settings: { ...DEFAULT_SETTINGS }, notebook: {}, fixedCount: 0, help: {}, gaps: [], lessonRun: null, drilled: [], evidence: newEvidence() };
 }
 
 /** Skill tags look like 's2.or-both'. Anything else in an imported save is dropped (it would also break the CSV). */
@@ -218,6 +224,7 @@ export function parseSave(raw: unknown): SaveData | null {
     }
   }
   if (Array.isArray(raw.drilled)) s.drilled = [...new Set(strs(raw.drilled, 400).filter((id) => /^s\d{1,2}\.l\d{1,2}$/.test(id)))];
+  s.evidence = parseEvidence(raw.evidence);
   if (Array.isArray(raw.gaps)) s.gaps = [...new Set(raw.gaps.filter((g): g is string => typeof g === 'string' && /^s\d{1,2}\.[\w.:-]{1,120}$/.test(g)))].slice(-MAX_GAPS);
   if (isObj(raw.settings)) {
     const st = raw.settings;

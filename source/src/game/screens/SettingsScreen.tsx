@@ -23,7 +23,7 @@ export function SettingsScreen() {
         )}
       </div>
       {player && save && <YouPanel player={player} />}
-      {player && save && <PlayPanel settings={save.settings} onChange={actions.updateSettings} />}
+      {player && save && <PlayPanel settings={save.settings} onChange={actions.updateSettings} plain={save.evidence.plain} onPlain={actions.setPlainLabels} />}
       {player && save && <SyncPanel player={player} />}
       <SavePanel />
       <DevicePlayers />
@@ -153,13 +153,14 @@ function Toggle({ label, note, on, onChange }: { label: string; note: string; on
   );
 }
 
-function PlayPanel({ settings, onChange }: { settings: Settings; onChange(patch: Partial<Settings>): void }) {
+function PlayPanel({ settings, onChange, plain, onPlain }: { settings: Settings; onChange(patch: Partial<Settings>): void; plain: boolean; onPlain(v: boolean): void }) {
   return (
     <section className="panel" aria-labelledby="play-title">
       <h3 id="play-title" className="section-title">PLAY</h3>
       <Toggle label="Check timer" note="Grown-ups: a calm time limit on check questions. It is 90 seconds, or up to 3 minutes for big puzzles." on={settings.timer} onChange={(v) => onChange({ timer: v })} />
       <Toggle label="Read aloud" note="Shows a speaker button that reads the words out loud." on={settings.readAloud} onChange={(v) => onChange({ readAloud: v })} />
       <Toggle label="Reduce motion" note="Turns off moving effects, like shakes and slides." on={settings.reduceMotion} onChange={(v) => onChange({ reduceMotion: v })} />
+      <Toggle label="Plain labels for grown-ups" note="The Pattern Observatory names its places Repeating units, Growth rules, Functions, Cycles, Spatial rules and Evidence instead of Star Chain, Rule Machine and the rest. Same skills." on={plain} onChange={onPlain} />
     </section>
   );
 }

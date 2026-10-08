@@ -4,6 +4,7 @@
  * Everything here is safe to import in tests and on a server: nothing touches `window` until called.
  */
 import type { Item, Scene, Thing } from '../engine/types';
+import { observatorySpeech } from './components/scenes/speech';
 
 export const SPEECH_RATE = 0.95;
 
@@ -180,6 +181,7 @@ export function sceneSpeech(scene: Scene, revealed?: number): string[] {
       return [
         ...(scene.rule ? [asSentence(scene.rule)] : []),
         ...(scene.fact ? [`What is true: ${asSentence(scene.fact)}`] : []),
+        ...(scene.test ? [`Test world: ${asSentence(scene.test)}`] : []),
         ...scene.speakers.map((sp) => (sp.says.trim() ? `${sp.name} says: ${asSentence(sp.says)}` : `${sp.name} says nothing.`)),
       ];
     case 'grid': {
@@ -208,6 +210,26 @@ export function sceneSpeech(scene: Scene, revealed?: number): string[] {
       }
       return lines;
     }
+    case 'chain':
+    case 'staircase':
+    case 'machine':
+    case 'clock':
+    case 'mirror':
+    case 'matrix':
+    case 'bridge':
+    case 'lantern':
+      return observatorySpeech(scene, revealed);
+    case 'contrast':
+      // Each panel: the test world, who says what, and the comparison. Then the question and its answer.
+      return [
+        ...scene.pairs.flatMap((p, k) => [
+          `Case ${k + 1}. ${asSentence(p.world)}`,
+          `${p.who} ${scene.words?.saysWord ?? 'says:'} ${asSentence(p.says)}`,
+          `${p.truth ? scene.words?.truth ?? 'True' : scene.words?.untruth ?? 'False'}. ${p.because}`,
+          ...(p.then ? [p.then] : []),
+        ]),
+        ...(scene.ask ? [`${scene.ask.q} ${scene.ask.a}`] : []),
+      ];
   }
 }
 
@@ -239,6 +261,9 @@ export function itemSpeech(item: Item): string[] {
       break;
     case 'multi':
       lines.push('Your choices are:', ...item.choices.map((c) => asSentence(c.label)));
+      break;
+    case 'number':
+      lines.push(item.frame ? `Fill the blank: ${item.frame.replace(/_{2,}/g, 'blank')}` : `Type a number${item.unit ? ` of ${item.unit}` : ''} on the number pad.`);
       break;
   }
   return lines;

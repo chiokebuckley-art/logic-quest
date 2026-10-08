@@ -1,0 +1,28 @@
+/* Pattern Observatory, Ring 1: styles its builder adds (classes start with play-ob-). The shared pieces are in observatory.css. */
+
+/* A word on a tile (a sound, a move, a name, a class): smaller type so it fits the 44 px tile. */
+.play-ob-token-face.play-ob-word { font-size: 11px; letter-spacing: 0; padding: 0 2px; text-align: center; overflow-wrap: anywhere; line-height: 1.1; }
+.play-ob-token.is-small .play-ob-token-face.play-ob-word { font-size: 9.5px; }
+
+/* A long chain (more than 8 pieces) draws smaller tiles, so it wraps to at most three rows at 320 px. */
+.play-ob-chain-row.is-long { gap: 4px; }
+.play-ob-chain-row.is-long .play-ob-slot { padding: 3px; }
+.play-ob-chain-row.is-long .play-ob-blank { width: 34px; height: 44px; }
+.play-ob-chain-row.is-long .play-ob-caption { font-size: 10px; }
+
+/* The unit's later copies: tinted in turn, so each repeat of the block shows. */
+.play-ob-slot.in-copy { border-style: dotted; border-color: rgba(255, 201, 60, 0.55); }
+.play-ob-slot.in-copy.copy-odd { background: rgba(255, 201, 60, 0.04); }
+.play-ob-slot.in-copy.copy-even { background: rgba(255, 201, 60, 0.12); }
+
+/* A piece checked against the block: a teal bar under its number. */
+.play-ob-slot.is-checked .play-ob-pos { color: var(--teal-soft, #7dffbf); box-shadow: inset 0 -2px 0 var(--teal-soft, #7dffbf); padding: 0 4px; }
+
+/* Where a block or the stated rule fails. */
+.play-ob-slot.is-miss { border-color: #ff8fa3; border-style: solid; background: rgba(255, 77, 109, 0.12); }
+.play-ob-slot.is-miss .play-ob-flag { background: #ff8fa3; }
+
+@media (max-width: 359px) {
+  .play-ob-chain-row { gap: 4px; }
+  .play-ob-slot { padding: 3px; }
+}

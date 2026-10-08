@@ -10,7 +10,7 @@ STOP=2 npx vitest run src/engine/__tests__/stops.test.ts
 ## Shape
 
 - **3–7 lessons**, ids `sN.l1`, `sN.l2`, … (one method per lesson: a new rule family gets its own lesson)
-- Each lesson starts with **3–6 key-idea cards**. They are taught before any question. One card shows a worked
+- Each lesson starts with **3–7 key-idea cards**. They are taught before any question. One card shows a worked
   case already marked on its board (see "Teach before the quiz").
 - Then the lesson's **guided boards** (`drill`): the learner marks a new case on that board by taps.
 - `practice(rng)` gives **3–5 quiz items** in at least two skins: an everyday story, a fantasy story, and
@@ -199,6 +199,73 @@ The contract test checks coverage, shapes, lengths, curly quotes, banned words, 
 ```bash
 npx vitest run src/engine/__tests__/world.test.ts -t "stop 2"
 ```
+
+## The Pattern Observatory
+
+Stops 14–17 are a side constellation of pattern recognition with its own lesson shape: See → Explain → Do → Transfer →
+Review, the routine strip (Notice → Describe → Compare → Test → Predict → Explain), items that declare their rule
+and their error tags, a number pad for numeric answers, and an evidence profile per place (Practiced · Lesson
+complete · Independent · Transferred · Retained). The spec and the content rules for its ten places are in
+[`OBSERVATORY.md`](OBSERVATORY.md). Everything in this guide (reading level, curly quotes, teach-first wrong answers,
+See → Do → Quiz, real life, distinctions) applies there too.
+
+## Distinctions: two ideas a learner can merge into one
+
+*This is the Logic Quest half of a rule for every educational app here: [`../../docs/design-rule-hidden-distinctions.md`](../../docs/design-rule-hidden-distinctions.md).*
+
+A learner can know every word in a question and still be confused, because two ideas have collapsed into one
+mental category. The treasure signs showed it: "the treasure is in this chest" was read as "this chest's sign is
+true", and the program only said which mark was wrong. For every lesson, ask: *what must a learner already keep
+apart for this instruction to make sense?* Then teach that boundary before the quiz, and build the method so the
+reasoning stays visible until it is not needed.
+
+- **Declare it.** `LessonDef.distinctions: [{ id, a, b }]` names the two sides ("Where the treasure is (the test
+  world)." / "Whether a sign's words are true in that world."). A later lesson that relies on it adds
+  `taughtIn: '<lesson id>'` and still carries a reminder card.
+- **Teach it with a contrast.** Where it is first taught, a key-idea card with `distinction: id` and a `contrast`
+  scene: two cases side by side that differ in one thing (same test world, different words; or same words, different
+  world), each with the comparison that gives its truth, then the question under them ("Did the treasure move? No.
+  Only the words changed."). A board with `distinction: id` right after it (`afterCard`) has the learner do the two
+  cases themselves. Only then comes the worked example.
+- **Show the comparison, in words.** Every truth value comes with its reason as three rows: what it says, what the
+  test world says, whether they fit. Never symbols (=, ≠, ✓ alone). A worked step carries `because`; a mark the
+  learner sets carries `compare` (the two facts, no verdict), shown under the mark while the method is new; a
+  `Truth` on a hint or Teach case carries `because` too. This works on every board layout: case boards, plain row
+  boards (`DrillBoard` draws `compare` under a mark to tap, a because row under a shown mark, `DrillRow.needs` over
+  a row), and case cards (`CaseCard` in the explanation).
+- **Use the lesson's words.** `DrillStep.words` (a `BoardWords`) and `TeachCase.words` rename every label: the three
+  rows (`says`, `world`, `so`: "Says / In this case / So"), the verdict lines (`fit`, `unfit`), the compare question
+  (`ask`), the test-world tag and note (`worldTag`, `worldNote`), the words before `needs` (`needs`; an empty string
+  shows the need on its own), the truth words on a case card (`truth`, `untruth`: "Fits" / "Not") and the closing line
+  of "I'm confused" (`closing`). A contrast scene has `words` of its own (`ContrastWords`: `worldTag`, `saysWord`,
+  `truth`, `untruth`), and each panel may carry `things` (a picture of cards) and `then` (the need or verdict that
+  follows). The defaults are the sign words, so a card, line-up, knight or cause board must set them.
+- **Keep the assumption on screen.** The test world is drawn (the treasure in the pretend chest) and named over the
+  board, and the rule's need sits next to the count, so nothing has to be held in working memory. A speakers scene
+  has a `test` banner ("Test world") beside its `fact` banner ("What is true"), so a guess is never shown as a fact.
+  While a case's stamps are blank, the rule banner is tagged "Check this after the stamps".
+- **Fade the scaffold.** `DrillStep.scaffold: 'full'` on the Do board and the first quiz (compare facts under every
+  mark, the need over each row, the method's steps lit: `DrillStep.steps`, or the case board's own list); later
+  boards are `'light'` and show the facts only for a row that had a wrong mark. On a quiz item, use `Item.workFirst`
+  (a board before the answer buttons) for the full scaffold and `Item.scratch` (with `scratchLabel`: "the test
+  board") for an optional one.
+- **Name the belief, not only the mark.** `DrillStep.misconceptions`: patterns of wrong marks that reveal a belief,
+  each with words that teach the distinction and end with the concrete case. `checkDrill` shows them before the
+  first wrong mark's words. The kinds `diagnose()` knows, on every layout (a row's statements are all its marks but
+  the last; the last is its verdict): `fit-rule` (case boards: wrong stamps, the count the rule needs and Keep),
+  `own-true` and `own-false` (case boards: the picked box's own sign), `copied` (a row copies another row's right
+  marks), `all-one` (every mark of the row the same), `verdict-only` (right marks, wrong verdict) and `picks` (the
+  marks the author lists are set to the options listed, and at least one is wrong: "every words mark set to what the
+  speaker's kind demands"). List them most specific first. Sign boards get rule-aware texts from
+  `signMisconceptions(skin, rule)`.
+- **"I'm confused."** `DrillStep.confused` (and `Item.confused`): one to three short questions, one per distinction,
+  each with one right option, that find the first merged idea and teach it apart. They never give the board's answer,
+  and opening them counts as help, like a hint. Set `words.closing` so the last line fits the lesson.
+
+The contract test checks that every declared distinction has its card (with a contrast picture and a board where it
+is first taught), that every case board carries its misconceptions and questions, and that all of it reads at the
+game's level. The audit that found the gaps, lesson by lesson, is `docs/audit/hidden-distinctions.md`; its "How to
+apply" section maps every P0 and P1 finding to these pieces.
 
 ## Reading level
 

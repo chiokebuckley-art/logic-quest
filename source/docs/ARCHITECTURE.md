@@ -76,6 +76,20 @@ marked right and the pass rule is met (`LessonDef.pass`; default 3 right on the 
 in a row or including tagged items). Until then, extra quiz items come from the lesson's own practice
 (`extraQuizItem`). The store refuses `completeLesson` for a lesson with boards that are not in `SaveData.drilled`.
 
+## Distinctions
+
+Two ideas a learner can merge into one (CONTENT_GUIDE.md, "Distinctions") are declared on the lesson
+(`LessonDef.distinctions`), taught by a card with a `contrast` scene and a board (`distinction` on both), and kept
+apart on the boards: `DrillMark.compare` (the two facts under a mark), `DrillRow.needs` (the rule by the count, or
+over a row), `DrillStep.scaffold` and `steps`, `misconceptions` (patterns `diagnose()` in `engine/drill.ts` looks
+for before naming the first wrong mark, on every layout) and `confused` (the "I'm confused" questions). Every label
+comes from `DrillStep.words` / `TeachCase.words` (`BoardWords`) and a contrast scene's `words`, with the sign words
+as defaults. The screens are in `game/components/Distinction.tsx`: `BecauseRows`, `CompareRows`, `ContrastView`,
+`MethodSteps`, `ConfusedPanel`; `CaseBoard`, `DrillBoard` (row layout) and `ExplanationPanel`'s `CaseCard` draw
+them, and `SceneView` draws a speakers scene's `test` banner. The sign puzzles build all of it in
+`engine/puzzles/signs.ts` (`TREASURE_VS_SIGN`, `signContrastCard`, `signDistinctionDrill`, `signMisconceptions`,
+`signConfused`, `signWorldNote`, `signSteps`). The audit is `docs/audit/hidden-distinctions.md`.
+
 ## Wrong answers
 
 A wrong answer is a teaching moment (see "Wrong answers: teach first" in `CONTENT_GUIDE.md`):

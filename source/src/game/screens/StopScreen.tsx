@@ -3,7 +3,10 @@
  * repair cards that came from it. The gold row is the thing to do now. Coming-soon stops show the idea and
  * any Pattern Lab preview events.
  */
-import { MAX_NOT_YETS_PER_DAY, viewStop, type CheckKind } from '../../engine/journey/mastery';
+import { MAX_NOT_YETS_PER_DAY, stopOpening, viewStop, type CheckKind } from '../../engine/journey/mastery';
+import { profileOf } from '../../engine/evidence';
+import { EvidenceProfile } from '../components/EvidenceProfile';
+import { placeNeeds, placeTitle, profileWords, ringTitle } from '../observatory';
 import { lessonWaitsFor } from '../../engine/drill';
 import { canFix } from '../../engine/notebook';
 import { STOPS, stopById } from '../../content/stops';
@@ -28,10 +31,11 @@ export function StopScreen({ route }: { route: Extract<Route, { name: 'stop' }> 
       </div>
     );
   }
-  const i = STOPS.indexOf(stop);
-  const prev = i > 0 ? STOPS[i - 1] : null;
+  const opening = stopOpening(STOPS, save.stops, stop);
   const p = save.stops[stop.id];
-  const view = viewStop(stop, p, !prev || !!save.stops[prev.id]?.passDay, today);
+  const view = viewStop(stop, p, opening.open, today, opening.after);
+  const plain = save.evidence.plain;
+  const ob = stop.observatory;
   const open = view.status !== 'locked' && view.status !== 'soon';
   const action = open ? stopAction(stop, view) : null;
   const place = stopPlace(stop.id);
@@ -67,10 +71,10 @@ export function StopScreen({ route }: { route: Extract<Route, { name: 'stop' }> 
     <div className="page sl-page sl-stop-page">
       <div className="sl-hero">
         <img src={place.art} alt="" />
-        <button type="button" className="sl-back on-art" onClick={() => actions.navigate({ name: 'journey' })}>‹ Journey</button>
+        <button type="button" className="sl-back on-art" onClick={() => actions.navigate(ob ? { name: 'journey', track: 'observatory' } : { name: 'journey' })}>‹ {ob ? 'Observatory' : 'Journey'}</button>
         <div className="sl-hero-text">
-          <Eyebrow>Stop {stop.n}{place.name ? ` · ${place.name}` : ''}</Eyebrow>
-          <h2 className="sl-title">{stop.title}</h2>
+          <Eyebrow>{ob ? `Pattern Observatory · Ring ${ob.ring} · Track ${ob.track}` : `Stop ${stop.n}${place.name ? ` · ${place.name}` : ''}`}</Eyebrow>
+          <h2 className="sl-title">{ob ? ringTitle(stop, plain) : stop.title}</h2>
           <p className="sl-sub">{stop.idea}</p>
         </div>
       </div>
@@ -93,6 +97,16 @@ export function StopScreen({ route }: { route: Extract<Route, { name: 'stop' }> 
       {view.status === 'soon' && <p className="sl-note">This stop is coming in a later version.{events.length ? ' Its Pattern Lab events are open now as a preview.' : ''}</p>}
 
       <div className="sl-list">
+        {open && ob && !save.evidence.diagnostic && (
+          <Row
+            lead={<KindTag kind="check" />}
+            title="Find your level"
+            sub="About 5 minutes · no timer · a miss just ends that track"
+            meta="Start ▸"
+            metaTone="gold"
+            onClick={() => actions.navigate({ name: 'diagnostic' })}
+          />
+        )}
         {open && stop.lessons.map((lesson, k) => {
           const isDone = done.includes(lesson.id);
           const redo = toRedo.includes(lesson.id);
@@ -100,24 +114,58 @@ export function StopScreen({ route }: { route: Extract<Route, { name: 'stop' }> 
           const resuming = isNext && run?.lessonId === lesson.id;
           const tries = lesson.ideas.length;
           const waits = lessonWaitsFor(stop, lesson.id, done, save.drilled ?? []);
+          const needs = stop.lessonOrder === 'free' ? placeNeeds(lesson, save) : [];
+          const locked = !!waits || needs.length > 0;
+          const profile = lesson.routine ? profileOf(save.evidence, lesson.id, today) : null;
           let meta: { text: string; tone: string } = { text: '', tone: 'muted' };
-          if (isNext) meta = { text: resuming ? 'Resume ▸' : redo ? 'Redo ▸' : 'Start ▸', tone: redo ? 'orange' : 'gold' };
+          if (isNext && !locked) meta = { text: resuming ? 'Resume ▸' : redo ? 'Redo ▸' : 'Start ▸', tone: redo ? 'orange' : 'gold' };
           else if (redo) meta = { text: 'redo', tone: 'orange' };
           else if (isDone) meta = { text: 'done', tone: 'mint' };
-          else if (k === lessonsDone) meta = { text: 'next', tone: 'muted' };
+          else if (!locked && !ob && k === lessonsDone) meta = { text: 'next', tone: 'muted' };
+          else if (!locked && ob) meta = { text: 'Start ▸', tone: 'gold' };
           if (waits && !isNext) meta = { text: 'after Lesson ' + k, tone: 'muted' };
+          if (needs.length) meta = { text: lesson.primer ? 'primer ▸' : 'needs a skill', tone: 'muted' };
+          const title = ob ? `Place ${k + 1} · ${placeTitle(lesson, plain)}` : `Lesson ${k + 1} · ${lesson.title}`;
+          const sub = waits
+            ? `Opens when you have done Lesson ${k}`
+            : needs.length
+              ? `Needs ${needs.map((n) => n.title).join(' and ')}${lesson.primer ? ', or the 3-question primer' : ''}`
+              : profile
+                ? `${lesson.levels ? `L${lesson.levels[0]}–L${lesson.levels[1]} · ` : ''}${profileWords(profile)}${resuming ? ' · partway' : ''}`
+                : `${tries} key ${tries === 1 ? 'idea' : 'ideas'}${lesson.drill?.length ? ' + you do it' : ''} + tries${resuming ? ' · partway' : ''}`;
+          const go = waits
+            ? undefined
+            : needs.length
+              ? lesson.primer ? () => actions.navigate({ name: 'evidence', stopId: stop.id, lessonId: lesson.id, kind: 'primer' }) : undefined
+              : () => actions.navigate({ name: 'lesson', stopId: stop.id, lessonId: lesson.id, from: 'stop' });
           return (
-            <Row
-              key={lesson.id}
-              lead={<KindTag kind="learn" />}
-              title={`Lesson ${k + 1} · ${lesson.title}`}
-              sub={waits ? `Opens when you have done Lesson ${k}` : `${tries} key ${tries === 1 ? 'idea' : 'ideas'}${lesson.drill?.length ? ' + you do it' : ''} + tries${resuming ? ' · partway' : ''}`}
-              meta={meta.text}
-              metaTone={meta.tone}
-              tone={isNext ? (redo ? 'orange' : 'current') : undefined}
-              current={isNext}
-              onClick={waits ? undefined : () => actions.navigate({ name: 'lesson', stopId: stop.id, lessonId: lesson.id, from: 'stop' })}
-            />
+            <div key={lesson.id} className="sl-place">
+              <Row
+                lead={<KindTag kind="learn" />}
+                title={title}
+                sub={sub}
+                meta={meta.text}
+                metaTone={meta.tone}
+                tone={isNext && !locked ? (redo ? 'orange' : 'current') : undefined}
+                current={isNext && !locked}
+                onClick={go}
+              />
+              {profile && profile.complete && (
+                <div className="sl-place-evidence">
+                  <EvidenceProfile profile={profile} compact />
+                  {profile.reviewDue && (
+                    <button type="button" className="sl-link" onClick={() => actions.navigate({ name: 'evidence', stopId: stop.id, lessonId: lesson.id, kind: 'review' })}>
+                      Review due today · 4 fresh questions ▸
+                    </button>
+                  )}
+                  {!profile.reviewDue && profile.independentDue && (
+                    <button type="button" className="sl-link" onClick={() => actions.navigate({ name: 'evidence', stopId: stop.id, lessonId: lesson.id, kind: 'independent' })}>
+                      Independent check · 6 fresh questions, no hints ▸
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           );
         })}
 

@@ -5,6 +5,7 @@
 import { nextStep, viewAll, type CheckKind, type NextStep } from '../../engine/journey/mastery';
 import { fixableCards } from '../../engine/notebook';
 import { STOPS, stopById } from '../../content/stops';
+import { dueEvidence, placeTitle } from '../observatory';
 import { DAILY_GOAL_MINUTES, minutesOn, streakDays } from '../progressStats';
 import { useStore, type Route } from '../store';
 import { Icon } from '../components/Icon';
@@ -110,6 +111,10 @@ export function HomeScreen() {
     }
     const doneToday = p?.weekDay === today ? 'week' : p?.lockDay === today ? 'lockin' : p?.passDay === today ? 'pass' : null;
     if (doneToday) plan.push({ key: `done-${stop.id}`, title: `${CHECK_NAME[doneToday]} · Stop ${stop.n}`, meta: 'done', state: 'done' });
+  }
+  // The Pattern Observatory: a delayed review or an independent check open today on a place.
+  for (const d of dueEvidence(save, today)) {
+    plan.push({ key: `ev-${d.lesson.id}`, title: `${d.kind === 'review' ? 'Review' : 'Independent check'} · ${placeTitle(d.lesson, save.evidence.plain)}`, meta: d.kind === 'review' ? 'due' : 'open', state: 'later', route: { name: 'evidence', stopId: d.stop.id, lessonId: d.lesson.id, kind: d.kind } });
   }
   const doneCount = plan.filter((r) => r.state === 'done').length;
 

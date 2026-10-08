@@ -33,7 +33,7 @@ export function IdeaCards({ cards, readAloud, onDone, doneLabel = 'Try it', kick
   const moved = useRef(false);
   const count = cards.length;
   const card = cards[Math.min(i, Math.max(0, count - 1))];
-  const steps = card?.scene?.kind === 'cases' ? card.scene.steps ?? [] : [];
+  const steps = card?.scene && 'steps' in card.scene ? card.scene.steps ?? [] : [];
   const revealed = steps.length ? shownSteps[i] ?? 0 : 0;
   /** The card's worked case is not all showing yet: the main button shows its next step instead of moving on. */
   const nextStep = revealed < steps.length ? steps[revealed] : null;
@@ -92,10 +92,11 @@ export function IdeaCards({ cards, readAloud, onDone, doneLabel = 'Try it', kick
       <h2 className="play-idea-title" ref={titleRef} tabIndex={-1}>
         {card.title}
       </h2>
-      {/* A worked case says what to pretend first, then shows the board and its line for each step. */}
-      {steps.length > 0 && body}
+      {/* A worked case says what to pretend first, then shows the board and its line for each step. A contrast card
+          names the two ideas first, then shows them side by side. */}
+      {(steps.length > 0 || card.scene?.kind === 'contrast') && body}
       {card.scene && <SceneView scene={card.scene} revealed={revealed} />}
-      {steps.length === 0 && body}
+      {steps.length === 0 && card.scene?.kind !== 'contrast' && body}
       {showWhy && (
         <p className="play-why">
           <span className="play-why-label">Why it matters</span> {why}

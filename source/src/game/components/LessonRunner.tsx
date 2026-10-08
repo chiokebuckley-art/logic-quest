@@ -6,7 +6,7 @@
  * player leaves the recap of a passed lesson. Tapping Next through the cards never passes it.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { extraQuizItem, passGoal, passState, type QuizResult } from '../../engine/drill';
+import { extraQuizItem, passGoal, passState, practiceFor, type QuizResult } from '../../engine/drill';
 import { createRng } from '../../engine/rng';
 import { MAX_RUN } from '../../engine/save/save';
 import type { Item, LessonDef, StopDef } from '../../engine/types';
@@ -17,6 +17,8 @@ import { PlayHeader, type DotState } from './ItemView';
 import { LearnItem } from './LearnItem';
 import { ROUTINE } from '../pattern/bridges';
 import { lessonWorld } from '../../content/world';
+import { PHASE_NAMES, RoutineStrip } from './RoutineStrip';
+import type { Phase } from '../../engine/types';
 
 /** The thinking routine shared with Pattern Lab, as one line under the key idea. */
 function RoutineLine() {
@@ -65,11 +67,11 @@ type Step = { at: 'stage'; s: number } | { at: 'try'; i: number } | { at: 'recap
  * and the pass rule is not met yet. Rebuilt the same way from the same answers, so a resumed lesson gets the same
  * items. `count` is how many items are needed so far.
  */
-export function lessonItems(lesson: LessonDef, seed: number, results: readonly QuizResult[], count: number): Item[] {
-  const items = [...lesson.practice(createRng(seed))];
+export function lessonItems(lesson: LessonDef, seed: number, results: readonly QuizResult[], count: number, level?: 1 | 2 | 3 | 4): Item[] {
+  const items = [...practiceFor(lesson, createRng(seed), level)];
   for (let k = 0; items.length < Math.min(count, MAX_RUN) && k < MAX_RUN; k++) {
     const st = passState(lesson.pass, results.slice(0, items.length));
-    const x = extraQuizItem(lesson, seed, items, st.missing.map((m) => m.tag), k);
+    const x = extraQuizItem(lesson, seed, items, st.missing.map((m) => m.tag), k, level);
     if (!x) break;
     items.push(x);
   }
@@ -163,15 +165,15 @@ export function RealLife({ world }: { world: NonNullable<ReturnType<typeof lesso
   );
 }
 
-export function LessonRunner({ stop, lesson, seed, readAloud, onAnswer, onComplete, onExit, onDrilled, start, onProgress, onRestart }: LessonRunnerProps) {
+export function LessonRunner({ stop, lesson, seed, level, readAloud, onAnswer, onComplete, onExit, onDrilled, start, onProgress, onRestart }: LessonRunnerProps) {
   const drill = lesson.drill ?? [];
-  const planned = useMemo(() => lesson.practice(createRng(seed)).length, [lesson, seed]);
+  const planned = useMemo(() => practiceFor(lesson, createRng(seed), level).length, [lesson, seed, level]);
   const resumed = !!start && (start.next > 0 || !!start.drilled);
   const [results, setResults] = useState<QuizResult[]>(() => (resumed ? (start!.results ?? []).slice(0, start!.next) : []));
   const [items, setItems] = useState<Item[]>(() => {
-    if (!resumed || start!.next < planned) return lessonItems(lesson, seed, [], planned);
+    if (!resumed || start!.next < planned) return lessonItems(lesson, seed, [], planned, level);
     const met = passState(lesson.pass, start!.results ?? []).met;
-    return lessonItems(lesson, seed, start!.results ?? [], start!.next + (met ? 0 : 1));
+    return lessonItems(lesson, seed, start!.results ?? [], start!.next + (met ? 0 : 1), level);
   });
   /** The guided boards are marked right in this run (or the lesson has none). */
   const [drilled, setDrilled] = useState(() => drill.length === 0 || (resumed && !!start!.drilled));
@@ -214,9 +216,20 @@ export function LessonRunner({ stop, lesson, seed, readAloud, onAnswer, onComple
   // One dot per stretch of key ideas, one per guided board, one per try.
   const pos = step.at === 'stage' ? step.s : step.at === 'try' ? stages.length + step.i : stages.length + items.length;
   const dots: DotState[] = Array.from({ length: stages.length + items.length }, (_, d) => (d < pos ? 'done' : d === pos ? 'now' : 'todo'));
-  const tryLabel = (i: number) => (i < planned ? `Try ${i + 1} of ${planned}` : `Extra try ${i - planned + 1}`);
+  /** An Observatory lesson labels tries by phase ("Explain 1 of 2", "Do 2 of 3", "Transfer 1 of 1"); others by number. */
+  const phaseOf = (i: number): Phase | undefined => (lesson.routine ? items[i]?.phase ?? 'do' : undefined);
+  const tryLabel = (i: number) => {
+    const ph = phaseOf(i);
+    if (ph && i < planned) {
+      const same = items.slice(0, planned).map((it, k) => [it.phase ?? 'do', k] as const).filter(([p]) => p === ph).map(([, k]) => k);
+      return `${PHASE_NAMES[ph]} ${same.indexOf(i) + 1} of ${same.length}`;
+    }
+    return i < planned ? `Try ${i + 1} of ${planned}` : `Extra try ${i - planned + 1}`;
+  };
   const boardNo = (s: number) => stages.slice(0, s + 1).filter((st) => st.kind === 'board').length;
   const here = step.at === 'stage' ? stages[step.s] : null;
+  /** The routine strip's lit moves: the cards are See; a board is Do; a try is its item's phase; the recap is Review. */
+  const stripAt: Phase | 'see' = step.at === 'stage' ? (here?.kind === 'board' ? 'do' : 'see') : step.at === 'try' ? phaseOf(step.i) ?? 'do' : 'review';
   const dotsLabel = here ? (here.kind === 'cards' ? 'Key ideas' : `Do it ${boardNo(step.at === 'stage' ? step.s : 0)} of ${drill.length}`) : step.at === 'try' ? tryLabel(step.i) : passed ? 'Lesson done' : 'Not done yet';
 
   /** After stage s: the next stage, or the quiz. Leaving the last board records the boards as done. */
@@ -253,7 +266,7 @@ export function LessonRunner({ stop, lesson, seed, readAloud, onAnswer, onComple
       return;
     }
     // Not passed yet: one more quiz item from the same lesson (a tag the rule still needs comes first).
-    const more = lessonItems(lesson, seed, now, items.length + 1);
+    const more = lessonItems(lesson, seed, now, items.length + 1, level);
     if (more.length > items.length) {
       setItems(more);
       setStep({ at: 'try', i: i + 1 });
@@ -291,6 +304,7 @@ export function LessonRunner({ stop, lesson, seed, readAloud, onAnswer, onComple
         dots={dots}
         dotsLabel={dotsLabel}
       />
+      {lesson.routine && <RoutineStrip at={stripAt} />}
       {here?.kind === 'cards' && step.at === 'stage' && (
         <IdeaCards
           key={`cards-${step.s}`}
@@ -300,7 +314,7 @@ export function LessonRunner({ stop, lesson, seed, readAloud, onAnswer, onComple
           readAloud={readAloud}
           doneLabel={cardsDone(step.s).label}
           doneNote={cardsDone(step.s).note}
-          after={<RoutineLine />}
+          after={lesson.routine ? undefined : <RoutineLine />}
           why={here.from === 0 ? lessonWorld(lesson.id)?.why : undefined}
           onDone={() => nextStage(step.s)}
         />

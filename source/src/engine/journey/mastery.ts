@@ -99,9 +99,9 @@ export function weekDue(p: StopProgress): string | null {
   return a > b ? a : b;
 }
 
-export function viewStop(stop: StopDef, prog: StopProgress | undefined, prevPassed: boolean, today: string): StopView {
+export function viewStop(stop: StopDef, prog: StopProgress | undefined, prevPassed: boolean, today: string, opensAfter?: string): StopView {
   if (!stop.ready) return { status: 'soon', due: null, nextLesson: null, label: 'Coming soon' };
-  if (!prevPassed) return { status: 'locked', due: null, nextLesson: null, label: `Opens after Stop ${stop.n - 1}` };
+  if (!prevPassed) return { status: 'locked', due: null, nextLesson: null, label: `Opens after ${opensAfter ?? `Stop ${stop.n - 1}`}` };
   const p = prog ?? emptyProgress();
   const lessonIds = stop.lessons.map((l) => l.id);
   const firstUndone = lessonIds.find((id) => !p.lessonsDone.includes(id)) ?? null;
@@ -257,11 +257,28 @@ export function nextStep(stops: readonly StopDef[], progress: Readonly<Record<st
   return { stopId: last?.stop.id ?? '', action: 'done', label: 'Every open stop is done for today' };
 }
 
-/** Every stop with its view, in order. A stop's predecessor counts as passed once it has a passDay. */
+/**
+ * The stops that must be passed before `stop` opens: its `requires` list, or the stop before it in the list (the
+ * main path's rule). An empty list means it is open from the start (the Pattern Observatory).
+ */
+export function requiredStops(stops: readonly StopDef[], stop: StopDef): StopDef[] {
+  if (stop.requires) return stop.requires.map((id) => stops.find((s) => s.id === id)).filter((s): s is StopDef => !!s);
+  const i = stops.indexOf(stop);
+  return i > 0 ? [stops[i - 1]] : [];
+}
+
+/** Whether every stop `stop` needs is passed, and the words for the lock label ("Stop 3", or two titles). */
+export function stopOpening(stops: readonly StopDef[], progress: Readonly<Record<string, StopProgress>>, stop: StopDef): { open: boolean; after: string } {
+  const need = requiredStops(stops, stop);
+  const open = need.every((s) => !!progress[s.id]?.passDay);
+  const after = need.length === 1 && need[0].n === stop.n - 1 ? `Stop ${need[0].n}` : need.map((s) => `Stop ${s.n} (${s.title})`).join(' and ');
+  return { open, after };
+}
+
+/** Every stop with its view, in order. A stop opens once every stop it requires has a passDay (see requiredStops). */
 export function viewAll(stops: readonly StopDef[], progress: Readonly<Record<string, StopProgress>>, today: string) {
-  return stops.map((stop, i) => {
-    const prev = i === 0 ? null : stops[i - 1];
-    const prevPassed = !prev || !!progress[prev.id]?.passDay;
-    return { stop, view: viewStop(stop, progress[stop.id], prevPassed, today) };
+  return stops.map((stop) => {
+    const { open, after } = stopOpening(stops, progress, stop);
+    return { stop, view: viewStop(stop, progress[stop.id], open, today, after) };
   });
 }

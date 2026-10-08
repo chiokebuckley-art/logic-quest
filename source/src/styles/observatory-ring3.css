@@ -1,0 +1,52 @@
+/* Pattern Observatory, Ring 3 (Deep Sky): the mirror pool, the matrix gate and the analogy bridge. Classes start with
+   play-ob-. The shared pieces (stated lines, notes, the grid, the planks) are in observatory.css. Every picture is a
+   still frame and fits a 320 px screen. */
+
+/* ---------- mirror ---------- */
+.play-ob-mirror { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.play-ob-mirror-svg { display: block; max-width: 100%; height: auto; }
+.play-ob-mirror-bg { fill: var(--bg-3, #1e2656); }
+.play-ob-fold { stroke: var(--gold, #ffc93c); stroke-width: 2.5; stroke-linecap: round; }
+.play-ob-dot-on { fill: #22e6ff; }
+.play-ob-dot-off { fill: rgba(154, 163, 209, 0.22); }
+.play-ob-dot-hidden { fill: rgba(154, 163, 209, 0.35); }
+.play-ob-dot-ask { fill: rgba(255, 201, 60, 0.08); stroke: var(--gold, #ffc93c); stroke-width: 1.6; stroke-dasharray: 3 2; }
+.play-ob-dot-letter { fill: var(--gold, #ffc93c); font-size: 11px; font-weight: 700; font-family: var(--font-body, 'Exo 2', sans-serif); }
+.play-ob-pair-ring { fill: none; stroke: var(--gold, #ffc93c); stroke-width: 1.6; }
+.play-ob-pair-line { stroke: var(--gold, #ffc93c); stroke-width: 1.4; stroke-dasharray: 3 3; opacity: 0.75; }
+.play-ob-step { fill: var(--muted, #9aa3d1); font-size: 10px; font-family: var(--font-body, 'Exo 2', sans-serif); }
+.play-ob-cands { display: flex; flex-wrap: wrap; gap: 10px; }
+.play-ob-cand { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.play-ob-cand svg { display: block; max-width: 100%; height: auto; }
+.play-ob-cand-box { fill: var(--bg-3, #1e2656); stroke: var(--line-soft, rgba(154, 163, 209, 0.3)); }
+.play-ob-cand figcaption { font-size: 12px; font-weight: 700; color: var(--text-2, #c9cff0); }
+
+/* ---------- matrix ---------- */
+.play-ob-stated.is-lit { color: var(--gold, #ffc93c); }
+.play-ob-stated.is-lit .play-drill-tag { background: rgba(255, 201, 60, 0.18); }
+.play-ob-cell.is-filled { border: 2px solid var(--teal-soft, #7dffbf); }
+.play-ob-cell.is-trial { border: 2px dashed var(--amber, #ff7a1a); }
+.play-ob-cell .play-ob-caption { overflow-wrap: anywhere; }
+.play-ob-trial { margin: 0; font-size: 13.5px; color: var(--text-2, #c9cff0); }
+.play-ob-trial .is-ok { color: var(--teal-soft, #7dffbf); font-weight: 700; }
+.play-ob-trial .is-off { color: #ff8fa3; font-weight: 700; }
+.play-ob-grid.play-ob-words.size-3 { grid-template-columns: minmax(58px, auto) repeat(3, minmax(0, 1fr)); gap: 4px; }
+.play-ob-words .play-ob-cell { min-height: 54px; padding: 4px 3px; }
+.play-ob-head { display: flex; align-items: center; justify-content: center; font-size: 11.5px; font-weight: 700; color: var(--muted, #9aa3d1); text-align: center; overflow-wrap: anywhere; }
+.play-ob-head.is-row { justify-content: flex-start; }
+.play-ob-word { font-size: 12px; line-height: 1.3; text-align: center; color: var(--text, #f1f3ff); overflow-wrap: anywhere; }
+.play-ob-grid.glow-rows .play-ob-head.is-row { color: #22e6ff; }
+.play-ob-grid.glow-cols .play-ob-head:not(.is-row):not(.is-corner) { color: #c9a8ff; }
+
+/* ---------- bridge ---------- */
+.play-ob-pier.has-card { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 4px; }
+.play-ob-pier .play-thing { width: 34px; height: 44px; }
+.play-ob-pier-words { font-size: 13px; line-height: 1.25; }
+.play-ob-span.is-ask { background: transparent; border: 2px dashed var(--gold, #ffc93c); min-width: 2.2em; text-align: center; }
+.play-ob-look { text-decoration: line-through; font-weight: 700; color: #ff8fa3; }
+
+@media (max-width: 359px) {
+  .play-ob-plank { gap: 4px; }
+  .play-ob-span { padding: 3px 6px; font-size: 12px; }
+  .play-ob-pier { padding: 6px 6px; }
+}

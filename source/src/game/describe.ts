@@ -21,6 +21,7 @@ export function rightAnswer(item: Item): Answer {
     case 'order': return { kind: 'order', ids: [...item.answer] };
     case 'assign': return { kind: 'assign', values: item.answer };
     case 'multi': return { kind: 'multi', ids: [...item.answer] };
+    case 'number': return { kind: 'number', value: item.answer };
   }
 }
 
@@ -70,6 +71,10 @@ export function describeAnswer(item: Item, answer: Answer | null | undefined): s
       if (answer.kind !== 'multi') return 'No answer';
       const labels = item.choices.filter((c) => answer.ids.includes(c.id)).map((c) => c.label);
       return labels.length ? listWords(labels) : 'None chosen';
+    }
+    case 'number': {
+      if (answer.kind !== 'number') return 'No answer';
+      return `${answer.value}${item.unit ? ` ${item.unit}` : ''}`;
     }
   }
 }

@@ -37,7 +37,9 @@ import {
   cardFitting,
   cardId,
   cardName,
+  cardTestRow,
   colorIs,
+  copiedMarkPicks,
   deckRow,
   deckTwins,
   differences,
@@ -49,11 +51,15 @@ import {
   has,
   is,
   makeRuleGuess,
+  matchRow,
+  matchesMark,
   not,
   or,
   parse,
   pickIds,
+  picksLike,
   render,
+  rightPicks,
   ruleId,
   ruleTestRow,
   sameCard,
@@ -66,15 +72,22 @@ import {
   twoFeatures,
   withoutBrackets,
 } from '../engine/puzzles/rules';
-import type { Card, CardWords, Feature, FeatureKind, Formula, RuleGuess } from '../engine/puzzles/rules';
+import type { Card, CardWords, Feature, FeatureKind, Formula, MatchWords, RuleGuess } from '../engine/puzzles/rules';
 import { syncWhyWrong } from '../engine/teach';
 import type {
+  BoardWords,
   ChoiceFeedback,
   ChooseItem,
+  ConfusedQuestion,
+  ContrastPanel,
+  ContrastWords,
+  Distinction,
+  DrillRow,
   DrillStep,
   IdeaCard,
   Item,
   LessonDef,
+  LessonPass,
   Rng,
   Scene,
   StopDef,
@@ -322,6 +335,12 @@ const fitsTruth = (f: Formula, c: Card): Truth => ({ who: `It fits ${Q(f)}`, val
 const yourTruth = (f: Formula, c: Card): Truth => ({ who: `It fits your answer, ${Q(f)}`, value: evaluate(f, c) });
 const rightTruth = (f: Formula, c: Card): Truth => ({ who: `It fits the right answer, ${Q(f)}`, value: evaluate(f, c) });
 
+/**
+ * A rule machine's case card reads its truth rows as yes and no: "Its mark: no", "It fits “blue”: no". Never "It got a
+ * yes: false", a double negative on exactly the card where the mark and the rule agree on no.
+ */
+const YES_NO_WORDS: BoardWords = { truth: 'yes', untruth: 'no' };
+
 /** One card as a worked case: its name in words (enough without the picture), the card, its truths and a note. */
 function cardCase(c: Card, truths: Truth[], note?: string, opts: { the?: boolean; mark?: 'yes' | 'no' } = {}): TeachCase {
   return {
@@ -329,6 +348,8 @@ function cardCase(c: Card, truths: Truth[], note?: string, opts: { the?: boolean
     things: [{ id: cardId(c), shape: c.shape, color: c.color, size: c.size, ...(opts.mark ? { mark: opts.mark } : {}) }],
     truths,
     ...(note ? { note } : {}),
+    // A card with a machine mark is a rule machine's card: its truth rows say yes and no.
+    ...(opts.mark ? { words: YES_NO_WORDS } : {}),
   };
 }
 
@@ -458,7 +479,8 @@ const T_SAME: Term = { word: '“Mean the same”', meaning: 'fit exactly the sa
 const T_JOIN: Term = { word: 'The joining word', meaning: 'the AND or the OR between two parts.' };
 const ruleOutTerm = (s: Skin): Term => ({ word: '“Rule out”', meaning: `show that a rule cannot be the secret rule. One ${s.one} that does not match is enough.` });
 const fitsTerm = (s: Skin): Term => ({ word: '“Fits”', meaning: `the rule is true for that ${s.one}.` });
-const markTerm = (s: Skin): Term => ({ word: 'A mark', meaning: `the yes (✓) or the no (✗) on a ${s.one}.` });
+const markTerm = (s: Skin): Term => ({ word: 'A mark', meaning: `the yes or the no a ${s.one} got. It never changes.` });
+const matchTerm = (s: Skin): Term => ({ word: 'A match', meaning: `the mark and the rule agree. A ${s.one} with a yes fits the rule, or a ${s.one} with a no does not fit it.` });
 const partTerm = (rule: Join): Term => ({ word: 'A part', meaning: `one piece of a rule. The rule ${Q(rule)} has two parts: ${Q(rule.a)} and ${Q(rule.b, '.')}` });
 
 // ---------- teaching: one Teach per kind of rule ----------
@@ -1185,6 +1207,214 @@ function orYesNoAs(rng: Rng, id: string, s: Skin, want?: OrCard): ChooseItem {
 
 const orYesNo: Gen = (rng, id, s) => orYesNoAs(rng, id, s);
 
+// ---------- distinctions: two ideas lessons 4 and 5 teach apart ----------
+//
+// docs/CONTENT_GUIDE.md, "Distinctions". Lesson 4: whether a card fits the inside of the brackets is one question,
+// whether it fits the whole rule (after the NOT) is another. Lesson 5: a card's machine mark is one fact, whether the
+// rule being tested fits that card is another; and a rule no card rules out is kept for now, not proved. Every truth on
+// a contrast panel, a board or a case card comes from evaluate() and matchesMark().
+
+/** Lesson 4: the result before the NOT and the result after it. */
+export const INSIDE_VS_WHOLE: Distinction = { id: 'inside-vs-whole', a: 'Does the card fit the inside of the brackets?', b: 'Does it fit the whole rule, after the NOT?' };
+/** Lesson 5: the evidence (the machine's mark, which never changes) and the tested rule's answer (which changes). */
+export const MARK_VS_FITS: Distinction = { id: 'mark-vs-fits', a: 'The machine’s mark on a card. It never changes.', b: 'Whether the rule you test fits that card. It changes with the rule.' };
+/** Lesson 5: one card that does not match proves a rule wrong; matching every card only keeps it in the game. */
+export const KEPT_VS_PROVED: Distinction = { id: 'kept-vs-proved', a: 'A rule no card rules out. It is still possible.', b: 'The secret rule. Only one rule is.' };
+
+/** The pass rule's tags. Lesson 4: one rule with AND inside the brackets and one with OR. Lesson 5: a wrong rule only a no card rules out. */
+const INSIDE_AND = 'inside-and', INSIDE_OR = 'inside-or', NO_CARD_OUT = 'no-card-rules-out';
+
+/** "It is red, and it is not big." One sentence on a card's two features, for a rule with two one-feature parts. */
+function twoFacts(f: Formula, c: Card): string {
+  if (!isJoin(f) || !literal(f.a) || !literal(f.b)) throw new Error(`${render(f)} is not two one-feature parts`);
+  return `It ${fact(featOf(f.a), c)}, and it ${fact(featOf(f.b), c)}.`;
+}
+
+/** What a one-feature part asks for, after "is": "blue", "not small", "a circle". */
+const trait = (p: Formula) => (p.op === 'is' ? ft(p.f) : `not ${ft(featOf(p))}`);
+
+/** What a two-part rule needs: "“blue AND small” needs a card that is blue and also small." */
+function needsOf(f: Formula): string {
+  if (!isJoin(f) || !literal(f.a) || !literal(f.b)) throw new Error(`${render(f)} is not two one-feature parts`);
+  return f.op === 'and'
+    ? `${Q(f)} needs a card that is ${trait(f.a)} and also ${trait(f.b)}.`
+    : `${Q(f)} needs a card that is ${trait(f.a)} or ${trait(f.b)}. One part is enough.`;
+}
+
+/** Lesson 4's board labels: a rule, a card, and (under a shown inside mark) whether the card fits the inside. */
+const insideWords = (closing: string): BoardWords => ({
+  says: 'Rule',
+  world: 'Card',
+  so: 'So',
+  fit: 'It fits the inside.',
+  unfit: 'It does not fit the inside.',
+  ask: 'Does the card fit this row’s rule?',
+  needs: '',
+  closing,
+});
+
+/** The facts for a two-part rule's mark: the rule (its need is over the row), and the card's two features. */
+const partsCompare = (rule: Formula, c: Thing) => ({ says: `The rule is ${Q(rule, '.')}`, world: twoFacts(rule, c) });
+
+/** The facts for NOT ( … )'s mark: NOT flips the inside, and whether the card fits the inside. */
+const wholeCompare = (rule: Formula, c: Thing) => {
+  const inner = innerOf(rule);
+  return { says: `${Q(rule)} flips the inside.`, world: `It ${evaluate(inner, c) ? 'fits' : 'does not fit'} the inside, ${Q(inner, '.')}` };
+};
+
+/** The need over a NOT ( … ) row: the inside first, then the flip. */
+const FLIP_NEEDS = 'Do the inside first, then flip it. NOT takes every card that does not fit the inside.';
+
+/** "I’m confused" on lesson 4: fitting the inside vs fitting the whole rule, and what the NOT covers. Never a board's answer. */
+function insideConfused(s: Skin): ConfusedQuestion[] {
+  return [
+    {
+      q: `A ${s.one} fits the inside of the brackets. Does it fit the whole rule, with NOT in front?`,
+      options: [{ label: 'Yes, it fits the inside' }, { label: 'No. NOT flips it, so it is left out', right: true }, { label: 'Not sure' }],
+      teach: `Fitting the inside and fitting the whole rule are two different things. Work out the inside first. Then NOT flips it. A ${s.one} that fits the inside is left out. A ${s.one} that does not fit the inside fits the whole rule.`,
+    },
+    {
+      q: 'Take the rule NOT (red AND big). What do you check first?',
+      options: [{ label: 'Is it red? Then flip that' }, { label: 'The whole inside, red AND big. Then flip it', right: true }, { label: 'Not sure' }],
+      teach: 'The NOT covers the whole bracket. First check each part inside, and join them with AND. That gives the inside. Only then does NOT flip it.',
+    },
+  ];
+}
+
+/** A pattern of marks that copies the inside into the whole rule. */
+const INSIDE_AS_WHOLE = 'You may be treating “fits the inside” and “fits the whole rule” as the same thing. They are two different things: NOT flips the inside. A card that fits the inside does not fit the whole rule. Mark the inside first, then flip it.';
+
+/** The closing line of "I’m confused" on a lesson 4 question. */
+const INSIDE_CLOSING = 'Those ideas are apart now. Back to the question: do the inside first, then let NOT flip it.';
+
+/** A thinking board for a NOT ( … ) question: the inside row, then the whole rule. Never checked. */
+function insideScratch(rule: Formula, things: readonly Thing[], s: Skin): DrillStep {
+  const inner = innerOf(rule);
+  return {
+    id: 'scratch',
+    title: 'Your inside board',
+    body: ['Mark it if it helps. Nothing on it is checked.', `First mark the inside for each ${s.one}. Then flip it for the whole rule.`],
+    rows: [
+      deckRow(inner, things, cardWords, { id: 'scratch-in', label: `Inside: ${R(inner)}` }),
+      deckRow(rule, things, cardWords, { id: 'scratch-all', label: `Rule: ${R(rule)}` }),
+    ],
+    done: '',
+    words: insideWords(INSIDE_CLOSING),
+  };
+}
+
+/**
+ * A lesson 4 question's extras: its tag for the pass rule (AND or OR inside the brackets), the inside board to open if
+ * it helps (so the inside row is there again on every question, the new example after a miss included; checks never
+ * show it), and "I’m confused".
+ */
+function withInside<T extends Item>(it: T, rule: Formula, things: readonly Thing[], s: Skin): T {
+  return {
+    ...it,
+    tags: [innerOf(rule).op === 'and' ? INSIDE_AND : INSIDE_OR],
+    scratch: insideScratch(rule, things, s),
+    scratchLabel: 'the inside board',
+    confused: insideConfused(s),
+  };
+}
+
+/** Lesson 5's board labels: the card's mark, what the rule says, and whether they match. */
+const markWords = (closing: string): BoardWords => ({
+  says: 'Mark',
+  world: 'Rule',
+  so: 'So',
+  fit: 'A match: the mark and the rule agree.',
+  unfit: 'No match: the mark and the rule do not agree.',
+  ask: 'Fits or Not? Ask the rule, not the mark.',
+  needs: '',
+  closing,
+});
+
+/** A card's machine mark, in words. */
+const markSays = (t: Thing) => (t.mark === 'yes' ? 'Yes. It got through.' : 'No. It was stopped.');
+
+/** The worked comparison under a shown Match mark: the mark, then what the rule says about the card. */
+const matchCompare = (rule: Formula, t: Thing) => ({ says: markSays(t), world: whyFits(rule, t, 'It', ABSTRACT) });
+
+/** The facts beside a Fits or Not mark to tap: the mark stays in view, but the rule decides. */
+const testCompare = (rule: Formula, t: Thing) => ({ says: markSays(t), world: `Does it fit ${Q(rule)}?` });
+
+/** The need over a rule test. */
+const MATCH_NEEDS = 'Every yes card must fit, and every no card must not fit. One card that does not match rules the rule out.';
+
+/** "You may be treating …": Fits or Not copied from the machine's marks. */
+const COPIED_MARK = 'You may be treating “it got a yes” and “it fits the rule” as the same thing. They are two different things: the mark is the machine’s answer, and it never changes. Fits or Not comes from the rule you test. Work it out from the rule, then compare it with the mark.';
+/** The same mix-up the other way round: a no card read as "does not fit". The rule test's trap card is a no card it fits. */
+const COPIED_NO = 'You may be treating “it got a no” and “it does not fit the rule” as the same thing. They are two different things: the mark is the machine’s answer, and it never changes. Fits or Not comes from the rule you test. Work it out from the rule, then compare it with the mark. A no card that fits is no match.';
+/** "Not" read as "no match". */
+const NOT_AS_NO_MATCH = 'You may be treating “Not” and “no match” as the same thing. They are two different things: Not is what the rule says, and a match compares it with the mark. A no card that does not fit is a match. The machine said no, and the rule says no too.';
+/** Two kept rules read as one proved rule. */
+const KEPT_AS_PROVED = 'You may be treating “this rule is kept” and “this is the rule” as the same thing. They are two different things: two kept rules can still disagree on a new card. Kept means still possible. Check the new card against each rule on its own.';
+
+/** "I’m confused" on lesson 5's boards: the mark vs Fits or Not, and what a match is. Never a board's answer. */
+const MARK_CONFUSED: ConfusedQuestion[] = [
+  {
+    q: 'The big yellow square got a yes. You test the rule “blue.” Does the big yellow square fit “blue”?',
+    options: [{ label: 'Yes, it got a yes' }, { label: 'No, it is not blue', right: true }, { label: 'Not sure' }],
+    teach: 'Getting a yes is the machine’s answer. Fits or Not is what the rule you test says. The big yellow square is not blue, so it does not fit “blue,” even with its yes. Its yes and Not do not match.',
+  },
+  {
+    q: 'A card got a no. The rule you test does not fit it. Is that a match?',
+    options: [{ label: 'Yes. The mark says no, and the rule says no too', right: true }, { label: 'No. A rule should fit every card' }, { label: 'Not sure' }],
+    teach: 'A match means the mark and the rule agree. A no card that does not fit the rule is a match. A no card that fits the rule is no match, and it rules the rule out.',
+  },
+];
+
+/** "I’m confused" on kept vs proved. */
+const keptConfused = (s: Skin): ConfusedQuestion => ({
+  q: 'A rule matches every mark you can see. What do you know?',
+  options: [{ label: 'It must be the rule, for sure' }, { label: 'It is still possible. Another rule might match every mark too', right: true }, { label: 'Not sure' }],
+  teach: `One ${s.one} that does not match rules a rule out for sure. Matching every mark only keeps a rule for now. In these puzzles, the rule it uses is one of the choices. When the other choices are ruled out, the one left must be it.`,
+});
+
+/** "I’m confused" on kept vs proved, the other side: one card that does not match is enough, for sure. */
+const RULED_OUT_CONFUSED: ConfusedQuestion = {
+  q: 'One card does not match a rule. What do you know?',
+  options: [{ label: 'That rule is ruled out for sure', right: true }, { label: 'It might still be the rule' }, { label: 'Not sure' }],
+  teach: 'One card that does not match proves a rule wrong, for sure. Many matching cards can never prove a rule right. They only keep it for now.',
+};
+
+/** "I’m confused" on a guess the rule question: the mark vs Fits or Not, what a match is, and kept vs proved. */
+function guessConfused(s: Skin): ConfusedQuestion[] {
+  return [
+    {
+      q: `A ${s.one} got a yes. You test a rule. Does the yes tell you if it fits that rule?`,
+      options: [{ label: 'Yes. A yes means it fits' }, { label: 'No. Fits or Not comes from the rule you test', right: true }, { label: 'Not sure' }],
+      teach: `The yes is the mark it got. It never changes. Fits or Not is what the rule you test says about the ${s.one}, so it can change with each rule. Work it out from the rule. Then compare it with the mark.`,
+    },
+    {
+      q: `A ${s.one} got a no. The rule you test does not fit it. Is that a match?`,
+      options: [{ label: 'Yes. The mark says no, and the rule says no too', right: true }, { label: `No. A rule should fit every ${s.one}` }, { label: 'Not sure' }],
+      teach: `A match means the mark and the rule agree. A ${s.one} with a no that does not fit the rule is a match. A ${s.one} with a no that fits the rule is no match. That rules the rule out.`,
+    },
+    keptConfused(s),
+  ];
+}
+
+/** A thinking board for a guess the rule question: every choice tested on every card. Never checked. */
+function guessScratch(rules: readonly Formula[], things: readonly Thing[], s: Skin): DrillStep {
+  return {
+    id: 'scratch',
+    title: 'Your test board',
+    body: ['Mark it if it helps. Nothing on it is checked.', `Test each rule. Tap Fits or Not for each ${s.one}, from the rule, not the mark. Then keep the rule for now, or rule it out.`],
+    rows: rules.map((f, k) => ruleTestRow(f, things, guessWords, { id: `scratch-r${k + 1}`, label: `Test the rule ${Q(f, '.')}` })),
+    done: '',
+    words: markWords(`Those ideas are apart now. Back to the question: test each rule on every ${s.one}, then compare it with the marks.`),
+  };
+}
+
+/** A wrong choice that only no cards rule out: every card whose mark it gets wrong is a no card it fits. */
+const ruledOutByNoOnly = (g: RuleGuess) =>
+  g.distractors.some((d) => {
+    const miss = g.things.filter((t) => !matchesMark(d, t));
+    return miss.length > 0 && miss.every((t) => t.mark === 'no');
+  });
+
 // ---------- lesson 4: brackets ----------
 
 /**
@@ -1208,7 +1438,7 @@ function notAndTapOn(id: string, s: Skin, a: Feature, b: Feature, things: Thing[
   const n = pickIds(rule, things).length;
   const one = things.find(onePartOf(A, B))!;
   const [p, q] = has(one, a) ? [a, b] : [b, a];
-  return tapItem({ id, lesson: L4, skill: 's2.not-both', conflict: true }, s, {
+  return withInside(tapItem({ id, lesson: L4, skill: 's2.not-both', conflict: true }, s, {
     prompt: s.tap(R(rule)),
     things,
     rule,
@@ -1220,7 +1450,7 @@ function notAndTapOn(id: string, s: Skin, a: Feature, b: Feature, things: Thing[
       misread(rule, things, pickIds(rule, things, 'dropBrackets'), notOnOnePart(rule, s), s),
       misread(rule, things, pickIds(inner, things), `Your answer takes the ${s.many} that fit the inside of the brackets, ${Q(inner, '.')} NOT flips that, so those are the only ${s.many} that do not fit.`, s),
     ],
-  });
+  }), rule, things, s);
 }
 
 const notOrTap: Gen = (rng, id, s) => {
@@ -1231,7 +1461,7 @@ const notOrTap: Gen = (rng, id, s) => {
   const second = fit.length <= 3
     ? `NOT takes the rest, so only ${names(fit)} ${plural(fit.length, 'fits', 'fit')}. ${fit.length === 1 ? `It is not ${ft(a)} and not ${ft(b)}` : `They are not ${ftPl(a)} and not ${ftPl(b)}`}.`
     : `NOT takes the rest, so ${nFit(fit.length, s)}. Each one is not ${ft(a)} and not ${ft(b)}.`;
-  return tapItem({ id, lesson: L4, skill: 's2.not-either', conflict: true }, s, {
+  return withInside(tapItem({ id, lesson: L4, skill: 's2.not-either', conflict: true }, s, {
     prompt: s.tap(R(rule)),
     things,
     rule,
@@ -1243,7 +1473,7 @@ const notOrTap: Gen = (rng, id, s) => {
       misread(rule, things, pickIds(rule, things, 'dropBrackets'), notOnOnePart(rule, s), s),
       misread(rule, things, pickIds(inner, things), `Your answer takes the ${s.many} that fit the inside of the brackets, ${Q(inner, '.')} NOT flips that, so those are the only ${s.many} that do not fit.`, s),
     ],
-  });
+  }), rule, things, s);
 };
 
 /** (A OR B) AND NOT C. Untaught: no key idea marks it and no board drills it, so only untaughtItems() builds it. */
@@ -1403,9 +1633,10 @@ function bracketYesNoAs(rng: Rng, id: string, s: Skin, want?: 'and' | 'or'): Cho
       detail: [`Do the brackets first. ${The(c)} is ${ft(p)}, so the part ${Q(A)} is true. One part is enough for OR, so ${Q(inner)} is true.`, `NOT flips true to false. So it does not fit ${Q(rule, '.')}`],
       example: ex,
     };
-  return chooseItem({ id, lesson: L4, skill: 's2.bracket-yesno', conflict: true }, {
+  const shown: Thing[] = [{ id: cardId(c), shape: c.shape, color: c.color, size: c.size }];
+  return withInside(chooseItem({ id, lesson: L4, skill: 's2.bracket-yesno', conflict: true }, {
     prompt: s.yesNo(R(rule)),
-    scene: { kind: 'things', things: [{ id: cardId(c), shape: c.shape, color: c.color, size: c.size }] },
+    scene: { kind: 'things', things: shown },
     choices: YES_NO,
     answer,
     explain: fits
@@ -1416,7 +1647,7 @@ function bracketYesNoAs(rng: Rng, id: string, s: Skin, want?: 'and' | 'or'): Cho
     hintCase: hintCaseOf(teach, [(x) => !sameCard(x, c) && !evaluate(rule, x), (x) => !sameCard(x, c)], id),
     feedback: { [fits ? 'no' : 'yes']: fb },
     teach,
-  });
+  }), rule, shown, s);
 }
 
 const bracketYesNo: Gen = (rng, id, s) => bracketYesNoAs(rng, id, s);
@@ -1459,7 +1690,8 @@ function guessOn(rng: Rng, id: string, s: Skin, g: RuleGuess): ChooseItem {
   const opts = rng.shuffle([g.target, ...g.distractors]);
   const choices = opts.map((f) => ({ id: ruleId(f), label: R(f) }));
   const byId = (tid: string) => g.things.find((t) => t.id === tid)!;
-  const got = (t: Thing): Truth => ({ who: 'It got a yes', value: t.mark === 'yes' });
+  // The machine's mark as its own truth row, read as yes or no (the card's words): "Its mark: no".
+  const got = (t: Thing): Truth => ({ who: 'Its mark', value: t.mark === 'yes' });
   const feedback: Record<string, ChoiceFeedback> = {};
   g.distractors.forEach((d, k) => {
     const t = byId(g.ruledOutBy[k]);
@@ -1486,33 +1718,57 @@ function guessOn(rng: Rng, id: string, s: Skin, g: RuleGuess): ChooseItem {
     const t = byId(g.ruledOutBy[k]);
     return cardCase(t, [got(t), fitsTruth(d, t)], `The mark and ${Q(d)} do not match. So ${Q(d)} is ruled out.`, { the: true, mark: t.mark });
   });
-  return chooseItem({ id, lesson: L5, skill: 's2.guess-rule' }, {
+  // A rule that matches every mark is only kept for now: another rule might match them too. The answer comes from the
+  // choices: the other two are ruled out, so the one left is the rule it uses.
+  const many = ['no', 'one', 'two', 'three', 'four'][opts.length];
+  const others = ['no', 'one', 'two', 'three', 'four'][opts.length - 1];
+  const item = chooseItem({ id, lesson: L5, skill: 's2.guess-rule' }, {
     prompt: s.guess,
     scene: { kind: 'things', things: g.things },
     choices,
     answer: ruleId(g.target),
-    explain: `Only the rule ${Q(g.target)} fits every ${s.one}. ${outs.join(' ')}`,
+    explain: `Of these ${many} rules, only ${Q(g.target)} matches every mark. ${outs.join(' ')} The other ${others} are ruled out, so the rule must be ${Q(g.target, '.')}`,
     hint: `Test each rule on every ${s.one}. One ${s.one} that does not match rules it out. ${checkedOne(s)}`,
     // A card that rules out a wrong rule, already tested: it models the test without naming the secret rule.
     hintCase: ruledOut[0],
     feedback,
     teach: {
       rule: `The secret rule matches every mark. Each ${s.one} with a yes fits it. Each ${s.one} with a no does not fit it.`,
-      terms: [markTerm(s), ruleOutTerm(s)],
-      meaning: `Only ${Q(g.target)} matches all ${g.things.length} marks. Each other rule gets at least one mark wrong.`,
+      terms: [markTerm(s), matchTerm(s), ruleOutTerm(s)],
+      meaning: `Of these ${many} rules, only ${Q(g.target)} matches all ${g.things.length} marks. Each other rule gets at least one mark wrong, so it is ruled out.`,
       casesTitle: `Test each rule on the ${s.many}.`,
       cases: [
         cardCase(yesCard, [got(yesCard), fitsTruth(g.target, yesCard)], `The mark and ${Q(g.target)} match.`, { the: true, mark: 'yes' }),
         cardCase(noCard, [got(noCard), fitsTruth(g.target, noCard)], `The mark and ${Q(g.target)} match.`, { the: true, mark: 'no' }),
         ...ruledOut,
       ],
-      remember: ['The right rule matches every mark.', `Ask: “Is there a ${s.one} whose mark this rule gets wrong?”`],
+      remember: ['The right rule matches every mark. One mark that does not match rules a rule out.', `Ask: “Is there a ${s.one} whose mark this rule gets wrong?”`],
       simpler: [`Look at ${the(t0)}. It got a ${t0.mark}.`, `Does it fit ${Q(d0)}? ${yn(evaluate(d0, t0))}.`, `The mark and the rule do not match. So ${Q(d0)} is ruled out.`],
     },
   });
+  return {
+    ...item,
+    // The pass rule asks for one of these: a wrong rule that only a no card rules out (a no card it fits).
+    ...(ruledOutByNoOnly(g) ? { tags: [NO_CARD_OUT] } : {}),
+    scratch: guessScratch(opts, g.things, s),
+    scratchLabel: 'the test board',
+    confused: guessConfused(s),
+  };
 }
 
 const guessEasy: Gen = (rng, id, s) => guess(rng, id, s, rng.pick<Family>(['simple', 'and']));
+
+/**
+ * A rule machine where one wrong choice is ruled out only by a no card it fits (tagged for the pass rule), drawn again
+ * from the same rng until it is one. Every lesson 5 pack holds one, so the pass rule can ask for it.
+ */
+const noCardOut = (gen: Gen): Gen => (rng, id, s) => {
+  for (let i = 0; i < 80; i++) {
+    const it = gen(rng, id, s);
+    if (it.tags?.includes(NO_CARD_OUT)) return it;
+  }
+  throw new Error(`${id}: no rule machine where only a no card rules out a wrong rule`);
+};
 const guessOr: Gen = (rng, id, s) => guess(rng, id, s, 'or');
 const guessHard: Gen = (rng, id, s) => guess(rng, id, s, 'any');
 
@@ -1600,6 +1856,10 @@ export const EXAMPLE_RULES = {
   notRedOrNotBig: or(not(red), not(big)),
   guess: or(blue, big),
   guessWrong: blue,
+  /** The contrast card's second rule: the small blue circle got a yes, but it does not fit “big.” */
+  guessBig: big,
+  /** Kept vs proved: a second rule that matches all six marks too. The big red circle tells it apart from blue OR big. */
+  guessKept: or(blue, square),
   // The guided boards: a new rule of the same family on the same cards.
   notBlue: not(blue),
   notSquare: not(square),
@@ -1609,9 +1869,124 @@ export const EXAMPLE_RULES = {
   notBlueAndNotSmall: and(not(blue), not(small)),
   notBlueOrSmall: not(or(blue, small)),
   notBlueOrNotSmall: or(not(blue), not(small)),
-  guessTest: big,
+  /** The rule the learner tests on Guess the rule's board: only the small yellow circle, a no card it fits, rules it out. */
+  guessTest: or(circle, big),
 };
 const E = EXAMPLE_RULES;
+
+/** Lesson 4's contrast card: the small red square fits NOT (red AND big), but not its inside. */
+const SMALL_RED_SQUARE: Card = card('small', 'red', 'square');
+/** Lesson 5's contrast card: the small blue circle got a yes. */
+const SMALL_BLUE_CIRCLE: Card = card('small', 'blue', 'circle');
+/** Kept vs proved: a card not on the deck that the two kept rules disagree on. */
+const BIG_RED_CIRCLE: Card = card('big', 'red', 'circle');
+
+/** A card of a key idea's deck, with its machine mark when the deck has marks. */
+function deckCard(scene: Scene, c: Card): Thing {
+  const t = scene.kind === 'things' ? scene.things.find((x) => sameCard(x, c)) : undefined;
+  if (!t) throw new Error(`${cardName(c)} is not on the deck`);
+  return t;
+}
+
+/** The labels of a contrast on cards: the card or the marks over each panel, then the rule and Fits or Not. */
+const cardContrastWords = (worldTag: string, saysWord: string, truth = 'Fits', untruth = 'Not'): ContrastWords => ({ worldTag, saysWord, truth, untruth });
+
+/** Whether a card fits the inside, after its two facts: "AND needs both parts, so it does not fit the inside." */
+function insideVerdict(inner: Formula, c: Card): string {
+  if (!isJoin(inner)) throw new Error(`${render(inner)} has no two parts`);
+  const va = evaluate(inner.a, c), vb = evaluate(inner.b, c);
+  if (inner.op === 'and') return va && vb ? 'Both parts are true, so it fits the inside.' : 'AND needs both parts, so it does not fit the inside.';
+  if (va && vb) return 'Both parts are true. OR takes that too, so it fits the inside.';
+  return va || vb ? 'One part is true. That is enough for OR, so it fits the inside.' : 'No part is true, so it does not fit the inside.';
+}
+
+/**
+ * Lesson 4's contrast: one card, two questions. The inside of the brackets, then the whole rule. NOT flips the
+ * answer, so a card that does not fit the inside fits the whole rule. Both truths from evaluate().
+ */
+function insideContrast(rule: Formula, c: Card): Extract<Scene, { kind: 'contrast' }> {
+  const inner = innerOf(rule);
+  const vIn = evaluate(inner, c), vAll = evaluate(rule, c);
+  const thing: Thing = { id: cardId(c), shape: c.shape, color: c.color, size: c.size };
+  const world = `${The(c)}.`;
+  const fitsWord = (v: boolean) => (v ? 'fits' : 'does not fit');
+  const panel = (who: string, says: Formula, truth: boolean, because: string): ContrastPanel => ({ world, who, says: R(says), truth, because, things: [thing] });
+  return {
+    kind: 'contrast',
+    pairs: [
+      panel('Inside', inner, vIn, `${twoFacts(inner, c)} ${insideVerdict(inner, c)}`),
+      panel('Whole', rule, vAll, `It ${fitsWord(vIn)} the inside. NOT flips that, so it ${fitsWord(vAll)} the whole rule.`),
+    ],
+    ask: { q: 'Did the card change?', a: `No. Only the question changed. ${The(c)} ${fitsWord(vIn)} the inside, but it ${fitsWord(vAll)} the whole rule.` },
+    words: cardContrastWords('The card', 'rule:'),
+  };
+}
+
+/**
+ * Lesson 5's contrast: the same card with the same mark, two rules to test. Fits or Not changes with the rule; the
+ * mark never does. Each panel ends with the match: the mark and the rule agree, or they do not.
+ */
+function markContrast(c: Thing, rules: [Formula, Formula]): Extract<Scene, { kind: 'contrast' }> {
+  const panel = (rule: Formula): ContrastPanel => {
+    const fits = evaluate(rule, c), ok = matchesMark(rule, c);
+    return {
+      world: `${The(c)}. Its mark: ${c.mark}.`,
+      who: 'The rule',
+      says: R(rule),
+      truth: fits,
+      because: whyFits(rule, c, 'It', ABSTRACT),
+      things: [c],
+      then: ok
+        ? `Its mark is ${c.mark}, and the rule says ${fits ? 'Fits' : 'Not'}. A match, so this card does not rule it out.`
+        : `Its mark is ${c.mark}, but the rule says ${fits ? 'Fits' : 'Not'}. No match, so this card rules out ${Q(rule, '.')}`,
+    };
+  };
+  return {
+    kind: 'contrast',
+    pairs: [panel(rules[0]), panel(rules[1])],
+    ask: { q: 'Did the mark change?', a: `No. It got a ${c.mark} both times. Only the rule changed, so Fits or Not changed. The mark and Fits or Not are two different things.` },
+    words: cardContrastWords('The card', 'you test:'),
+  };
+}
+
+/**
+ * Kept vs proved: the same six marks, two rules that each match every one. Each is kept for now; a new card the two
+ * disagree on (the big red circle) shows that neither is proved.
+ */
+function keptContrast(deck: readonly Thing[], rules: [Formula, Formula], fresh: Card): Extract<Scene, { kind: 'contrast' }> {
+  const panel = (rule: Formula): ContrastPanel => {
+    if (!isJoin(rule) || rule.op !== 'or' || !literal(rule.a) || !literal(rule.b)) throw new Error(`${render(rule)} is not one OR another`);
+    const [a, b] = [featOf(rule.a), featOf(rule.b)];
+    const kept = deck.every((t) => matchesMark(rule, t));
+    // Every yes card is a or b, and every no card is neither: the same thing as matching every mark, for an OR rule.
+    if (deck.some((t) => (t.mark === 'yes') !== (has(t, a) || has(t, b)))) throw new Error(`${render(rule)}: the panel's words are not true of the deck`);
+    return {
+      world: 'The six cards from the example, with their marks.',
+      who: 'The rule',
+      says: R(rule),
+      truth: kept,
+      because: `Every yes card is ${ft(a)} or ${ft(b)}. Every no card is not ${ft(a)} and not ${ft(b)}. No card rules it out.`,
+      things: [...deck],
+      then: `A new card, ${the(fresh)}, ${evaluate(rule, fresh) ? 'fits' : 'does not fit'} this rule.`,
+    };
+  };
+  if (evaluate(rules[0], fresh) === evaluate(rules[1], fresh)) throw new Error('the new card must tell the two kept rules apart');
+  return {
+    kind: 'contrast',
+    pairs: [panel(rules[0]), panel(rules[1])],
+    ask: { q: 'Did the marks change?', a: `No. The two rules each match every mark, so each one is kept for now. Not one of them is proved. A new card, like ${the(fresh)}, could still rule one out.` },
+    words: cardContrastWords('The marks', 'you test:', 'Kept for now', 'Ruled out'),
+  };
+}
+
+/** The worked guess-the-rule deck: the six cards with the machine's marks for “blue OR big.” */
+const GUESS_SCENE = exampleScene(EXAMPLES.guess, E.guess);
+const GUESS_DECK = GUESS_SCENE.kind === 'things' ? GUESS_SCENE.things : [];
+
+/** The contrast pictures. Each is the very scene its board shows (afterCard), so the Do sits next to its See. */
+const L4_CONTRAST_SCENE = insideContrast(E.notRedAndBig, SMALL_RED_SQUARE);
+const L5_MARK_SCENE = markContrast(deckCard(GUESS_SCENE, SMALL_BLUE_CIRCLE), [E.guess, E.guessBig]);
+const L5_KEPT_SCENE = keptContrast(GUESS_DECK, [E.guess, E.guessKept], BIG_RED_CIRCLE);
 
 const IDEAS: Record<string, IdeaCard[]> = {
   [L1]: [
@@ -1733,14 +2108,32 @@ const IDEAS: Record<string, IdeaCard[]> = {
       title: 'Brackets group parts',
       body: [
         'Brackets, also called parentheses, look like this: ( ). They hold parts of a rule together.',
-        'Always work out the part inside the brackets first.',
+        'The part inside the brackets is the inside. Always work out the inside first.',
       ],
+    },
+    {
+      title: 'The inside: red AND big',
+      body: [
+        'Take the rule NOT (red AND big). Its inside is red AND big. Start there.',
+        'Only the big red circle is red AND big. The marks show the cards that fit the inside.',
+      ],
+      scene: exampleScene(EXAMPLES.brackets, innerOf(E.notRedAndBig)),
+    },
+    {
+      title: 'Inside or whole?',
+      distinction: INSIDE_VS_WHOLE.id,
+      body: [
+        'You can ask two questions about one card. Does it fit the inside? Does it fit the whole rule?',
+        'They are two different questions, because NOT flips the answer. Look at the small red square below.',
+      ],
+      scene: L4_CONTRAST_SCENE,
     },
     {
       title: 'NOT (red AND big)',
       body: [
-        'First find the cards that are red AND big.',
-        'NOT then takes every other card. A small red card fits. A big blue card fits too.',
+        'Now NOT flips the inside. It takes every card that does not fit the inside.',
+        'For one card: if it fits the inside, NOT leaves it out. If it does not fit the inside, NOT takes it.',
+        'So a small red card fits. A big blue card fits too. Only the big red circle is left out.',
       ],
       scene: exampleScene(EXAMPLES.brackets, E.notRedAndBig),
     },
@@ -1755,7 +2148,7 @@ const IDEAS: Record<string, IdeaCard[]> = {
     {
       title: 'NOT (red OR big)',
       body: [
-        'First find the cards that are red OR big. NOT takes the rest.',
+        'First find the cards that fit the inside, red OR big. NOT takes the rest.',
         'So a card fits only when it is not red, and it is not big.',
         'That is the same as NOT red AND NOT big. The same two cards fit: the small yellow circle and the small blue triangle.',
       ],
@@ -1775,16 +2168,17 @@ const IDEAS: Record<string, IdeaCard[]> = {
     {
       title: 'The rule machine',
       body: [
-        'A rule machine has a secret rule.',
-        'It lets through every card that fits the rule. It stops every card that does not.',
-        'A check mark (✓) means yes, the card got through. A cross (✗) means no, it was stopped.',
+        'A rule machine has a secret rule. It lets through every card that fits the rule. It stops every card that does not.',
+        'Each card gets a mark. A check mark means yes: the card got through. A cross means no: it was stopped.',
+        'The mark is the machine’s answer. It never changes.',
       ],
     },
     {
       title: 'Test a rule',
       body: [
-        'To test a rule, check it against every card you can see.',
-        'Every yes card must fit it. Every no card must not fit it.',
+        'To test a rule, check it against every card you can see. First ask the rule: does this card fit, or not?',
+        'Then compare that with the card’s mark. A yes card that fits is a match. A no card that does not fit is a match too.',
+        'A yes card that does not fit is no match. So is a no card that fits.',
       ],
     },
     {
@@ -1795,12 +2189,32 @@ const IDEAS: Record<string, IdeaCard[]> = {
       ],
     },
     {
+      title: 'Two different things',
+      distinction: MARK_VS_FITS.id,
+      body: [
+        'Each card has a mark. Each rule you test gives it Fits or Not. These are two different things.',
+        'The mark is the machine’s answer, and it never changes. Fits or Not comes from the rule you test, so it changes with the rule.',
+        'Look at the small blue circle below. Same card, same mark, two rules.',
+      ],
+      scene: L5_MARK_SCENE,
+    },
+    {
       title: 'A worked example',
       body: [
-        'Could the rule be blue? The big red square got a yes, but it is not blue. So the rule can’t be blue.',
-        'Now try blue OR big. Every yes card is blue or big. Every no card is not blue and not big. It fits every card.',
+        'Could the rule be blue? The big red square got a yes, but it is not blue. No match, so the rule can’t be blue.',
+        'Now try blue OR big. Every yes card is blue or big. Every no card is not blue and not big. It matches every mark, so keep it for now.',
       ],
-      scene: exampleScene(EXAMPLES.guess, E.guess),
+      scene: GUESS_SCENE,
+    },
+    {
+      title: 'Kept is not proved',
+      distinction: KEPT_VS_PROVED.id,
+      body: [
+        'A rule that matches every mark is kept for now. It is still possible, but it is not proved. Stop 7 has more on guesses like this.',
+        'Look below. Two rules match all six marks. A new card could tell them apart. It is like “Can’t tell yet” in Stop 1: the marks do not decide it.',
+        'In a puzzle, the rule the machine uses is one of the choices. When the other choices are ruled out, the one left must be it.',
+      ],
+      scene: L5_KEPT_SCENE,
     },
   ],
 };
@@ -1835,7 +2249,7 @@ export const TWINS = {
     [E.notRedAndBig, E.notRedAndNotBig, E.notRedOrBig, E.notRedOrNotBig, E.notBlueAndSmall, E.notBlueAndNotSmall, E.notBlueOrSmall, E.notBlueOrNotSmall],
     { minFit: 2, minOut: 1 },
   ),
-  guess: deckTwins(EXAMPLES.guess, pairRules(EXAMPLES.guess, or), [E.guess, E.guessWrong, E.guessTest], { minFit: 2, minOut: 2 }).filter(guessable(EXAMPLES.guess)),
+  guess: deckTwins(EXAMPLES.guess, pairRules(EXAMPLES.guess, or), [E.guess, E.guessWrong, E.guessBig, E.guessKept, E.guessTest], { minFit: 2, minOut: 2 }).filter(guessable(EXAMPLES.guess)),
 };
 
 // ---------- Do: the guided boards ----------
@@ -1923,35 +2337,265 @@ function sameDone(rule: Formula, twin: Formula, deck: readonly Card[]): string {
   return `Right. ${who} ${Q(rule)} fits the same cards as ${Q(twin, '.')}`;
 }
 
-/** Guess the rule's board: the machine's marks stay up; the kept rule is shown tested; the learner tests a new rule. */
-function guessBoard(see: IdeaCard): DrillStep {
-  const deck = deckOf(see);
-  const words = {
-    card: cardWords,
-    keep: (r: Formula) => `Each yes card fits ${Q(r, ',')} and each no card does not. No card rules it out, so keep it.`,
-    ruleOut: (r: Formula, t: Thing) => `${The(t)} got a ${t.mark}, but it ${evaluate(r, t) ? 'fits' : 'does not fit'} ${Q(r, '.')} One card that does not match is enough to rule it out.`,
+/** A rule machine board's words for a wrong mark, Keep for now, Rule out, and Match. */
+const guessWords: MatchWords = {
+  card: cardWords,
+  keep: (r) => `Each yes card fits ${Q(r, ',')} and each no card does not. No card rules it out, so keep it for now.`,
+  ruleOut: (r, t) => `${The(t)} got a ${t.mark}, but it ${evaluate(r, t) ? 'fits' : 'does not fit'} ${Q(r, '.')} One card that does not match is enough to rule it out.`,
+  match: (r, t) => {
+    const fits = evaluate(r, t);
+    return matchesMark(r, t)
+      ? `${The(t)} got a ${t.mark}, and it ${fits ? 'fits' : 'does not fit'} ${Q(r, '.')} The mark and the rule agree, so it is a match.`
+      : `${The(t)} got a ${t.mark}, but it ${fits ? 'fits' : 'does not fit'} ${Q(r, '.')} The mark and the rule do not agree, so it is no match.`;
+  },
+};
+
+/** "Right. Only the small blue triangle fits the inside, so NOT leaves it out. Every other card fits “NOT (blue AND small).”" */
+function insideDone(rule: Formula, deck: readonly Card[]): string {
+  const inside = fitting(innerOf(rule), deck);
+  if (!inside.length || inside.length === deck.length) throw new Error('the inside must take some cards and leave some out');
+  const n = inside.length;
+  return `Right. Only ${names(inside)} ${plural(n, 'fits', 'fit')} the inside, so NOT leaves ${plural(n, 'it', 'them')} out. Every other card fits ${Q(rule, '.')}`;
+}
+
+// ---------- lesson 4's boards: the inside, then the whole rule ----------
+
+/** The card the inside contrast is about, and the two questions about it. */
+function insideQuestionsBoard(): DrillStep {
+  const rule = E.notRedAndBig, inner = innerOf(rule);
+  const thing = L4_CONTRAST_SCENE.pairs[0].things![0];
+  const inRow = deckRow(inner, [thing], cardWords, { id: 's2.l4-two-in', label: `Inside: ${R(inner)}` });
+  const allRow = deckRow(rule, [thing], cardWords, { id: 's2.l4-two-all', label: `Rule: ${R(rule)}` });
+  const [mIn, mAll] = [inRow.marks[0], allRow.marks[0]];
+  if (mIn.answer === mAll.answer) throw new Error('NOT must flip the inside');
+  return {
+    id: 's2.l4-two-questions',
+    title: 'Mark the two questions',
+    body: [`The same card, two questions. First: does it fit the inside, ${Q(inner)}? Then: does it fit the whole rule?`],
+    scene: L4_CONTRAST_SCENE,
+    rows: [inRow, allRow],
+    afterCard: 2,
+    distinction: INSIDE_VS_WHOLE.id,
+    // The whole rule marked like the inside, or the inside marked like the whole rule: the two questions merged.
+    misconceptions: [
+      { id: 'inside-as-whole', when: 'picks', picks: { [mIn.id]: mIn.answer, [mAll.id]: mIn.answer }, text: INSIDE_AS_WHOLE },
+      { id: 'whole-as-inside', when: 'picks', picks: { [mIn.id]: mAll.answer, [mAll.id]: mAll.answer }, text: INSIDE_AS_WHOLE },
+    ],
+    confused: insideConfused(ABSTRACT),
+    words: insideWords(INSIDE_BOARD_CLOSING),
+    done: `Right. ${The(thing)} ${evaluate(inner, thing) ? 'fits' : 'does not fit'} the inside, so it ${evaluate(rule, thing) ? 'fits' : 'does not fit'} the whole rule. The inside and the whole rule are two different questions.`,
   };
-  const kept = E.guess, test = E.guessTest, wrong = E.guessWrong;
+}
+
+/** The closing line of "I’m confused" on a lesson 4 board. */
+const INSIDE_BOARD_CLOSING = 'Those ideas are apart now. Back to the board: mark the inside first, then let NOT flip it.';
+
+/** The board after NOT (red AND big): the inside row is shown (with its facts); the learner flips it for the whole rule. */
+function insideFirstBoard(): DrillStep {
+  const see = IDEAS[L4][3], deck = deckOf(see);
+  const rule = E.notBlueAndSmall, inner = innerOf(rule);
+  const inRow = deckRow(inner, deck, cardWords, { id: 's2.l4-do-in', label: `Inside: ${R(inner)}`, given: true, compare: partsCompare, needs: needsOf(inner) });
+  const allRow = deckRow(rule, deck, cardWords, { id: 's2.l4-do-all', label: `Rule: ${R(rule)}`, compare: wholeCompare, needs: FLIP_NEEDS });
+  return {
+    id: 's2.l4-do',
+    title: 'Mark the cards',
+    body: [
+      `These are the six cards from the key idea. The marks show ${Q(E.notRedAndBig, '.')}`,
+      `Now the rule is ${Q(rule, '.')} The inside row is shown. Do the inside first, then flip it for each card.`,
+    ],
+    scene: see.scene,
+    rows: [inRow, allRow],
+    afterCard: 3,
+    scaffold: 'full',
+    distinction: INSIDE_VS_WHOLE.id,
+    misconceptions: [{ id: 'inside-as-whole', when: 'picks', picks: picksLike(allRow, inRow), text: INSIDE_AS_WHOLE }],
+    confused: insideConfused(ABSTRACT),
+    words: insideWords(INSIDE_BOARD_CLOSING),
+    done: insideDone(rule, EXAMPLES.brackets),
+  };
+}
+
+/** The board after NOT red AND NOT big: the bracket rule is shown, the learner marks the rule without brackets. */
+function bracketsBoard(): DrillStep {
+  const see = IDEAS[L4][4], deck = deckOf(see);
+  const shown = deckRow(E.notBlueAndSmall, deck, cardWords, { id: 's2.l4-do-pair-shown', label: `Rule: ${R(E.notBlueAndSmall)}`, given: true });
+  const mine = deckRow(E.notBlueAndNotSmall, deck, cardWords, { id: 's2.l4-do-pair', label: `Rule: ${R(E.notBlueAndNotSmall)}`, compare: partsCompare, needs: `No brackets: each NOT flips only the word after it. ${needsOf(E.notBlueAndNotSmall)}` });
+  return {
+    id: 's2.l4-do-pair',
+    title: 'Now take the brackets away',
+    body: [
+      `The marks show ${Q(E.notRedAndNotBig, '.')} The shown row is the rule from the last board, ${Q(E.notBlueAndSmall, '.')}`,
+      `Now mark ${Q(E.notBlueAndNotSmall, '.')} It has no brackets. Tap Fits or Not for each card.`,
+    ],
+    scene: see.scene,
+    rows: [shown, mine],
+    afterCard: 4,
+    misconceptions: [
+      {
+        id: 'brackets-dropped',
+        when: 'picks',
+        picks: picksLike(mine, shown),
+        text: `You may be treating ${Q(E.notBlueAndSmall)} and ${Q(E.notBlueAndNotSmall)} as the same rule. They are two different rules. With brackets, NOT flips the whole inside. Without brackets, each NOT flips only the word after it.`,
+      },
+    ],
+    confused: insideConfused(ABSTRACT),
+    words: insideWords('Those ideas are apart now. Back to the board: this rule has no brackets, so each NOT flips only the word after it.'),
+    done: bracketDone(E.notBlueAndSmall, E.notBlueAndNotSmall, EXAMPLES.brackets),
+  };
+}
+
+/** The board after NOT (red OR big): the learner marks the inside row, then the whole rule. */
+function insideOrBoard(): DrillStep {
+  const see = IDEAS[L4][5], deck = deckOf(see);
+  const rule = E.notBlueOrSmall, inner = innerOf(rule);
+  const inRow = deckRow(inner, deck, cardWords, { id: 's2.l4-do-or-in', label: `Inside: ${R(inner)}`, compare: partsCompare, needs: needsOf(inner) });
+  const allRow = deckRow(rule, deck, cardWords, { id: 's2.l4-do-or-all', label: `Rule: ${R(rule)}`, needs: FLIP_NEEDS });
+  return {
+    id: 's2.l4-do-or',
+    title: 'Now OR inside the brackets',
+    body: [
+      `The marks show ${Q(E.notRedOrBig, '.')}`,
+      `Now the rule is ${Q(rule, '.')} First mark the inside row: does each card fit ${Q(inner)}? Then flip it for the whole rule.`,
+    ],
+    scene: see.scene,
+    rows: [inRow, allRow],
+    afterCard: 5,
+    distinction: INSIDE_VS_WHOLE.id,
+    // The inside marked right, then copied into the whole rule without the flip.
+    misconceptions: [{ id: 'inside-as-whole', when: 'picks', picks: { ...rightPicks(inRow), ...picksLike(allRow, inRow) }, text: INSIDE_AS_WHOLE }],
+    confused: insideConfused(ABSTRACT),
+    words: insideWords(INSIDE_BOARD_CLOSING),
+    done: sameDone(rule, E.notBlueAndNotSmall, EXAMPLES.brackets),
+  };
+}
+
+// ---------- lesson 5's boards: the mark, Fits or Not, and a match ----------
+
+/** The closing line of "I’m confused" on a lesson 5 board. */
+const MARK_BOARD_CLOSING = 'Those ideas are apart now. Back to the board: work out Fits or Not from the rule. Then compare it with the mark.';
+
+/**
+ * The board right after the mark-vs-fits contrast: the small blue circle (a yes card) under the contrast's two rules,
+ * then a no card that a rule does not fit. Each row: Fits or Not from the rule, then whether that matches the mark.
+ */
+function markBoard(): DrillStep {
+  const blueCircle = deckCard(GUESS_SCENE, SMALL_BLUE_CIRCLE);
+  const yellowCircle = deckCard(GUESS_SCENE, card('small', 'yellow', 'circle'));
+  const label = (t: Thing, r: Formula) => `${The(t)} got a ${t.mark}. Test the rule ${Q(r, '.')}`;
+  const rows: DrillRow[] = [
+    cardTestRow(E.guess, blueCircle, guessWords, { id: 's2.l5-two-r1', label: label(blueCircle, E.guess) }),
+    cardTestRow(E.guessBig, blueCircle, guessWords, { id: 's2.l5-two-r2', label: label(blueCircle, E.guessBig) }),
+    cardTestRow(E.guessBig, yellowCircle, guessWords, { id: 's2.l5-two-r3', label: label(yellowCircle, E.guessBig) }),
+  ];
+  const [fits, match] = [(k: number) => rows[k].marks[0], (k: number) => rows[k].marks[1]];
+  // The rows the board needs: a yes card that fits (a match), the same yes card that does not (no match), and a no
+  // card that does not fit (a match too).
+  if (JSON.stringify(rows.map((r) => r.marks.map((m) => m.answer))) !== JSON.stringify([['fit', 'yes'], ['not', 'no'], ['not', 'yes']])) throw new Error('the mark board’s cases are not the ones it teaches');
+  const copied: Record<string, string> = Object.fromEntries(rows.map((_, k) => [fits(k).id, fits(k).thing!.mark === 'yes' ? 'fit' : 'not']));
+  return {
+    id: 's2.l5-two-things',
+    title: 'The mark, then the rule',
+    body: [
+      'For each row, ask the rule first: Fits or Not? Do not look at the mark for that.',
+      'Then compare: does Fits or Not match the card’s mark?',
+    ],
+    scene: L5_MARK_SCENE,
+    rows,
+    afterCard: IDEAS[L5].findIndex((c) => c.scene === L5_MARK_SCENE),
+    distinction: MARK_VS_FITS.id,
+    misconceptions: [
+      { id: 'copied-mark', when: 'picks', picks: copied, text: COPIED_MARK },
+      { id: 'copied-yes', when: 'picks', picks: { [fits(1).id]: 'fit' }, text: COPIED_MARK },
+      { id: 'not-as-no-match', when: 'picks', picks: { [fits(2).id]: 'not', [match(2).id]: 'no' }, text: NOT_AS_NO_MATCH },
+      { id: 'verdict-only', when: 'verdict-only', text: 'Your Fits or Not is right. Now compare it with the card’s mark. Yes with Fits is a match, and no with Not is a match. Any other pair is no match.' },
+    ],
+    confused: MARK_CONFUSED,
+    words: markWords(MARK_BOARD_CLOSING),
+    done: `Right. The small blue circle kept its ${blueCircle.mark} the whole time. Only the rule changed. And ${the(yellowCircle)} got a ${yellowCircle.mark}, and it does not fit ${Q(E.guessBig, '.')} That is a match too.`,
+  };
+}
+
+/**
+ * Guess the rule's board: the machine's marks stay up. Two tests are shown card by card (the mark, what the rule says,
+ * and the match): “blue OR big” is kept for now and “blue” is ruled out. The learner tests “a circle OR big” on every
+ * card from the rule, then keeps it or rules it out. Only a no card it fits rules it out, so copying the marks into
+ * Fits and Not keeps a rule that is wrong.
+ */
+function guessBoard(): DrillStep {
+  const deck = GUESS_DECK;
+  const kept = E.guess, wrong = E.guessWrong, test = E.guessTest;
   if (firstMismatch(kept, deck)) throw new Error('the worked example’s rule must match every mark');
-  const miss = firstMismatch(test, deck), missWrong = firstMismatch(wrong, deck);
-  if (!miss || !missWrong) throw new Error('the board’s rule and the key idea’s wrong rule must each miss a mark');
+  const miss = firstMismatch(test, deck);
+  const wrongMisses = deck.filter((t) => !matchesMark(wrong, t));
+  if (!miss || !wrongMisses.length) throw new Error('the board’s rule and the key idea’s wrong rule must each miss a mark');
+  // Copying the marks into Fits and Not must go wrong on this rule: some card's Fits or Not is not its mark.
+  if (deck.every((t) => matchesMark(test, t))) throw new Error('copying the marks must not pass the board');
+  const mine = ruleTestRow(test, deck, guessWords, {
+    id: 's2.l5-do-test',
+    label: `Test the rule ${Q(test, '.')}`,
+    compare: testCompare,
+    needs: MATCH_NEEDS,
+    note: `${The(miss)} got a ${miss.mark}, but it ${evaluate(test, miss) ? 'fits' : 'does not fit'} ${Q(test, '.')} No match, so rule out ${Q(test, '.')}`,
+  });
+  const many = wrongMisses.length;
   return {
     id: 's2.l5-do',
     title: 'Test a rule',
     body: [
-      `The machine’s marks stay on the cards. The shown row tests ${Q(kept, '.')} Every card matches its mark, so it is kept.`,
-      `Now test the rule ${Q(test, '.')} Tap Fits or Not for each card. Then keep the rule, or rule it out.`,
+      'The machine’s marks stay on the cards. The shown rows check each card: does its mark match the rule?',
+      `${cap(Q(kept))} matches every mark, so it is kept for now. ${cap(Q(wrong))} does not, so it is ruled out.`,
+      `Now test ${Q(test, '.')} Tap Fits or Not for each card, from the rule. Then keep it for now, or rule it out.`,
     ],
-    scene: see.scene,
+    scene: GUESS_SCENE,
     rows: [
-      ruleTestRow(kept, deck, words, { id: 's2.l5-do-shown', label: `Test the rule ${Q(kept, '.')}`, given: true, note: `Every card matches its mark. Keep ${Q(kept, '.')}` }),
-      ruleTestRow(test, deck, words, {
-        id: 's2.l5-do-test',
-        label: `Test the rule ${Q(test, '.')}`,
-        note: `${The(miss)} got a ${miss.mark}, but it ${evaluate(test, miss) ? 'fits' : 'does not fit'} ${Q(test, '.')} Rule out ${Q(test, '.')}`,
+      matchRow(kept, deck, guessWords, { id: 's2.l5-do-kept', label: `Test the rule ${Q(kept, '.')}`, given: true, note: `Every card matches its mark. Keep ${Q(kept)} for now.` }),
+      matchRow(wrong, deck, guessWords, {
+        id: 's2.l5-do-out',
+        label: `Test the rule ${Q(wrong, '.')}`,
+        given: true,
+        compare: matchCompare,
+        note: `${cap(names(wrongMisses))} got a yes, but ${plural(many, 'it does', 'they do')} not fit ${Q(wrong, '.')} No match, so rule out ${Q(wrong, '.')}`,
       }),
+      mine,
     ],
-    done: `Right. ${The(miss)} rules out ${Q(test, ',')} just as ${the(missWrong)} ruled out ${Q(wrong, '.')}`,
+    afterCard: 4,
+    scaffold: 'full',
+    distinction: MARK_VS_FITS.id,
+    misconceptions: [
+      // Copying the marks goes wrong only on a no card the rule fits, so the words name a no card.
+      { id: 'copied-mark', when: 'picks', picks: copiedMarkPicks(mine), text: COPIED_NO },
+      { id: 'verdict-only', when: 'verdict-only', text: 'Your Fits and Not marks are right. Now compare each one with the card’s mark. A yes card that is Not, or a no card that Fits, is no match. One card with no match rules the rule out.' },
+    ],
+    confused: MARK_CONFUSED,
+    words: markWords(MARK_BOARD_CLOSING),
+    done: `Right. ${The(miss)} rules out ${Q(test, ',')} just as ${the(wrongMisses[0])} ruled out ${Q(wrong, '.')} A ${miss.mark} card that ${evaluate(test, miss) ? 'fits' : 'does not fit'} the rule is no match.`,
+  };
+}
+
+/** The board right after kept vs proved: a new card, tested on the two kept rules. */
+function keptBoard(): DrillStep {
+  const [r1, r2] = [E.guess, E.guessKept];
+  const fresh: Thing = { id: cardId(BIG_RED_CIRCLE), ...BIG_RED_CIRCLE };
+  const rows = [r1, r2].map((r, k) => deckRow(r, [fresh], cardWords, { id: `s2.l5-kept-r${k + 1}`, label: `Test the rule ${Q(r, '.')}` }));
+  const [a1, a2] = rows.map((r) => r.marks[0]);
+  if (a1.answer === a2.answer) throw new Error('the new card must tell the two kept rules apart');
+  const fitsWord = (r: Formula) => (evaluate(r, fresh) ? 'fits' : 'does not fit');
+  return {
+    id: 's2.l5-kept',
+    title: 'A new card',
+    body: [`The two rules each match all six marks. Now a new card comes: ${the(fresh)}. Tap Fits or Not for it under each rule.`],
+    scene: L5_KEPT_SCENE,
+    rows,
+    afterCard: 5,
+    distinction: KEPT_VS_PROVED.id,
+    // The two kept rules marked alike, as if kept meant "the same rule".
+    misconceptions: [
+      { id: 'kept-as-proved', when: 'picks', picks: { [a1.id]: a1.answer, [a2.id]: a1.answer }, text: KEPT_AS_PROVED },
+      { id: 'kept-as-proved-2', when: 'picks', picks: { [a1.id]: a2.answer, [a2.id]: a2.answer }, text: KEPT_AS_PROVED },
+    ],
+    confused: [keptConfused(ABSTRACT), RULED_OUT_CONFUSED],
+    words: markWords('Those ideas are apart now. Back to the board: test the new card on each rule, one at a time.'),
+    done: `Right. ${The(fresh)} ${fitsWord(r1)} ${Q(r1, ',')} but it ${fitsWord(r2)} ${Q(r2, '.')} The two kept rules are not the same rule. Kept means still possible, not proved.`,
   };
 }
 
@@ -1991,23 +2635,15 @@ export const DRILLS: Record<string, DrillStep[]> = {
       done: orDone(E.bigOrRed, EXAMPLES.or),
     }),
   ],
+  // Each board sits right after its card (afterCard): the two questions after the contrast, the inside shown after
+  // NOT (red AND big), the rule without brackets after NOT red AND NOT big, both rows after NOT (red OR big), and the
+  // switch (light, no inside row) last.
   [L4]: [
-    deckBoard(IDEAS[L4][1], {
-      id: 's2.l4-do',
-      title: 'Mark the cards',
-      body: [`These are the six cards from the key ideas. The marks show ${Q(E.notRedAndBig, '.')}`, 'Now use blue and small. Mark each card for each rule. When a rule has brackets, do them first.'],
-      rows: [{ rule: E.notBlueAndSmall }, { rule: E.notBlueAndNotSmall }],
-      done: bracketDone(E.notBlueAndSmall, E.notBlueAndNotSmall, EXAMPLES.brackets),
-    }),
-    deckBoard(IDEAS[L4][3], {
-      id: 's2.l4-do-or',
-      title: 'Now OR inside the brackets',
-      body: [`The marks show ${Q(E.notRedOrBig, '.')}`, `Now the rule is ${Q(E.notBlueOrSmall, '.')} First find the cards that fit ${Q(innerOf(E.notBlueOrSmall), '.')} NOT takes the rest.`],
-      rows: [{ rule: E.notBlueOrSmall }],
-      done: sameDone(E.notBlueOrSmall, E.notBlueAndNotSmall, EXAMPLES.brackets),
-    }),
-    // The switch (key idea 5) on its own picture: a NOT on each part and OR, the same cards as NOT (blue AND small).
-    deckBoard(IDEAS[L4][4], {
+    insideQuestionsBoard(),
+    insideFirstBoard(),
+    bracketsBoard(),
+    insideOrBoard(),
+    deckBoard(IDEAS[L4][6], {
       id: 's2.l4-do-switch',
       title: 'Now the switch',
       body: [`The marks show ${Q(E.notRedOrNotBig, '.')} It fits the same cards as ${Q(E.notRedAndBig, '.')}`, `Now the rule is ${Q(E.notBlueOrNotSmall, '.')} Tap Fits or Not for each card.`],
@@ -2015,7 +2651,8 @@ export const DRILLS: Record<string, DrillStep[]> = {
       done: sameDone(E.notBlueOrNotSmall, E.notBlueAndSmall, EXAMPLES.brackets),
     }),
   ],
-  [L5]: [guessBoard(IDEAS[L5][3])],
+  // The two distinctions each get a board right after their contrast card; the rule test sits after the worked example.
+  [L5]: [markBoard(), guessBoard(), keptBoard()],
 };
 
 // ---------- lessons, check, arcade ----------
@@ -2030,7 +2667,7 @@ const LESSON_GENS: Record<string, readonly Gen[]> = {
   [L2]: [fixedGen(andTwin), andPick, andTap, andCount],
   [L3]: [fixedGen(orTwin), orYesNo, orNotFit, orTap, orCount],
   [L4]: [fixedGen(notAndTwin), notOrTap, bracketYesNo, notAndTap, sameMeaningPick],
-  [L5]: [fixedGen(guessTwin), guessEasy, guessOr, guessHard],
+  [L5]: [fixedGen(guessTwin), noCardOut(guessEasy), guessOr, guessHard],
 };
 
 /** The Arcade's generators: each lesson's taught families, never the twin (it is the same six cards every time). */
@@ -2050,11 +2687,29 @@ const TITLES: Record<string, string> = {
   [L5]: 'Guess the rule',
 };
 
+/** The distinctions each lesson teaches apart (docs/CONTENT_GUIDE.md, "Distinctions"). */
+const DISTINCTIONS: Record<string, Distinction[]> = {
+  [L4]: [INSIDE_VS_WHOLE],
+  [L5]: [MARK_VS_FITS, KEPT_VS_PROVED],
+};
+
+/**
+ * Mastery: 3 right on the first try with no hint, including the trap the lesson exists for. Lesson 4: one rule with
+ * AND inside the brackets and one with OR (every pack holds both). Lesson 5: a puzzle where only a no card rules out a
+ * wrong rule (every pack holds one).
+ */
+const PASS: Record<string, LessonPass> = {
+  [L4]: { firstTry: 3, include: [{ tag: INSIDE_AND, label: 'a rule with AND inside the brackets' }, { tag: INSIDE_OR, label: 'a rule with OR inside the brackets' }] },
+  [L5]: { firstTry: 3, include: [{ tag: NO_CARD_OUT, label: 'a puzzle where only a no card rules out a rule' }] },
+};
+
 const lessons: LessonDef[] = [L1, L2, L3, L4, L5].map((lid) => ({
   id: lid,
   title: TITLES[lid],
   ideas: IDEAS[lid],
   drill: DRILLS[lid],
+  ...(DISTINCTIONS[lid] ? { distinctions: DISTINCTIONS[lid] } : {}),
+  ...(PASS[lid] ? { pass: PASS[lid] } : {}),
   practice(rng: Rng): Item[] {
     const gens = LESSON_GENS[lid];
     const skins = lessonSkins(rng, gens.length);

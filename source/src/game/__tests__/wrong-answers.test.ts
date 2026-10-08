@@ -259,6 +259,8 @@ function wrongFor(item: Item): Answer | null {
       }
       return { kind: 'assign', values };
     }
+    case 'number':
+      return { kind: 'number', value: item.answer + 1 };
     default:
       return null;
   }
@@ -275,7 +277,10 @@ describe('where other kinds fail (handoff page 2: show exactly where the answer 
   const other = items.filter((x) => x.kind !== 'choose');
 
   it('every wrong answer gets a title that names its gap, and one line for each place it fails, at the reading level', () => {
-    expect(new Set(other.map((x) => x.kind))).toEqual(new Set(['tapall', 'order', 'assign', 'multi']));
+    // Every non-choose kind the game has is covered; the Observatory adds 'number' once its rings are built.
+    const kinds = new Set(other.map((x) => x.kind));
+    for (const k of ['tapall', 'order', 'assign', 'multi']) expect((kinds as Set<string>).has(k), k).toBe(true);
+    expect([...kinds].every((k) => (['tapall', 'order', 'assign', 'multi', 'number'] as string[]).includes(k))).toBe(true);
     for (const item of other) {
       const wrong = wrongFor(item)!;
       const g = grade(item, wrong);

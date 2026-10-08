@@ -31,7 +31,7 @@ export function PlayersScreen({ route }: { route: PlayersRoute }) {
   const pinPlayer = pinFor ? players.find((p) => p.id === pinFor) ?? null : null;
 
   const stopNumbers = useMemo(() => {
-    const ids = STOPS.map((s) => s.id);
+    const ids = STOPS.filter((s) => !s.observatory).map((s) => s.id);
     const out: Record<string, number> = {};
     for (const p of players) {
       const data = p.id === current?.id && currentSave ? currentSave : loadSave(kv, p.id);

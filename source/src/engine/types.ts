@@ -4,7 +4,9 @@
  * regenerated from its seed and compared in tests.
  */
 import type { Rng } from './rng';
+import type { ObservatoryScene } from './scenes';
 export type { Rng };
+export type { ObservatoryScene, SceneStep, ChainToken, MatrixCell } from './scenes';
 
 // ---------- things the UI knows how to draw ----------
 
@@ -46,8 +48,12 @@ export type Scene =
    */
   | { kind: 'clues'; clues: string[]; marks?: ('ok' | 'broken')[]; line?: { names: string[]; first: string; last: string } }
   | { kind: 'text'; lines: string[] } // a sentence, rule or quote card
-  /** Speech bubbles. rule: 'Knights always tell the truth…'. fact: what is true on this board ('The well is full.'), drawn as a banner. */
-  | { kind: 'speakers'; speakers: Speaker[]; rule?: string; fact?: string }
+  /**
+   * Speech bubbles. rule: 'Knights always tell the truth…'. fact: what is true on this board ('The well is full.'),
+   * drawn as a banner. test: the case being tried ('Ava is a knave'), drawn as a test-world banner beside the fact,
+   * so a guess is never mistaken for a fact.
+   */
+  | { kind: 'speakers'; speakers: Speaker[]; rule?: string; fact?: string; test?: string }
   /**
    * A logic grid drawn as a picture (not playable): rows × cols with some ✓ / ✗ marks. For worked examples.
    * labels: a short word drawn inside a box ('the break'), by row id and column id.
@@ -60,15 +66,65 @@ export type Scene =
    * shown one stamp at a time (each sign, then the count and the verdict), one line each. `changed`: the sign a twin
    * changed, tagged on the picture.
    */
-  | { kind: 'cases'; rule: string; boxes: SignBox[]; pretend?: number; stamps?: boolean[]; counts?: (number | null)[]; verdicts?: (CaseVerdict | null)[]; steps?: CaseStep[]; changed?: number };
+  | { kind: 'cases'; rule: string; boxes: SignBox[]; pretend?: number; stamps?: boolean[]; counts?: (number | null)[]; verdicts?: (CaseVerdict | null)[]; steps?: CaseStep[]; changed?: number }
+  /**
+   * Two cases side by side that differ in one thing, to teach a distinction (see LessonDef.distinctions): the same
+   * test world with a different statement, or the same statement in a different world. Each panel shows the world,
+   * the statement, and the comparison that gives its truth. `ask`: the question under them ("Did the treasure move?")
+   * and its answer.
+   */
+  | { kind: 'contrast'; pairs: [ContrastPanel, ContrastPanel]; ask?: { q: string; a: string }; words?: ContrastWords }
+  /** The Pattern Observatory's pictures (src/engine/scenes): a chain, a staircase, a machine, a clock, a mirror, a matrix, a bridge, a lantern. */
+  | ObservatoryScene;
+
+/** The labels a contrast picture uses, so a card puzzle never says "sign" or "test world". All optional. */
+export interface ContrastWords {
+  /** The tag over each panel's world line. Default "Test world". */
+  worldTag?: string;
+  /** The word after `who` ("says:" by default; "rule:" for a machine rule). */
+  saysWord?: string;
+  /** The verdict words. Default "True" / "False". For a deck: "Fits" / "Not"; for a case: "Can happen" / "Can’t happen". */
+  truth?: string;
+  untruth?: string;
+}
+
+/** One panel of a contrast picture. */
+export interface ContrastPanel {
+  /** "Test: the treasure is in the Bronze chest." */
+  world: string;
+  /** Whose statement it is: "Bronze chest sign". */
+  who: string;
+  /** The statement's words. */
+  says: string;
+  /** How it comes out in that world. */
+  truth: boolean;
+  /** The comparison, in words: "It says Bronze. The test says Bronze. They match." */
+  because: string;
+  /** An optional picture: the shape cards this panel is about. */
+  things?: Thing[];
+  /** An optional last line: the need or the verdict that follows ("A knave with true words: this case crashes."). */
+  then?: string;
+}
 
 /** A box's verdict on a case board: Keep (drawn as a ring) or Reject (drawn as a cross). */
 export type CaseVerdict = 'keep' | 'reject';
 
 /** One step of a worked case on a case board: the button that shows it ("Check the Gold chest sign") and its line. */
+/**
+ * How a statement's truth was worked out in a test world, in three parts: what the statement says, what the test
+ * world says, and whether they match. The screen shows them as rows, never as symbols.
+ */
+export interface Because {
+  says: string;
+  world: string;
+  match: boolean;
+}
+
 export interface CaseStep {
   label: string;
   say: string;
+  /** The comparison behind a stamp, shown as three rows under the board. Count-and-decide steps have none. */
+  because?: Because;
 }
 
 export interface Choice {
@@ -131,6 +187,8 @@ export interface CountGroup {
 export interface Truth {
   who: string;
   value: boolean;
+  /** The comparison behind the value, shown as Says / In this case / So rows under it (hints and Teach cases). */
+  because?: Because;
 }
 
 /**
@@ -145,6 +203,8 @@ export interface TeachCase {
   truths?: Truth[];
   /** "The counts are equal. This is a tie." */
   note?: string;
+  /** The labels its because rows and truth rows use (BoardWords.truth / untruth for "Fits" / "Not"). */
+  words?: BoardWords;
 }
 
 /**
@@ -232,6 +292,76 @@ interface ItemBase {
    * board to mark by taps. It is never checked and never counts; it only helps.
    */
   scratch?: DrillStep;
+  /** What the thinking board's toggle calls it: "the case board" (default), "the test board", "the grid". */
+  scratchLabel?: string;
+  /** "I’m confused" questions for this question (lessons and practice, never checks). Using them counts as help. */
+  confused?: ConfusedQuestion[];
+  /** The closing line of this question's "I’m confused" panel. Default: the board's words (workFirst or scratch), else a plain line. */
+  confusedClosing?: string;
+  // ---- Pattern Observatory (lessons with LessonDef.routine) ----
+  /** Which phase of the five-phase lesson this item belongs to. The runner labels and orders tries by it. */
+  phase?: Phase;
+  /** The level this item is pitched at (L1 Starter … L4 Prover). Levels are never ages. */
+  level?: 1 | 2 | 3 | 4;
+  /**
+   * A faded example: the sentence frame with `___` for the one blank. The screen shows the frame with the picked
+   * answer in the blank, so the learner fills a frame before doing the same task with no frame.
+   */
+  frame?: string;
+  /** What this item declares about itself (the handoff's §14 metadata). Every Observatory item has one. */
+  meta?: ItemMeta;
+  /** The explanation level an Explain item needs (0-3; see ItemMeta.rubric). A preschool item never needs 3. */
+  rubric?: 0 | 1 | 2 | 3;
+  /** The misconception each wrong answer reveals (choice id, or the wrong number as a string). */
+  errorTags?: Record<string, ErrorTag>;
+  /** The hint sequence (the first is also `hint`): count whole cycles · where does cycle 10 end? · a worked twin. */
+  hints?: string[];
+  /** The twin family: items that share it are matched twins (same structure, new numbers or materials). */
+  twin?: string;
+}
+
+/** The five phases of an Observatory lesson (See is the key-idea cards; the rest are items). */
+export type Phase = 'explain' | 'do' | 'transfer' | 'review';
+
+/** Errors are recorded by meaning (the handoff's error tags). */
+export type ErrorTag =
+  | 'oversized-unit' // a longer block also repeats, but it is not the shortest
+  | 'copy-last' // copying the last item instead of continuing the unit
+  | 'not-repeating' // calling a random chain a repeating one
+  | 'error-near-end' // missing a break near the end of the chain
+  | 'same-objects-different-structure' // the same objects, but not the same structure (translation)
+  | 'off-by-one' // n jumps instead of n − 1, or an index off by one
+  | 'local-only' // "add 2" with no position rule
+  | 'add-vs-multiply' // treating doubling like adding
+  | 'first-rule' // the first rule that fits the first pair, never tested
+  | 'undo-order' // reversing a machine in the wrong order
+  | 'elapsed-vs-position' // item n of a cycle vs n steps after
+  | 'zero-remainder' // a zero remainder read as the first item
+  | 'reflection-vs-rotation'
+  | 'row-only' // the row rule checked, the column rule not
+  | 'appearance-match' // an analogy answer that looks alike instead of keeping the relation
+  | 'examples-as-proof' // a run of examples taken as a proof
+  | 'unwarranted-certainty'; // certain where the evidence only supports a guess
+
+/** What every Observatory item declares (the handoff's §14 "Every item declares"). Plain strings, for the log and the tests. */
+export interface ItemMeta {
+  /** The track and skill in words: "Track 1 · distant position". */
+  skill: string;
+  /** The generating rule or assumptions, stated: "repeat ABCD; the first item is position 1". */
+  rule: string;
+  /** The task type: "predict an item", "box the shortest unit", "choose a separating input". */
+  task: string;
+  /** The representation: "letters", "shape cards", "sounds", "weekdays", "a dot grid". */
+  representation: string;
+  difficulty: 1 | 2 | 3 | 4 | 5;
+  answerType: 'categorical' | 'number' | 'order' | 'set';
+  /** Reasoning items: the alternative rules that are also accepted (each precisely stated). */
+  alternatives?: string[];
+  /** The explanation rubric for this item, in words: "2 = uses whole cycles correctly". */
+  rubric?: string;
+  tags: ErrorTag[];
+  twin: string;
+  phase: Phase;
 }
 
 export interface ChooseItem extends ItemBase {
@@ -300,14 +430,32 @@ export interface MultiItem extends ItemBase {
   missTips?: Record<string, string>;
 }
 
-export type Item = ChooseItem | TapAllItem | OrderItem | AssignItem | MultiItem;
+/**
+ * A whole-number answer typed on the in-app number pad (the Pattern Observatory: a far term, a step count, an
+ * input to feed a machine). Never a native text field, so a tablet's keyboard never opens.
+ */
+export interface NumberItem extends ItemBase {
+  kind: 'number';
+  answer: number;
+  /** The pad accepts up to this many digits (default 3). */
+  digits?: 1 | 2 | 3 | 4;
+  /** A unit word after the number: "tiles", "days". */
+  unit?: string;
+  /** The wrong number (as a string) -> what that answer gets wrong. Other wrong numbers get a plain line and the teaching. */
+  feedback?: Record<string, ChoiceFeedback>;
+  /** Kept in step with `feedback` (see syncWhyWrong). */
+  whyWrong?: Record<string, string>;
+}
+
+export type Item = ChooseItem | TapAllItem | OrderItem | AssignItem | MultiItem | NumberItem;
 
 export type Answer =
   | { kind: 'choose'; id: string }
   | { kind: 'tapall'; ids: string[] }
   | { kind: 'order'; ids: string[] }
   | { kind: 'assign'; values: Record<string, Record<string, string>> }
-  | { kind: 'multi'; ids: string[] };
+  | { kind: 'multi'; ids: string[] }
+  | { kind: 'number'; value: number };
 
 export interface Graded {
   correct: boolean;
@@ -326,6 +474,8 @@ export interface IdeaCard {
   body: string[];
   /** Optional worked example drawn above the text. */
   scene?: Scene;
+  /** The distinction this card teaches (LessonDef.distinctions), usually with a contrast scene. */
+  distinction?: string;
 }
 
 // ---------- the Do step: guided boards ----------
@@ -363,6 +513,14 @@ export interface DrillMark {
    * in Gold. The treasure is not in Silver." Every wrong option of every mark to tap has one.
    */
   why: Record<string, string>;
+  /**
+   * The two facts to compare before marking, with no verdict: what the statement says and what the test world says
+   * ("Says: the treasure is in the Gold chest." / "Test: it is in the Silver chest."). A full-scaffold board shows
+   * them under the sign; a light one shows them only after a wrong check. They keep the test world in view so the
+   * learner compares instead of remembering. Under a shown mark the rows end in a verdict: `match` (default: the
+   * answer is a yes-like option) and `so` (its own verdict line, over the board's fit / unfit words).
+   */
+  compare?: { says: string; world: string; match?: boolean; so?: string };
 }
 
 /** One row of a guided board: one case, card, box or person, with its marks. */
@@ -380,6 +538,17 @@ export interface DrillRow {
    * name in a sentence ("the Gold chest", "Box A").
    */
   case?: { box: number; name: string };
+  /**
+   * What the rule needs, next to the count on a case board ("exactly 1 true sign"), or on its own line over a row's
+   * marks ("Ben is a knave: his words must be false"), so the need and the marks sit side by side.
+   */
+  needs?: string;
+  /** A case board: how many True stamps the rule needs in this case (the `fit-rule` pattern compares the count to it). */
+  needTrue?: number;
+  /** A case board under the owner's rule: the box whose sign must be the one True stamp (`fit-rule` needs it True). */
+  needOn?: number;
+  /** Show `needs` only once the row's statement marks are set (a stamps-first board), not over blank marks. */
+  needsAfter?: boolean;
 }
 
 /** A guided board: the Do beat. Same board as the worked example, or a twin that changes one piece. */
@@ -421,6 +590,92 @@ export interface DrillStep {
   afterCard?: number;
   /** Said once every mark is right. */
   done: string;
+  /**
+   * How much of the reasoning is kept on screen. 'full' (the Do board, the first quiz): the compare facts under
+   * every sign, the rule's need next to the count, and the steps of the method. 'light' (later quizzes, thinking
+   * boards): the compare facts appear only for a case that had a wrong mark. Default 'light'.
+   */
+  scaffold?: 'full' | 'light';
+  /**
+   * Patterns of wrong marks that point to a belief, not a slip, each with the words that teach the distinction.
+   * checkDrill looks for them before naming the first wrong mark. See Misconception.
+   */
+  misconceptions?: Misconception[];
+  /** The "I’m confused" questions for this board: one or two, each locating one distinction. See ConfusedQuestion. */
+  confused?: ConfusedQuestion[];
+  /** The distinction this board exercises (LessonDef.distinctions), when it teaches one on its own. */
+  distinction?: string;
+  /**
+   * The labels this board's compare and because rows, test-world line and "I’m confused" panel use, so a card, line-up,
+   * grid, knight or cause board never speaks of signs and tests. All optional; the defaults are the sign words.
+   */
+  words?: BoardWords;
+  /** The method's steps for the strip (DrillStep.scaffold 'full'). A case board has its own default list. */
+  steps?: string[];
+  /** The strip's title. Default "The steps". */
+  stepsLabel?: string;
+  /** The small label over an item's board before the answer buttons (Item.workFirst). Default by layout: "First, mark the cases" / "First, mark the board". */
+  kicker?: string;
+}
+
+/** Labels for the pieces that keep a distinction visible (Distinction.tsx). Every field is optional. */
+export interface BoardWords {
+  /** The three row labels. Default "Says", "Test", "So". */
+  says?: string;
+  world?: string;
+  so?: string;
+  /** The verdict line of a because row. Default "The words fit the test: True." / "The words do not fit the test: False." */
+  fit?: string;
+  unfit?: string;
+  /** The question of a compare row. Default "Do the words fit the test?" */
+  ask?: string;
+  /** The tag and the note on the test-world line. Defaults: "Test world" and the sign note. */
+  worldTag?: string;
+  worldNote?: string;
+  /** The closing line of the "I’m confused" panel. */
+  closing?: string;
+  /** The words before DrillRow.needs ("The rule needs"). An empty string shows the need on its own. */
+  needs?: string;
+  /** The verdict words on a case card's truth rows (TeachCase.words). Default "true" / "false". */
+  truth?: string;
+  untruth?: string;
+}
+
+/**
+ * A mix-up that a pattern of wrong marks reveals, with the words that teach the distinction instead of only naming
+ * the first wrong mark. The `when` kinds are checked by the engine (drill.ts, diagnose), in the row of the first wrong
+ * mark:
+ *  - 'fit-rule' (case boards): the stamps are bent to fit the rule: at least one is wrong, the True count equals what
+ *    the rule needs (DrillRow.needTrue) and the box is kept, as if the rule were a stamping instruction;
+ *  - 'own-true' (case boards): the picked box's own sign is stamped True though its words are false, as if "the treasure
+ *    is here" made them true;
+ *  - 'own-false' (case boards): the picked box's own sign is stamped False though its words are true;
+ *  - 'copied': a row's marks copy another row's right marks, as if a truth carried over from one case to the next;
+ *  - 'all-one': every mark of the row is the same value, as if the marks were about the case, not each statement;
+ *  - 'verdict-only': every mark but the row's verdict (its last mark; Keep or Reject on a case board) is right: the
+ *    result was not compared with the rule;
+ *  - 'picks': the listed marks are set to the listed options (`picks`), and at least one is wrong: a pattern the
+ *    board's author names, such as every words mark set to what the speaker's kind demands.
+ */
+export interface Misconception {
+  id: string;
+  when: 'fit-rule' | 'own-true' | 'own-false' | 'copied' | 'all-one' | 'verdict-only' | 'picks';
+  /** For 'picks': mark id -> the option that, together, shows the mix-up. */
+  picks?: Record<string, string>;
+  /** Only in this row: the pattern is checked only when the first wrong mark is in the row with this id. */
+  row?: string;
+  /** "You may be treating … as the same thing." Then the distinction, in the lesson's words, with a tiny example. */
+  text: string;
+}
+
+/**
+ * One "I’m confused" question. It is short and has one right option; a wrong (or "Not sure") answer shows `teach`,
+ * the distinction in a few sentences, before the learner goes on. Using it counts as help, like a hint.
+ */
+export interface ConfusedQuestion {
+  q: string;
+  options: { label: string; right?: boolean }[];
+  teach: string;
 }
 
 /**
@@ -447,6 +702,45 @@ export interface LessonDef {
   practice(rng: Rng): Item[];
   /** Default { firstTry: 3 }. */
   pass?: LessonPass;
+  /**
+   * The distinctions this lesson's reasoning depends on: two ideas a learner can merge into one ("where the treasure
+   * is" vs "whether a sign's words are true"). Each must be taught before the quiz by a card that names both sides
+   * with a contrast picture, and exercised by a board (the contract test checks). See docs/CONTENT_GUIDE.md.
+   */
+  distinctions?: Distinction[];
+  // ---- Pattern Observatory places (see docs/OBSERVATORY.md) ----
+  /** A five-phase lesson (See → Explain → Do → Transfer → Review) with the routine strip. */
+  routine?: true;
+  /** The capability track this place belongs to: 1 Repetition, 2 Change, 3 Relations and space, 4 Evidence. */
+  track?: 1 | 2 | 3 | 4;
+  /** The levels this place offers, L1 Starter to L4 Prover. */
+  levels?: [1 | 2 | 3 | 4, 1 | 2 | 3 | 4];
+  /** The plain label for grown-ups: "Repeating units". */
+  plain?: string;
+  /**
+   * Skills, never stop numbers: lesson ids (anywhere in the game) that must be done before this place opens. A
+   * place also opens when the diagnostic showed its skill or its primer was passed (StopDef.lessonOrder 'free').
+   */
+  requires?: string[];
+  /** The 3-item primer a learner can take instead of a required lesson (a quick showing of the skill). */
+  primer?(rng: Rng): Item[];
+  /** The planned pack for a level, when it differs from `practice` (the L1 pack and the contract pack). */
+  practiceAt?(rng: Rng, level: 1 | 2 | 3 | 4): Item[];
+  /** Four fresh items for a delayed review (stage 1 about 2 days on, 2 a week on, 3 three to four weeks on). */
+  review?(rng: Rng, stage: 1 | 2 | 3): Item[];
+  /** Six fresh items for the independent check, with a misconception item and an explain item. */
+  independent?(rng: Rng): Item[];
+}
+
+/** Two ideas that are easy to merge, named apart. */
+export interface Distinction {
+  id: string;
+  /** The first idea, in a few words: "Where the treasure is." */
+  a: string;
+  /** The second: "Whether a sign’s words are true." */
+  b: string;
+  /** Taught (card with a contrast picture, and a board) in an earlier lesson of the same stop; this lesson reminds. */
+  taughtIn?: string;
 }
 
 export interface StopDef {
@@ -468,4 +762,30 @@ export interface StopDef {
    * item with the same skill from the same lesson. Used when one skill needs a set, e.g. a tie and no tie.
    */
   fresh?(missed: Item, rng: Rng): Item[];
+  /**
+   * The stops that must be passed before this one opens, by id. [] opens it from the start. Undefined (every main
+   * stop): the stop before it in the list, as before.
+   */
+  requires?: string[];
+  /** 'sequence' (default): a lesson opens after the one before it. 'free': each place opens on its own `requires`. */
+  lessonOrder?: 'sequence' | 'free';
+  /** Plain names for this stop's skill tags (merged into the Grown-ups view and the CSV reader). */
+  skillNames?: Record<string, string>;
+  /** A Pattern Observatory ring. */
+  observatory?: ObservatoryStop;
+}
+
+/** The Pattern Observatory: a ring of places on one track, with the diagnostic items it contributes. */
+export interface ObservatoryStop {
+  ring: 1 | 2 | 3 | 4;
+  track: 1 | 2 | 3 | 4;
+  /** The plain label for grown-ups: "Repeating units". */
+  plain: string;
+  /**
+   * One diagnostic item for a track at a level, or null when this ring has none for that track and level (every ring
+   * is asked; Clock Tower in Ring 2 serves Track 1 at L3). The diagnostic (8 to 10 items, no timer) starts each
+   * track at L1, moves up after two right in a row, and ends the track at the first miss. The item's `lesson` is
+   * the place whose skill it shows.
+   */
+  diagnostic?(rng: Rng, track: 1 | 2 | 3 | 4, level: 1 | 2 | 3 | 4): Item | null;
 }

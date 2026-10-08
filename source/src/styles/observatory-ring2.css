@@ -1,0 +1,50 @@
+/* Pattern Observatory, Ring 2 (Rule Rise): the staircase, the machine and the clock. Classes start with play-ob-.
+   Shared pieces (tiles, the machine box, the clock ring) are in observatory.css; these add the stepped table,
+   the skins, the candidate states and the paired clocks, all sized to wrap at 320 px. */
+
+/* ---------- staircase ---------- */
+.play-ob-stairs { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.play-ob-stairs .play-ob-stair-row { grid-template-columns: 62px minmax(0, 1fr) 28px; }
+.play-ob-stairs .play-ob-tiles { justify-content: center; }
+.play-ob-stairs .play-ob-tile.is-old { background: #3b82f6; }
+.play-ob-stairs .play-ob-tile.is-end { background: #9aa3d1; }
+.play-ob-stairs.is-beads .play-ob-tile { border-radius: 50%; }
+.play-ob-stairs.is-beads .play-ob-tile.is-centre { border-radius: 3px; width: 12px; }
+.play-ob-stairs.is-seats .play-ob-tile { border-radius: 50%; width: 14px; height: 14px; }
+.play-ob-stairs.is-seats .play-ob-tiles { padding: 3px 4px; border-radius: 6px; background: rgba(154, 163, 209, 0.14); }
+
+.play-ob-seq { display: flex; flex-direction: column; gap: 6px; }
+.play-ob-seq-jump { margin: 0; font-size: 13px; color: var(--text-2, #c9cff0); }
+.play-ob-seq-list { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; align-items: stretch; gap: 6px; }
+.play-ob-seq-cell {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  min-width: 54px; padding: 6px 8px; border-radius: 10px;
+  background: var(--bg-3, #1e2656); border: 1px solid var(--line-soft, rgba(154, 163, 209, 0.16));
+}
+.play-ob-seq-cell.is-ask { border: 2px dashed var(--gold, #ffc93c); }
+.play-ob-seq-head { font-size: 11px; color: var(--muted, #9aa3d1); white-space: nowrap; }
+.play-ob-seq-val { font-family: var(--font-display, 'Orbitron', sans-serif); font-size: 17px; color: var(--text, #f1f3ff); }
+.play-ob-seq-cell.is-ask .play-ob-seq-val { color: var(--gold, #ffc93c); }
+.play-ob-seq-gap { display: grid; place-items: center; padding: 0 2px; color: var(--muted, #9aa3d1); font-weight: 700; }
+
+/* ---------- machine ---------- */
+.play-ob-machine { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.play-ob-machine-body { overflow-wrap: anywhere; }
+.play-ob-candidates li.is-out { text-decoration: line-through; opacity: 0.55; border-style: dashed; }
+.play-ob-try { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 14px; color: var(--text-2, #c9cff0); }
+.play-ob-io { align-self: flex-start; min-width: 140px; }
+.play-ob-io td { font-family: var(--font-display, 'Orbitron', sans-serif); font-weight: 700; }
+
+/* ---------- clock ---------- */
+.play-ob-clock { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; }
+.play-ob-face { margin: 0; flex: 1 1 200px; min-width: 0; max-width: 320px; display: flex; flex-direction: column; gap: 6px; }
+.play-ob-clock.is-pair .play-ob-face { flex-basis: 150px; }
+.play-ob-face .play-ob-clock-face { width: 150px; }
+.play-ob-glyph { fill: var(--text, #f1f3ff); }
+.play-ob-bead text.is-on-color { fill: #0a0d2a; font-size: 8px; }
+.play-ob-bead.is-lit .play-ob-glyph { fill: var(--bg, #0a0d2a); }
+.play-ob-bead.is-start circle { stroke: var(--cyan, #22e6ff); stroke-width: 2; }
+.play-ob-clock-mid { fill: var(--cyan, #22e6ff); font-size: 8px; font-weight: 700; font-family: var(--font-body, 'Exo 2', sans-serif); }
+.play-ob-cycle-line { margin: 0; font-size: 13px; color: var(--muted, #9aa3d1); text-align: center; overflow-wrap: anywhere; }
+.play-ob-captions { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; color: var(--text-2, #c9cff0); }
+.play-ob-ask { text-align: center; font-weight: 700; color: var(--gold, #ffc93c); }

@@ -1,0 +1,97 @@
+/* Pattern Observatory, Ring 4: styles its builder adds (classes start with play-ob-). The shared pieces are in observatory.css. */
+
+/* The lantern: a circle picture, or a claim card. Everything stacks and wraps, so it reads at 320 px. */
+.play-ob-lantern { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.play-ob-lantern.is-card { padding: 10px 12px; border-radius: 14px; border: 1px solid rgba(255, 201, 60, 0.28); background: rgba(255, 201, 60, 0.05); }
+
+/* Constructed or observed: a small line under the stated rule. */
+.play-ob-lkind { margin: 0; font-size: 12.5px; font-weight: 700; color: var(--muted, #9aa3d1); }
+.play-ob-lkind.is-constructed { color: var(--teal-soft, #7dffbf); }
+.play-ob-lkind.is-observed { color: var(--gold, #ffc93c); }
+
+.play-ob-lseq { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.play-ob-lcount { text-align: center; }
+.play-ob-lcount strong { font-family: var(--font-display, 'Orbitron', sans-serif); font-size: 18px; color: var(--gold, #ffc93c); margin-right: 4px; }
+.play-ob-lcount.is-hidden { color: var(--muted, #9aa3d1); font-style: italic; }
+
+/* Rows: a sequence, a machine input, a finding, a list of terms. */
+.play-ob-lrows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.play-ob-lrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: rgba(154, 163, 209, 0.08);
+  border: 1px solid var(--line-soft, rgba(154, 163, 209, 0.16));
+  font-size: 14px;
+  min-width: 0;
+}
+.play-ob-lrow.is-lit { border-color: #ff8fa3; background: rgba(255, 77, 109, 0.12); }
+.play-ob-lrow-label { font-weight: 700; color: var(--text-2, #c9cff0); overflow-wrap: anywhere; }
+.play-ob-lrow-cells { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.play-ob-lcell {
+  padding: 2px 8px;
+  border-radius: 8px;
+  background: var(--bg-3, #1e2656);
+  color: var(--text, #f1f3ff);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+/* Numbers read best in the display face; words stay in the body face so they wrap at 320 px. */
+.play-ob-lcell.is-num { font-family: var(--font-display, 'Orbitron', sans-serif); font-size: 12.5px; }
+.play-ob-lcell.is-blank { border: 1px dashed var(--gold, #ffc93c); color: var(--gold, #ffc93c); }
+.play-ob-ltag {
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(34, 230, 255, 0.14);
+  color: var(--cyan, #22e6ff);
+  font-size: 12px;
+  font-weight: 700;
+}
+.play-ob-lrow.is-lit .play-ob-ltag { background: rgba(255, 77, 109, 0.2); color: #ff8fa3; }
+
+/* Claims with their verdicts. */
+.play-ob-lclaims { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+.play-ob-lclaim { overflow-wrap: anywhere; }
+.play-ob-lclaim-text { margin-right: 6px; }
+.play-ob-lverdict { display: inline-block; font-weight: 700; font-size: 13px; }
+.play-ob-lclaim.is-proved .play-ob-lverdict, .play-ob-claim.is-proved .play-ob-lverdict { color: var(--teal-soft, #7dffbf); }
+.play-ob-lclaim.is-tentative .play-ob-lverdict, .play-ob-claim.is-tentative .play-ob-lverdict { color: var(--gold, #ffc93c); }
+.play-ob-lclaim.is-false .play-ob-lverdict, .play-ob-claim.is-false .play-ob-lverdict { color: #ff8fa3; }
+
+/* The reason chain: each step lights in turn. */
+.play-ob-lchain { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.play-ob-llink {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  border: 1px dashed var(--line-soft, rgba(154, 163, 209, 0.3));
+  color: var(--muted, #9aa3d1);
+  font-size: 14px;
+  min-width: 0;
+}
+.play-ob-llink.is-lit { border-style: solid; border-color: var(--gold, #ffc93c); background: rgba(255, 201, 60, 0.1); color: var(--text, #f1f3ff); }
+.play-ob-llink-n {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--bg-3, #1e2656);
+  font-family: var(--font-display, 'Orbitron', sans-serif);
+  font-size: 11px;
+}
+.play-ob-llink.is-lit .play-ob-llink-n { background: var(--gold, #ffc93c); color: var(--bg, #0a0d2a); }
+.play-ob-llink-text { overflow-wrap: anywhere; min-width: 0; }
+
+@media (max-width: 359px) {
+  .play-ob-lrow { font-size: 13px; padding: 5px 6px; }
+  .play-ob-lcell { font-size: 11.5px; padding: 2px 6px; }
+  .play-ob-lantern-face { width: 150px; }
+}

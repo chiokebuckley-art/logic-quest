@@ -1,11 +1,12 @@
 /** Pieces shared by the box pictures: the rule banner and the tint of a box's marker. */
 
 /** The rule over a scene ("Rule: Exactly one sign is true."). */
-export function RuleBanner({ rule }: { rule: string }) {
+export function RuleBanner({ rule, note }: { rule: string; note?: string }) {
   return (
     <div className="play-rule">
       <span className="play-rule-tag">Rule</span>
       <strong>{rule}</strong>
+      {note && <span className="play-rule-note">{note}</span>}
     </div>
   );
 }

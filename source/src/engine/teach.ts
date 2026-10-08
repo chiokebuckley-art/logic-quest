@@ -22,14 +22,15 @@ export function syncWhyWrong<T extends Pick<ChooseItem, 'feedback' | 'whyWrong'>
 /** "true" / "false" as a player reads it. */
 export const truthWord = (v: boolean) => (v ? 'true' : 'false');
 
-/** "The dragon’s statement: false. Your answer: false." */
-export function truthLine(truths: readonly Truth[]): string {
-  return truths.map((t) => `${t.who}: ${truthWord(t.value)}.`).join(' ');
+/** "The dragon’s statement: false. Your answer: false." A case's own words (TeachCase.words: "Fits" / "Not") when it has them. */
+export function truthLine(truths: readonly Truth[], words?: TeachCase['words']): string {
+  const word = (v: boolean) => (v ? words?.truth ?? truthWord(true) : words?.untruth ?? truthWord(false));
+  return truths.map((t) => `${t.who}: ${word(t.value)}.`).join(' ');
 }
 
 /** A case in words: its label, its truths and its note. Enough on its own when the picture cannot load. */
 export function caseText(c: TeachCase): string[] {
-  return [c.label, ...(c.truths?.length ? [truthLine(c.truths)] : []), ...(c.note ? [c.note] : [])];
+  return [c.label, ...(c.truths?.length ? [truthLine(c.truths, c.words)] : []), ...(c.note ? [c.note] : [])];
 }
 
 /** Every player-facing teaching string of an item, in reading order. */

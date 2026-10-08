@@ -83,13 +83,15 @@ function drillProblems(step: DrillStep, boards: readonly string[], where: string
   return out;
 }
 
-/** Every player-facing string of a guided board. */
+/** Every player-facing string of a guided board, the misconception words and the "I'm confused" questions included. */
 const drillText = (step: DrillStep): string[] => [
   step.title,
   ...step.body,
   step.done,
   step.twin ?? '',
-  ...step.rows.flatMap((r) => [r.label, r.note ?? '', ...r.marks.flatMap((m) => [m.label, ...Object.values(m.why)])]),
+  ...step.rows.flatMap((r) => [r.label, r.note ?? '', r.needs ?? '', ...r.marks.flatMap((m) => [m.label, ...Object.values(m.why), m.compare?.says ?? '', m.compare?.world ?? ''])]),
+  ...(step.misconceptions ?? []).map((m) => m.text),
+  ...(step.confused ?? []).flatMap((q) => [q.q, q.teach, ...q.options.map((o) => o.label)]),
 ];
 
 /**
@@ -100,7 +102,42 @@ const seeBoards = (l: LessonDef) =>
   l.ideas.flatMap((c) => (c.scene ? [JSON.stringify(c.scene), ...(c.scene.kind === 'cases' ? [JSON.stringify({ kind: 'boxes', boxes: c.scene.boxes, rule: c.scene.rule })] : [])] : []));
 
 /** Every player-facing string of a key-idea card: its body, and a worked case's lines and buttons. */
-const cardText = (c: LessonDef['ideas'][number]): string[] => [...c.body, ...(c.scene?.kind === 'cases' ? (c.scene.steps ?? []).flatMap((st) => [st.say, st.label]) : [])];
+const cardText = (c: LessonDef['ideas'][number]): string[] => [
+  ...c.body,
+  ...(c.scene?.kind === 'cases' ? (c.scene.steps ?? []).flatMap((st) => [st.say, st.label]) : []),
+  ...(c.scene?.kind === 'contrast' ? [...c.scene.pairs.flatMap((p) => [p.world, p.who, p.says, p.because, ...(p.then ? [p.then] : [])]), ...(c.scene.ask ? [c.scene.ask.q, c.scene.ask.a] : [])] : []),
+  ...observatorySceneText(c.scene),
+];
+
+/** The words a Pattern Observatory picture shows: what is stated, the claim, the rules, the captions and the steps. */
+function observatorySceneText(scene: Scene | undefined): string[] {
+  if (!scene) return [];
+  const out: string[] = [];
+  if ('steps' in scene) for (const st of scene.steps ?? []) out.push(st.say, st.label);
+  switch (scene.kind) {
+    case 'chain': out.push(scene.stated); break;
+    case 'staircase': out.push(scene.construction, scene.tag ?? '', scene.jump ?? '', ...(scene.head ?? []), ...(scene.rowName ?? [])); break;
+    case 'machine': out.push(scene.stated ?? '', scene.rule ?? '', ...(scene.candidates ?? []), ...(scene.ruledOut ?? []).map((r) => r.rule)); break;
+    case 'clock': for (const f of [scene, ...(scene.pair ? [scene.pair] : [])]) out.push(...f.cycle, f.start ?? '', f.unit ?? '', ...(f.captions ?? [])); break;
+    case 'mirror': out.push(scene.caption ?? ''); break;
+    case 'matrix':
+      out.push(scene.rowRule ?? '', scene.colRule ?? '', scene.allRule ?? '');
+      if (scene.heads) out.push(...scene.heads.rows, ...scene.heads.cols);
+      for (const t of (scene.tiles ?? []).flat()) out.push(t ?? '');
+      for (const f of scene.frames ?? []) out.push(f.filledText ?? '', f.trial?.text ?? '');
+      break;
+    case 'bridge': out.push(scene.a, scene.b, scene.c, scene.d ?? '', scene.relation, ...(scene.options ?? []), ...(scene.frames ?? []).flatMap((f) => [f.d ?? '', f.look ?? ''])); break;
+    case 'lantern':
+      out.push(scene.stated ?? '');
+      for (const f of [scene, ...(scene.frames ?? [])]) {
+        out.push(f.claim ?? '', ...(f.rows ?? []).flatMap((r) => [r.label, r.tag ?? '']), ...(f.claims ?? []).map((c) => c.text), ...(f.chain ?? []).map((l) => l.text));
+      }
+      break;
+    default: break;
+  }
+  // A label or a single word has no end mark: give it one, so the sentence count stays honest.
+  return out.filter(Boolean).map((t) => (/[.!?]$/.test(t.trim()) ? t : `${t}.`));
+}
 
 /** Shape rules for a worked case card. */
 function caseProblems(c: TeachCase, where: string): string[] {
@@ -270,19 +307,21 @@ function prose(items: Item[]): string {
     if (it.kind === 'choose') parts.push(...Object.values(it.whyWrong ?? {}));
     if (it.kind === 'tapall') parts.push(...(it.diagnose ?? []).map((d) => d.message));
     if (it.kind === 'multi') parts.push(...Object.values(it.pickTips ?? {}), ...Object.values(it.missTips ?? {}));
+    if (it.kind === 'number') parts.push(...Object.values(it.whyWrong ?? {}), ...Object.values(it.feedback ?? {}).flatMap((f) => [f.headline, ...f.detail]));
+    parts.push(...(it.hints ?? []));
   }
   return parts.join('\n');
 }
 
 describe.each(built.map((s) => [s.n, s] as const))('stop %i', (_n, stop) => {
-  it('has 3-7 lessons with 3-6 key-idea cards each', () => {
+  it('has 3-7 lessons with 3-7 key-idea cards each', () => {
     expect(stop.lessons.length).toBeGreaterThanOrEqual(3);
     expect(stop.lessons.length).toBeLessThanOrEqual(7);
     stop.lessons.forEach((l, i) => {
       expect(l.id).toBe(`s${stop.n}.l${i + 1}`);
       if (!lessonsOf(stop).includes(l)) return;
       expect(l.ideas.length, l.id).toBeGreaterThanOrEqual(3);
-      expect(l.ideas.length, l.id).toBeLessThanOrEqual(6);
+      expect(l.ideas.length, l.id).toBeLessThanOrEqual(7);
       for (const c of l.ideas) expect(c.body.join(' ').trim().length, `${l.id} ${c.title}`).toBeGreaterThan(0);
     });
     expect(stop.check).toBeTypeOf('function');
@@ -352,6 +391,8 @@ describe.each(built.map((s) => [s.n, s] as const))('stop %i: See -> Do -> Quiz',
       // A board placed right after a card (afterCard) is that card's board, so the Do sits next to its See.
       for (const st of l.drill!) {
         if (st.afterCard === undefined || st.twin) continue;
+        // A distinction board may follow its contrast card with a board of its own.
+        if (st.distinction && l.ideas[st.afterCard]?.distinction === st.distinction) continue;
         expect(JSON.stringify(l.ideas[st.afterCard]?.scene), `${st.id} after card ${st.afterCard + 1}`).toBe(JSON.stringify(st.scene));
       }
       const text = l.drill!.flatMap(drillText).filter(Boolean).join('\n');
@@ -380,9 +421,53 @@ describe.each(built.map((s) => [s.n, s] as const))('stop %i: See -> Do -> Quiz',
   });
 });
 
-it('the Journey lists 13 stops in order; stops 1-7 are built', () => {
-  expect(STOPS.map((s) => s.n)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+it('the Journey lists 13 stops in order, then the four Observatory rings; stops 1-7 are built, 8-13 are coming', () => {
+  expect(STOPS.map((s) => s.n)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]);
   expect(STOPS.map((s) => s.id)).toEqual(STOPS.map((s) => `s${s.n}`));
   expect(STOPS.slice(0, 7).every((s) => s.ready) || only !== null || process.env.ALLOW_PLACEHOLDERS === '1').toBe(true);
-  expect(STOPS.slice(7).some((s) => s.ready)).toBe(false);
+  expect(STOPS.filter((s) => s.n >= 8 && s.n <= 13).some((s) => s.ready)).toBe(false);
+  // The Observatory rings open from the start and open their places on skills, never on the stop before them.
+  for (const s of STOPS.filter((x) => x.n >= 14)) {
+    expect(s.observatory, s.id).toBeTruthy();
+    expect(s.requires, s.id).toEqual([]);
+    expect(s.lessonOrder, s.id).toBe('free');
+  }
+});
+
+
+/**
+ * Distinctions (docs/CONTENT_GUIDE.md, "Distinctions"): two ideas a learner can merge into one must be taught apart
+ * before the quiz. A lesson that declares one has a card naming it; where it is first taught, that card shows a
+ * contrast picture and a board exercises it; a lesson that relies on an earlier lesson's teaching says so and still
+ * reminds. Every case board carries the misconceptions it can catch and its "I'm confused" questions.
+ */
+describe.each(built.map((s) => [s.n, s] as const))('stop %i: distinctions taught apart', (_n, stop) => {
+  it('every declared distinction has its card (and, where first taught, a contrast picture and a board); every case board catches mix-ups', () => {
+    for (const l of lessonsOf(stop)) {
+      for (const d of l.distinctions ?? []) {
+        const card = l.ideas.find((c) => c.distinction === d.id);
+        expect(card, `${l.id}: a card for ${d.id}`).toBeDefined();
+        expect(card!.body.join(' ').length, `${l.id}: ${d.id} card says something`).toBeGreaterThan(20);
+        if (d.taughtIn) {
+          const earlier = stop.lessons.find((x) => x.id === d.taughtIn);
+          expect(earlier, `${l.id}: ${d.id} taught in ${d.taughtIn}, which is in this stop`).toBeDefined();
+          expect(stop.lessons.indexOf(earlier!), `${l.id}: ${d.taughtIn} comes earlier`).toBeLessThan(stop.lessons.indexOf(l));
+          expect(earlier!.distinctions?.some((x) => x.id === d.id && !x.taughtIn), `${d.taughtIn} teaches ${d.id} itself`).toBe(true);
+        } else {
+          expect(card!.scene?.kind, `${l.id}: ${d.id} is taught with a contrast picture`).toBe('contrast');
+          const boards = [...(l.drill ?? []), ...l.practice(createRng(1)).flatMap((it) => (it.workFirst ? [it.workFirst] : []))];
+          expect(boards.some((b) => b.distinction === d.id), `${l.id}: a board exercises ${d.id}`).toBe(true);
+        }
+      }
+      for (const st of l.drill ?? []) {
+        if (st.layout !== 'cases') continue;
+        expect(st.misconceptions?.length ?? 0, `${st.id}: a case board names the mix-ups it can catch`).toBeGreaterThan(0);
+        expect(st.confused?.length ?? 0, `${st.id}: a case board has I’m confused questions`).toBeGreaterThan(0);
+        expect(st.distinction, `${st.id}: a case board names its distinction`).toBeTruthy();
+      }
+      // A board or card that names a distinction belongs to a lesson that declares it.
+      for (const st of l.drill ?? []) if (st.distinction) expect((l.distinctions ?? []).some((d) => d.id === st.distinction), `${st.id}: ${l.id} declares ${st.distinction}`).toBe(true);
+      for (const c of l.ideas) if (c.distinction) expect((l.distinctions ?? []).some((d) => d.id === c.distinction), `${l.id}: declares ${c.distinction}`).toBe(true);
+    }
+  });
 });

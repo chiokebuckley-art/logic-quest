@@ -73,12 +73,13 @@ function MyProgress() {
   if (!save) return null;
   const counts = stopCounts(save.stops);
   const wins = firstTryWinsThisWeek(save.stats, today);
-  const views = viewAll(STOPS, save.stops, today);
+  const views = viewAll(STOPS, save.stops, today).filter(({ stop }) => !stop.observatory);
   const dots = views.map(({ stop, view }) => ({ stop, dot: pathDot(view.status) }));
+  const main = STOPS.filter((s) => !s.observatory);
   const here = dots.find((d) => d.dot === 'current');
   const minutes = minutesOn(save.active, today);
   const open = Object.keys(save.notebook ?? {}).length;
-  const summary = `${counts.mastered ? `${counts.mastered} mastered, ` : ''}${counts.lockedIn} ${counts.lockedIn === 1 ? 'stop' : 'stops'} locked in, ${counts.passed} passed${here ? `, you are on Stop ${here.stop.n}` : ''}, out of ${STOPS.length}`;
+  const summary = `${counts.mastered ? `${counts.mastered} mastered, ` : ''}${counts.lockedIn} ${counts.lockedIn === 1 ? 'stop' : 'stops'} locked in, ${counts.passed} passed${here ? `, you are on Stop ${here.stop.n}` : ''}, out of ${main.length}`;
 
   return (
     <div className="stack" style={{ gap: 14 }}>
@@ -186,7 +187,7 @@ function GrownUps() {
       <div className="tiles">
         <Tile value={totalMinutes(save.active, today, range)} label="minutes" />
         <Tile value={rate === null ? '–' : `${rate}%`} label="right first try" />
-        <Tile value={`${counts.lockedIn} / ${STOPS.length}`} label={counts.mastered ? `stops locked in (${counts.mastered} mastered)` : 'stops locked in'} />
+        <Tile value={`${counts.lockedIn} / ${STOPS.filter((s) => !s.observatory).length}`} label={counts.mastered ? `stops locked in (${counts.mastered} mastered)` : 'stops locked in'} />
       </div>
 
       <section className="panel soft" aria-labelledby="nb-title" style={{ gap: 6 }}>

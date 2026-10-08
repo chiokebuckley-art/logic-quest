@@ -18,14 +18,21 @@
  * engine. A miss gets new examples from fresh() below.
  */
 import {
+  BACK_FORTH_CONFUSED,
+  BOX_VS_KID,
+  BOX_VS_KID_CONFUSED,
   CANT,
   EVERYDAY,
   FANTASY,
+  LINE_WORDS,
+  LINK_WORDS,
   SKIN_IDS,
   cardBoard,
   cardCast,
   cardGrid,
   clueText,
+  crossContrast,
+  crossMixup,
   enoughPuzzle,
   gridBoard,
   gridPuzzle,
@@ -40,7 +47,7 @@ import {
   type MarkClue,
   type SkinId,
 } from '../engine/puzzles/grid';
-import type { Choice, DrillStep, GridClue, Item, LessonDef, Rng, Scene, StopDef } from '../engine/types';
+import type { Choice, DrillStep, GridClue, IdeaCard, Item, LessonDef, Rng, Scene, StopDef } from '../engine/types';
 
 /** Skins for a practice set: everyday, fantasy, abstract, then any, in a shuffled order. */
 function practiceSkins(rng: Rng, count: number): SkinId[] {
@@ -82,6 +89,15 @@ const petGrid = (marks: Partial<Record<'mia' | 'leo' | 'ava', Partial<Record<'ca
 const PET_CAST = cardCast(['Mia', 'Leo', 'Ava'], [{ cat: 'pet', values: ['cat', 'dog', 'fish'] }]);
 const TWO_CAST = cardCast(['Mia', 'Leo', 'Ava'], [{ cat: 'pet', values: ['cat', 'dog', 'fish'] }, { cat: 'snack', values: ['apples', 'popcorn', 'grapes'] }]);
 const PAIR_CAST = cardCast(['Mia', 'Leo'], [{ cat: 'lunch', values: ['apple', 'bread'] }]);
+/** Lesson 2's snack grid: Mia’s cross is for apples, not grapes (box-vs-kid). */
+const SNACK_CAST = cardCast(['Mia', 'Leo', 'Ava'], [{ cat: 'snack', values: ['apples', 'popcorn', 'grapes'] }]);
+
+/**
+ * Lesson 2's contrast, computed by the engine (crossContrast): “Who must eat grapes?” on two grids. Leo has a cross in
+ * the grapes column in both; Mia’s cross is under apples in the first (it does not count: Mia and Ava are left) and under
+ * grapes in the second (it does: only Ava is left).
+ */
+export const L2_CROSS = crossContrast(SNACK_CAST, { c: 'snack', v: 'grapes', line: 'leo', other: 'mia', off: 'apples' });
 
 /** Card scenes, exported so the tests can check each card's claim by brute force. */
 export const CARD_GRIDS = {
@@ -93,6 +109,8 @@ export const CARD_GRIDS = {
   rowLeft: petGrid({ leo: { cat: 'no', dog: 'no' } }, 'Two ✗s in Leo’s row. The last box, Leo – fish, gets the ✓.'),
   colLeft: petGrid({ mia: { fish: 'no' }, ava: { fish: 'no' } }, 'Two ✗s in the fish column. The last box, Leo – fish, gets the ✓.'),
   notSoFast: petGrid({ leo: { cat: 'no' } }, 'One ✗ in Leo’s row. Two boxes are still empty, so you can’t tell yet.'),
+  /** Lesson 2, “A cross is about one box”: the first grid of the contrast, Leo ✗ grapes and Mia ✗ apples. */
+  crossFor: cardGrid(SNACK_CAST, 0, L2_CROSS.marks[0], 'Mia’s cross is for apples, not grapes.') as GridScene,
   spreadRow: petGrid({ mia: { cat: 'yes', dog: 'no', fish: 'no' } }),
   spreadBoth: petGrid({ mia: { cat: 'yes', dog: 'no', fish: 'no' }, leo: { cat: 'no' }, ava: { cat: 'no' } }),
   spreadAgain: petGrid({ mia: { cat: 'yes', dog: 'no', fish: 'no' }, leo: { cat: 'no', dog: 'no' }, ava: { cat: 'no' } }),
@@ -116,6 +134,8 @@ const said = (cl: GridClue) => clueText(cl.t === 'link' || cl.t === 'notLink' ? 
 const clueScene = (clues: string[]): Scene => ({ kind: 'clues', clues });
 /** One box to mark: Yes (✓), No (✗) or Can’t tell yet (it stays empty). */
 const box = (p: string, c: string, v: string): BoardAsk => ({ k: 'box', p, c, v });
+/** One box a linking clue carries (clue k of the row, 0-based): its reason names the link and the mark it carries. */
+const carryBox = (p: string, c: string, v: string, via: number): BoardAsk => ({ k: 'box', p, c, v, via });
 /** Every box of one kid's row, to mark. */
 const rowBoxes = (p: string, c: string, vs: readonly string[]): BoardAsk[] => vs.map((v) => box(p, c, v));
 
@@ -123,12 +143,20 @@ const rowBoxes = (p: string, c: string, vs: readonly string[]): BoardAsk[] => vs
 const L5_PROVE_CLUE = is('mia', 'pet', 'dog');
 const L5_TELL_CLUE = isnt('mia', 'pet', 'fish');
 const L5_LIST_CLUES = [isnt('mia', 'pet', 'fish'), either('leo', 'pet', 'cat', 'dog'), is('mia', 'pet', 'dog')];
+/**
+ * Lesson 4's “Back and forth” clues: neither part is known. Clue 1 crosses out Mia – fish (an “or” clue), clue 2 carries
+ * that worked-out cross to Mia – popcorn, clue 3 leaves Ava as the last kid for popcorn, and clue 2 carries her check
+ * mark back to Ava – fish.
+ */
+const L4_BF_CLUES = [either('mia', 'pet', 'cat', 'dog'), link('fish', 'popcorn'), isnt('leo', 'snack', 'popcorn')];
 export const CARD_CLUES = {
   /** Lesson 1, “Turn clues into marks”. */
   marks: clueScene([said(is('mia', 'pet', 'cat')), said(isnt('leo', 'pet', 'dog'))]),
   /** Lesson 4, “A linking clue” and “A ‘not’ link”. */
   link: clueScene([said(link('dog', 'popcorn'))]),
   notLink: clueScene([said(notLink('dog', 'popcorn'))]),
+  /** Lesson 4, “Back and forth”. */
+  backForth: clueScene(L4_BF_CLUES.map((cl) => clueText(TWO_CAST, cl))),
   /** Lesson 5, “One clue can prove a lot”, “Can you tell yet?” and “Use only the clues you are told”. */
   prove: clueScene([said(L5_PROVE_CLUE)]),
   tell: clueScene([said(L5_TELL_CLUE)]),
@@ -208,19 +236,81 @@ export const L1_OR: DrillStep = cardBoard(PET_CAST, {
 
 const NOT_SO_FAST = marksAsClues('pet', CARD_GRIDS.notSoFast.marks);
 
+/** The two snack grids of “Which cross counts?”, as the facts each board row draws. */
+const CROSS_FACTS = L2_CROSS.marks.map((m) => marksAsClues('snack', m));
+/** Mia’s cross under apples, the one that does not count for grapes. */
+const CROSS_MIXUP = crossMixup(SNACK_CAST, 'snack', { p: 'mia', v: 'apples' }, { v: 'grapes' });
+
 /**
- * Lesson 2: the “Not so fast” grid. Leo’s row is shown (two empty boxes: Can’t tell yet). The learner adds a ✗,
- * counts again and taps the last box (Leo – dog ✓), then counts the cat column (two left: both stay empty), then adds
- * a ✗ and taps the last box (Mia – cat ✓). No “which” or “who” buttons: the learner marks the boxes themselves.
+ * Lesson 2's contrast card (box-vs-kid): the same question on two grids, and only where Mia’s cross sits changed. The
+ * panels are text (Scene 'contrast'); their truths and last lines come from the engine (crossContrast).
  */
-export const L2_COUNT: DrillStep = cardBoard(PET_CAST, {
+export const L2_CROSS_CARD: IdeaCard = {
+  title: 'Which cross counts?',
+  distinction: BOX_VS_KID.id,
+  scene: L2_CROSS.scene,
+  body: [
+    'Here are two grids, told in words. Both ask: who must eat grapes? In both, Leo has a cross for grapes.',
+    'Only one thing changed: where Mia’s cross is. Only a cross in the grapes column counts for grapes. A cross under another snack is about that snack.',
+  ],
+};
+
+/**
+ * Lesson 2's distinction board (box-vs-kid), right after the contrast card: the two grids of the contrast, the same
+ * question each time (who must eat grapes?). The learner counts the grapes column and marks Mia’s and Ava’s boxes. In the
+ * first grid Mia’s cross is under apples: two boxes stay empty (Can’t tell yet). In the second it is under grapes: Ava –
+ * grapes is the last box. A tap that counts Mia’s apples cross for grapes names the mix-up first.
+ */
+export const L2_CROSS_DO: DrillStep = {
+  ...cardBoard(SNACK_CAST, {
+    id: 's4.l2-do-cross',
+    title: 'Which cross counts?',
+    body: [
+      'These are the two grids from the card. The question is the same: who must eat grapes?',
+      'Count the empty boxes in the grapes column. Then mark each box Yes (✓), No (✗) or Can’t tell yet.',
+    ],
+    scene: L2_CROSS.scene,
+    rows: (['first', 'second'] as const).map((id, k) => ({
+      id,
+      label: `${k === 0 ? 'First' : 'Second'} grid: ${CROSS_FACTS[k].map((cl) => clueText(SNACK_CAST, cl)).join(' ')}`,
+      basis: { facts: CROSS_FACTS[k] },
+      ask: [{ k: 'count', c: 'snack', v: 'grapes' } as BoardAsk, box('mia', 'snack', 'grapes'), box('ava', 'snack', 'grapes')],
+      note: k === 0
+        ? 'Mia’s cross is under apples, so it does not count for grapes. Mia and Ava could each eat grapes, so you can’t tell yet.'
+        : 'Now Mia’s cross is under grapes. Only Ava – grapes is left, so Ava must eat grapes.',
+    })),
+    done: 'Right. Under apples, Mia’s cross said nothing about grapes. Under grapes, it crossed Mia out for grapes, and only Ava was left.',
+  }),
+  afterCard: 4,
+  distinction: BOX_VS_KID.id,
+  scaffold: 'full',
+  words: LINE_WORDS,
+  // Mia out for grapes, Ava the last box, or a count of 1: each one counts Mia’s apples cross in the grapes column.
+  misconceptions: [
+    { id: 'cross-elsewhere', when: 'picks', picks: { 'first-mia-grapes': 'no' }, text: CROSS_MIXUP },
+    { id: 'kid-crossed-out', when: 'picks', picks: { 'first-ava-grapes': 'yes' }, text: CROSS_MIXUP },
+    { id: 'count-elsewhere', when: 'picks', picks: { 'first-count': '1' }, text: CROSS_MIXUP },
+  ],
+  confused: BOX_VS_KID_CONFUSED,
+};
+
+/**
+ * Lesson 2: the “Not so fast” grid. Leo’s row is shown (two empty boxes: Can’t tell yet), with its line in words over it.
+ * The learner adds a ✗, counts again and taps the last box (Leo – dog ✓), then counts the cat column (two left: both
+ * stay empty), then adds a ✗ and taps the last box (Mia – cat ✓). Then two rows with a cross off the line: a ✗ under the
+ * dog in Mia’s row does not count for the cat column (still two left), and Leo’s ✗ under the cat does not count for
+ * Mia’s row (three left). No “which” or “who” buttons: the learner marks the boxes themselves.
+ */
+const L2_COUNT_BOARD = cardBoard(PET_CAST, {
   id: 's4.l2-do',
   title: 'Count the empty boxes',
   body: [
     'This is the grid from “Not so fast.” Leo’s row is checked for you.',
     'Now add one ✗ at a time and count the empty boxes. Mark each box Yes (✓), No (✗) or Can’t tell yet (it stays empty). When one box is left, it gets the ✓.',
+    'Count only the boxes of the line you look at. A ✗ in another line does not count.',
   ],
   scene: CARD_GRIDS.notSoFast,
+  lines: true,
   rows: [
     {
       id: 'leo-card',
@@ -251,9 +341,35 @@ export const L2_COUNT: DrillStep = cardBoard(PET_CAST, {
       ask: [box('ava', 'pet', 'cat'), { k: 'count', c: 'pet', v: 'cat' }, box('mia', 'pet', 'cat')],
       note: 'Only Mia – cat is empty now. It is the last box in the cat column, so it gets the ✓. Mia has the cat.',
     },
+    {
+      id: 'cat-mia-dog',
+      label: `Back to the card’s grid. Add a ✗: ${said(isnt('mia', 'pet', 'dog'))}`,
+      basis: { facts: NOT_SO_FAST, clues: [isnt('mia', 'pet', 'dog')] },
+      ask: [{ k: 'count', c: 'pet', v: 'cat' }, box('mia', 'pet', 'cat')],
+      note: 'Mia’s new ✗ is under the dog, not the cat. The cat column still has two empty boxes.',
+    },
+    {
+      id: 'mia-row',
+      label: 'Back to the card’s grid. Look across Mia’s row.',
+      basis: { facts: NOT_SO_FAST },
+      ask: [{ k: 'count', c: 'pet', p: 'mia' }],
+      note: 'Leo’s ✗ is under the cat, but it is in Leo’s row. It says nothing about Mia. All three boxes in Mia’s row are empty.',
+    },
   ],
-  done: 'Right. One empty box left: it gets the ✓. Two or more: you can’t tell yet.',
+  done: 'Right. One empty box left: it gets the ✓. Two or more: you can’t tell yet. A ✗ in another line does not count.',
 });
+export const L2_COUNT: DrillStep = {
+  ...L2_COUNT_BOARD,
+  scaffold: 'full',
+  words: LINE_WORDS,
+  // A cross off the line counted in it: the cat column after Mia’s ✗ under the dog, and Mia’s row with Leo’s ✗ under the cat.
+  misconceptions: [
+    { id: 'cross-elsewhere', when: 'picks', picks: { 'cat-mia-dog-count': '1' }, text: crossMixup(PET_CAST, 'pet', { p: 'mia', v: 'dog' }, { v: 'cat' }) },
+    { id: 'kid-crossed-out', when: 'picks', picks: { 'cat-mia-dog-mia-cat': 'no' }, text: crossMixup(PET_CAST, 'pet', { p: 'mia', v: 'dog' }, { v: 'cat' }) },
+    { id: 'cross-other-row', when: 'picks', picks: { 'mia-row-count': '2' }, text: crossMixup(PET_CAST, 'pet', { p: 'leo', v: 'cat' }, { p: 'mia' }) },
+  ],
+  confused: BOX_VS_KID_CONFUSED,
+};
 
 const SPREAD_ROW = marksAsClues('pet', CARD_GRIDS.spreadRow.marks);
 
@@ -340,7 +456,7 @@ export const L4_NOT: DrillStep = cardBoard(TWO_CAST, {
   id: 's4.l4-do-not',
   title: 'A “not” link',
   body: [
-    'The grid shows each kid’s pet. A “not” link crosses out one kid. Then look at who is left.',
+    'The grid shows each kid’s pet. A “not” link crosses out one kid for one snack. Then look at who is left.',
     'Mark each box Yes (✓), No (✗) or Can’t tell yet (it stays empty). When one box is left, it gets the ✓.',
   ],
   scene: CARD_GRIDS.petsKnown,
@@ -358,17 +474,17 @@ export const L4_NOT: DrillStep = cardBoard(TWO_CAST, {
       label: `Add clue 2: ${said(notLink('cat', 'popcorn'))}`,
       basis: { facts: PETS_KNOWN, clues: [notLink('dog', 'popcorn'), notLink('cat', 'popcorn')] },
       ask: [box('mia', 'snack', 'popcorn'), box('ava', 'snack', 'popcorn')],
-      note: 'Clue 2 crosses out Mia. Ava – popcorn is the last box, so Ava eats popcorn.',
+      note: 'Clue 2 crosses out Mia for popcorn. Ava – popcorn is the last box, so Ava eats popcorn.',
     },
     {
       id: 'not-3',
       label: `A new clue on its own: ${said(notLink('fish', 'grapes'))}`,
       basis: { facts: PETS_KNOWN, clues: [notLink('fish', 'grapes')] },
       ask: [box('ava', 'snack', 'grapes'), box('mia', 'snack', 'grapes'), box('leo', 'snack', 'grapes')],
-      note: 'The clue crosses out Ava. Mia or Leo could eat grapes, so you can’t tell yet.',
+      note: 'The clue crosses out Ava for grapes. Mia or Leo could eat grapes, so you can’t tell yet.',
     },
   ],
-  done: 'Right. A “not” link crosses out one kid. With one kid left, you can tell. With two left, you can’t tell yet.',
+  done: 'Right. A “not” link crosses out one kid for one snack. With one kid left, you can tell. With two left, you can’t tell yet.',
 });
 
 /** Lesson 4: “Links work both ways.” The snacks are known; the learner fills the pet part, reading each link from its snack end. */
@@ -389,6 +505,71 @@ export const L4_BACK: DrillStep = gridBoard(TWO_CAST, {
   notes: { ava: 'Ava eats popcorn, and clue 1 says the kid with the dog eats popcorn. So Ava has the dog.' },
   done: 'Right. Mia eats grapes, so Mia has the cat. Then the fish was the last box in Leo’s row.',
 });
+
+/**
+ * Lesson 4: “Back and forth.” Neither part is known. The worked case is shown: clue 1 (an “or” clue) crosses out Mia –
+ * fish, and clue 2 carries that worked-out cross to Mia – popcorn. The learner goes on: clue 3’s cross, the last box in
+ * the popcorn column (Ava, with Mia’s carried cross counted), then carries Ava’s new check mark back across clue 2. Each
+ * carry names its link and the mark it carries (BoardAsk via), computed and checked by the engine.
+ */
+const [BF_OR, BF_LINK, BF_NOT] = L4_BF_CLUES;
+const bf = (cl: GridClue) => clueText(TWO_CAST, cl);
+export const L4_BACK_FORTH: DrillStep = {
+  ...cardBoard(TWO_CAST, {
+    id: 's4.l4-do-back-forth',
+    title: 'Back and forth',
+    body: [
+      'These are the clues from “Back and forth.” Neither part of the grid is filled in yet.',
+      'The first two rows are shown. Each row adds one step to the rows before it. Mark the boxes in your rows.',
+    ],
+    scene: CARD_CLUES.backForth,
+    rows: [
+      { id: 'bf-1', label: `Clue 1: ${bf(BF_OR)}`, given: true, basis: { clues: [BF_OR] }, ask: [box('mia', 'pet', 'fish')], note: 'Clue 1 leaves out the fish, so Mia – fish gets a ✗.' },
+      {
+        id: 'bf-2',
+        label: `Add clue 2: ${bf(BF_LINK)}`,
+        given: true,
+        basis: { clues: [BF_OR, BF_LINK] },
+        ask: [carryBox('mia', 'snack', 'popcorn', 1)],
+        note: 'Mia is not the kid with the fish, so clue 2 carries a ✗ to Mia – popcorn.',
+      },
+      {
+        id: 'bf-3',
+        label: `Add clue 3: ${bf(BF_NOT)}`,
+        basis: { clues: L4_BF_CLUES },
+        ask: [box('leo', 'snack', 'popcorn'), box('ava', 'snack', 'popcorn')],
+        note: 'Mia and Leo can’t eat popcorn. Ava – popcorn is the last box, so Ava eats popcorn.',
+      },
+      {
+        id: 'bf-4',
+        label: 'Carry back across clue 2.',
+        basis: { clues: L4_BF_CLUES },
+        ask: [carryBox('ava', 'pet', 'fish', 1)],
+        note: 'Ava eats popcorn, so clue 2 carries a ✓ back to Ava – fish. Ava has the fish.',
+      },
+    ],
+    done: 'Right. A cross went across clue 2, and a check mark came back. That is back and forth.',
+  }),
+  scaffold: 'full',
+  words: LINK_WORDS,
+  steps: ['Clue marks', 'Only one left', 'Again: carry across links'],
+  misconceptions: [
+    {
+      id: 'carried-not-counted',
+      when: 'picks',
+      // Clue 3’s cross counted, yet Ava – popcorn left empty: only Mia’s carried cross was not counted.
+      picks: { 'bf-3-leo-popcorn': 'no', 'bf-3-ava-popcorn': CANT },
+      text: 'You may be treating “the marks the clues say” and “all the marks you know” as the same thing. They are two different things: you also know the marks you worked out, like a carried cross. Count every cross in the popcorn column, carried ones too. Mia – popcorn and Leo – popcorn have one, so Ava – popcorn is the last box.',
+    },
+    {
+      id: 'link-used-up',
+      when: 'picks',
+      picks: { 'bf-4-ava-fish': CANT },
+      text: 'You may be treating “I read clue 2” and “clue 2 is used up” as the same thing. They are two different things: a linking clue is never used up. Ava now eats popcorn, so read clue 2 again and carry that mark back.',
+    },
+  ],
+  confused: BACK_FORTH_CONFUSED,
+};
 
 /** One “Only clue” row of lesson 5's first board: could Leo still have the dog, with that clue alone? */
 const onlyClue = (id: string, cl: GridClue, given = false, note?: string) => ({
@@ -444,7 +625,7 @@ export const L5_ENOUGH: DrillStep = cardBoard(PET_CAST, {
       { k: 'howMany', c: 'pet', v, later: L5_LIST_CLUES.slice(2) } as BoardAsk,
     ],
     ...(v === 'fish'
-      ? { given: true, note: 'Clue 1 crosses out Mia. Clue 2 leaves out the fish for Leo. Only Ava is left, so you can tell: Ava has the fish.' }
+      ? { given: true, note: 'Clue 1 crosses out Mia for the fish. Clue 2 leaves out the fish for Leo. Only Ava is left, so you can tell: Ava has the fish.' }
       : { note: 'Mia and Leo could each have the cat. So you can’t tell yet, even though clue 3 would tell you.' }),
   })),
   done: 'Right. One kid left: you can tell. Two or more: you can’t tell yet. A clue you were told not to use does not count.',
@@ -554,19 +735,36 @@ const lessons: LessonDef[] = [
         ],
       },
       {
+        title: 'A cross is about one box',
+        scene: CARD_GRIDS.crossFor,
+        body: [
+          'A cross means no for one box: one kid and one thing. It does not cross out the kid for everything.',
+          'Who must eat grapes? Look down the grapes column. Leo has a cross there, so Leo does not eat grapes.',
+          'Mia has a cross too, but it is under apples. It says Mia does not eat apples. It says nothing about grapes.',
+          'So Mia and Ava could each eat grapes. You can’t tell yet.',
+        ],
+      },
+      L2_CROSS_CARD,
+      {
         title: 'Count the empty boxes',
         body: [
-          'Before you put a ✓, count the empty boxes in its row or its column.',
+          'First find the line the question is about. Who has the fish? Look down the fish column. Which pet does Leo have? Look across Leo’s row.',
+          'Before you put a ✓, count the empty boxes in that row or column. Only the crosses in that line matter.',
           'Is just one box left? Then it gets the ✓.',
           'Are two or more left? Then you can’t tell from the boxes you counted. Look at the other rows and columns too.',
         ],
       },
     ],
-    drill: [L2_COUNT],
+    // The Do for box-vs-kid sits right after its contrast card; the count board comes after the last card.
+    drill: [L2_CROSS_DO, L2_COUNT],
+    distinctions: [BOX_VS_KID],
+    // Three right on the first try, one of them a “Can’t tell yet” grid with a cross off the line (the trap).
+    pass: { firstTry: 3, include: [{ tag: 'cant-tell', label: 'a “Can’t tell yet” grid' }] },
+    // Try 1 is the first column quiz, marked on its own board first (Item.workFirst): find the line, then count.
     practice: (rng) => {
       const skins = practiceSkins(rng, 4);
       return distinct([
-        () => onlyOnePuzzle(rng, { id: 'l2-1', skin: skins[0], mode: 'col', n: 3 }).item,
+        () => onlyOnePuzzle(rng, { id: 'l2-1', skin: skins[0], mode: 'col', n: 3, work: true }).item,
         () => onlyOnePuzzle(rng, { id: 'l2-2', skin: skins[1], mode: 'row' }).item,
         () => onlyOnePuzzle(rng, { id: 'l2-3', skin: skins[2], mode: 'cant' }).item,
         () => onlyOnePuzzle(rng, { id: 'l2-4', skin: skins[3], mode: rng.pick(['col', 'row', 'cant'] as const), n: 4 }).item,
@@ -662,9 +860,11 @@ const lessons: LessonDef[] = [
       {
         title: 'A “not” link',
         scene: CARD_CLUES.notLink,
+        // The reminder of box-vs-kid (taught in lesson 2): the ✗ is for one box, not for the whole kid.
+        distinction: BOX_VS_KID.id,
         body: [
           '“The kid with the dog does not eat popcorn” is a clue too.',
-          'If Leo has the dog, Leo’s popcorn box gets a ✗.',
+          'If Leo has the dog, Leo’s popcorn box gets a ✗. That ✗ is for popcorn only: Leo could still eat apples or grapes.',
           'But you still don’t know who eats popcorn. It could be Mia or Ava.',
         ],
       },
@@ -677,8 +877,24 @@ const lessons: LessonDef[] = [
           'You can start from either end of a link.',
         ],
       },
+      {
+        title: 'Back and forth',
+        scene: CARD_CLUES.backForth,
+        body: [
+          'A quiz grid starts with no part filled in. So work in a loop: clue marks, spread, only one left, carry across links. Then do it again.',
+          'Each time a kid gets a new check mark or cross, read the linking clues again. A link carries a cross too.',
+          'Here clue 1 leaves out the fish, so Mia – fish gets a cross. Mia is not the kid with the fish. So clue 2 gives Mia – popcorn a cross.',
+          'Stuck? Read the linking clues again. A linking clue may give you a new cross.',
+        ],
+      },
     ],
-    drill: [L4_LINK, L4_NOT, L4_BACK],
+    drill: [L4_LINK, L4_NOT, L4_BACK, L4_BACK_FORTH],
+    // “Who must eat popcorn?” counts the crosses in the popcorn column only (box-vs-kid, taught in lesson 2).
+    distinctions: [{ ...BOX_VS_KID, taughtIn: L2 }],
+    // Three right on the first try, one of them a whole two-part grid.
+    pass: { firstTry: 3, include: [{ tag: 'grid-two', label: 'a two-part grid' }] },
+    // Try 4 is the first two-part grid, worked step by step on its own board first (Item.workFirst). Try 5 is another
+    // two-part grid with no board, so a miss can still be made up on a two-part grid.
     practice: (rng) => {
       const skins = practiceSkins(rng, 4);
       const modes: LinkMode[] = rng.shuffle(['link', 'notLink2', 'notLink']);
@@ -686,7 +902,8 @@ const lessons: LessonDef[] = [
         () => linkPuzzle(rng, { id: 'l4-1', skin: skins[0], mode: modes[0] }).item,
         () => linkPuzzle(rng, { id: 'l4-2', skin: skins[1], mode: modes[1] }).item,
         () => linkPuzzle(rng, { id: 'l4-3', skin: skins[2], mode: modes[2] }).item,
-        () => gridPuzzle(rng, { id: 'l4-4', skin: skins[3], ncat: 2 }).item,
+        () => gridPuzzle(rng, { id: 'l4-4', skin: skins[3], ncat: 2, work: true }).item,
+        () => gridPuzzle(rng, { id: 'l4-5', skin: rng.pick(SKIN_IDS), ncat: 2 }).item,
       ]);
     },
   },
@@ -723,9 +940,11 @@ const lessons: LessonDef[] = [
       {
         title: 'Use only the clues you are told',
         scene: CARD_CLUES.list,
+        // The reminder of box-vs-kid (taught in lesson 2): each clue crosses a kid out for the fish only.
+        distinction: BOX_VS_KID.id,
         body: [
           'Some questions say which clues to use. Use only those, even when the list has more.',
-          'Use only clues 1 and 2. Who has the fish? Clue 1 crosses out Mia. Clue 2 says Leo has the cat or the dog, so it crosses out Leo too.',
+          'Use only clues 1 and 2. Who has the fish? Clue 1 crosses out Mia for the fish. Clue 2 says Leo has the cat or the dog, so it crosses out Leo for the fish too.',
           'Only Ava is left. So you can tell: Ava has the fish. Clue 3 was not needed.',
         ],
       },
@@ -733,12 +952,14 @@ const lessons: LessonDef[] = [
         title: 'Stuck? Read again',
         body: [
           'If no row or column is down to one empty box, read the clues again.',
-          'A linking clue or an “or” clue may give you a new ✗.',
+          'An “or” clue may give you a new ✗.',
           'Every puzzle here can be solved without guessing.',
         ],
       },
     ],
     drill: [L5_PROOF, L5_ENOUGH],
+    // “Can you tell who has the fish yet?” counts the crosses in the fish column only (box-vs-kid, taught in lesson 2).
+    distinctions: [{ ...BOX_VS_KID, taughtIn: L2 }],
     // Proofs stay in one-part grids: no board here tests a linking clue or a clue about the other part alone.
     practice: (rng) => {
       const skins = practiceSkins(rng, 4);

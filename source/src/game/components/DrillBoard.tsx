@@ -4,9 +4,10 @@
  * count, keep or reject). "Check my marks" names the first mismatch in plain words. A wrong mark stays as the
  * learner set it until they change it: nothing is filled in for them. Only a fully right board moves on.
  */
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { checkDrill, drillSpeech, rowDone, type DrillCheck } from '../../engine/drill';
 import { CaseBoard, firstPicked } from './CaseBoard';
+import { BecauseRows, CompareRows, ConfusedPanel, MethodSteps } from './Distinction';
 import type { DrillMark, DrillRow, DrillStep } from '../../engine/types';
 import { sceneSpeech, stopSpeaking } from '../speech';
 import { ReadAloudButton } from './ReadAloud';
@@ -32,6 +33,8 @@ export interface DrillBoardProps {
   settled?: boolean;
   /** A thinking board: marks are free, nothing is checked, and there is no button. */
   scratch?: boolean;
+  /** "I’m confused" was opened: it counts as help, like a hint. */
+  onHelp?(): void;
 }
 
 const isTruthy = (id: string) => id === 'true' || id === 'yes' || id === 'fit' || id === 'holds' || id === 'keep';
@@ -40,7 +43,7 @@ const isFalsy = (id: string) => id === 'false' || id === 'no' || id === 'not' ||
 /** A sentence answer (long options): a shown mark also lists the other options, crossed out. */
 const isSentenceMark = (m: DrillMark) => m.options.some((o) => o.label.length > 16);
 
-function GivenMark({ m }: { m: DrillMark }) {
+function GivenMark({ m, under }: { m: DrillMark; under?: ReactNode }) {
   const label = m.options.find((o) => o.id === m.answer)?.label ?? m.answer;
   const others = isSentenceMark(m) ? m.options.filter((o) => o.id !== m.answer) : [];
   return (
@@ -65,6 +68,7 @@ function GivenMark({ m }: { m: DrillMark }) {
           ))}
         </ul>
       )}
+      {under}
     </div>
   );
 }
@@ -78,9 +82,11 @@ interface TapMarkProps {
   /** The board is done: lock every mark. */
   locked: boolean;
   onPick(option: string): void;
+  /** Under the options: the two facts to compare (CompareRows), on a full scaffold or after a wrong check. */
+  under?: ReactNode;
 }
 
-function TapMark({ m, rowLabel, pick, wrong, locked, onPick }: TapMarkProps) {
+function TapMark({ m, rowLabel, pick, wrong, locked, onPick, under }: TapMarkProps) {
   const uid = useId().replace(/[^A-Za-z0-9_-]/g, '');
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
   const focusIdx = Math.max(0, m.options.findIndex((o) => o.id === pick));
@@ -129,6 +135,7 @@ function TapMark({ m, rowLabel, pick, wrong, locked, onPick }: TapMarkProps) {
           );
         })}
       </div>
+      {under}
     </div>
   );
 }
@@ -230,8 +237,10 @@ function DrillGrid({ step, picks, wrong, locked, onPick }: DrillGridProps) {
   );
 }
 
-export function DrillBoard({ step, readAloud, kicker = 'Do it', doneLabel = 'Next', embedded = false, autoFocus = true, onDone, onWrong, settled = false, scratch = false }: DrillBoardProps) {
+export function DrillBoard({ step, readAloud, kicker = 'Do it', doneLabel = 'Next', embedded = false, autoFocus = true, onDone, onWrong, settled = false, scratch = false, onHelp }: DrillBoardProps) {
   const [picks, setPicks] = useState<Record<string, string>>({});
+  const [confused, setConfused] = useState(false);
+  const confusedBtn = useRef<HTMLButtonElement>(null);
   const cases = step.layout === 'cases';
   /** A case board: the box whose case is shown. */
   const [picked, setPicked] = useState<number | null>(() => (cases ? firstPicked(step) : null));
@@ -241,6 +250,14 @@ export function DrillBoard({ step, readAloud, kicker = 'Do it', doneLabel = 'Nex
   const titleRef = useRef<HTMLHeadingElement>(null);
   const statusRef = useRef<HTMLParagraphElement>(null);
   const done = !!result?.done;
+  /** Full scaffold on a row board: the compare facts under every mark to tap, the comparison under every shown mark,
+   *  the need over a row's marks, and the method's steps (DrillStep.steps). Light: the facts only after a wrong check. */
+  const full = step.scaffold === 'full';
+  const words = step.words;
+  const needsLine = (needs: string) => (words?.needs === undefined ? `The rule needs ${needs}.` : words.needs ? `${words.needs} ${needs}` : needs);
+  /** Where the learner is on a row board: the first mark to tap that is still blank, in board order. */
+  const toTap = step.rows.flatMap((r) => r.marks.filter((m) => !m.given));
+  const stepAt = done ? (step.steps?.length ?? 0) : Math.min(Math.max(0, toTap.findIndex((m) => picks[m.id] === undefined) < 0 ? toTap.length : toTap.findIndex((m) => picks[m.id] === undefined)), Math.max(0, (step.steps?.length ?? 1) - 1));
 
   useEffect(() => {
     if (autoFocus) titleRef.current?.focus({ preventScroll: embedded });
@@ -318,6 +335,14 @@ export function DrillBoard({ step, readAloud, kicker = 'Do it', doneLabel = 'Nex
       </div>
       {step.columns && (
         <>
+          {full && step.steps && step.steps.length > 0 && <MethodSteps steps={step.steps} at={stepAt} label={step.stepsLabel} />}
+          {step.rows.some((r) => r.needs) && (
+            <ul className="play-list play-drill-needs-list" aria-label="What the rule needs">
+              {step.rows.filter((r) => r.needs && (full || r.marks.every((m) => m.given) || (!!result && r.marks.some((m) => result.wrong.includes(m.id))))).map((r) => (
+                <li key={r.id} className="play-drill-needs">{needsLine(r.needs!)}</li>
+              ))}
+            </ul>
+          )}
           <DrillGrid step={step} picks={picks} wrong={result?.wrong ?? []} locked={done} onPick={pickOne} />
           {step.rows.some((r) => r.note && (r.marks.every((m) => m.given) || done)) && (
             <ul className="play-list play-drill-notes">
@@ -340,11 +365,13 @@ export function DrillBoard({ step, readAloud, kicker = 'Do it', doneLabel = 'Nex
           onClear={clearRow}
         />
       )}
+      {!step.columns && !cases && full && step.steps && step.steps.length > 0 && <MethodSteps steps={step.steps} at={stepAt} label={step.stepsLabel} />}
       {!step.columns && !cases && <div className="play-drill-rows">
         {step.rows.map((row) => {
           const given = row.marks.every((m) => m.given);
           // A row turns teal only once the whole board is right: no checking a row by watching it.
           const finished = given || (done && rowDone(step, row.id, picks));
+          const rowFlagged = !!result && row.marks.some((m) => result.wrong.includes(m.id));
           return (
             <div key={row.id} className={`play-drill-row${given ? ' is-given' : ''}${!given && finished ? ' is-done' : ''}`}>
               <h4 className="play-drill-row-title">
@@ -352,6 +379,7 @@ export function DrillBoard({ step, readAloud, kicker = 'Do it', doneLabel = 'Nex
                 {!given && <span className="play-drill-tag play-drill-tag--you">Your turn</span>}
                 {row.label}
               </h4>
+              {row.needs && (full || given || rowFlagged) && (!row.needsAfter || given || row.marks.slice(0, -1).every((m) => m.given || picks[m.id] !== undefined)) && <p className="play-drill-needs">{needsLine(row.needs)}</p>}
               {row.things && row.things.length > 0 && (
                 <ul className="play-things play-drill-things" aria-label="The cards">
                   {row.things.map((t) => (
@@ -363,7 +391,7 @@ export function DrillBoard({ step, readAloud, kicker = 'Do it', doneLabel = 'Nex
               )}
               {row.marks.map((m) =>
                 m.given ? (
-                  <GivenMark key={m.id} m={m} />
+                  <GivenMark key={m.id} m={m} under={m.compare && full ? <BecauseRows compact because={{ says: m.compare.says, world: m.compare.world, match: m.compare.match ?? isTruthy(m.answer) }} words={m.compare.so ? { ...words, fit: m.compare.so, unfit: m.compare.so } : words} /> : undefined} />
                 ) : (
                   <TapMark
                     key={m.id}
@@ -373,6 +401,7 @@ export function DrillBoard({ step, readAloud, kicker = 'Do it', doneLabel = 'Nex
                     wrong={!!result && result.wrong.includes(m.id)}
                     locked={done}
                     onPick={(o) => pickOne(m.id, o)}
+                    under={m.compare && (full || rowFlagged) && !done ? <CompareRows says={m.compare.says} world={m.compare.world} words={words} /> : undefined}
                   />
                 ),
               )}
@@ -382,11 +411,36 @@ export function DrillBoard({ step, readAloud, kicker = 'Do it', doneLabel = 'Nex
         })}
       </div>}
       {!scratch && (
-        <p ref={statusRef} tabIndex={-1} role="status" className={`play-drill-status${done ? ' is-done' : result?.message ? ' is-wrong' : ''}`}>
+        <p ref={statusRef} tabIndex={-1} role="status" className={`play-drill-status${done ? ' is-done' : result?.message ? (result.diagnosis ? ' is-wrong is-diagnosis' : ' is-wrong') : ''}`}>
+          {!done && result?.diagnosis && <span className="play-drill-tag">A mix-up to untangle</span>}
           {done ? step.done : result ? result.message : ''}
         </p>
       )}
+      {confused && step.confused && (
+        <ConfusedPanel
+          questions={step.confused}
+          closing={words?.closing}
+          onClose={() => {
+            setConfused(false);
+            requestAnimationFrame(() => confusedBtn.current?.focus());
+          }}
+        />
+      )}
       {!scratch && !settled && <div className="play-actions">
+        {!done && step.confused && !confused && (
+          <button
+            ref={confusedBtn}
+            type="button"
+            className="play-btn play-btn--ghost play-confused-btn"
+            aria-expanded={confused}
+            onClick={() => {
+              setConfused(true);
+              onHelp?.();
+            }}
+          >
+            <PlayIcon name="help" size={18} /> I’m confused
+          </button>
+        )}
         {!done ? (
           <button type="button" className="play-btn play-btn--primary play-btn--grow" onClick={check}>
             Check my marks

@@ -7,17 +7,43 @@
  * message quotes and every smallest example is checked against its own computation.
  */
 import { describe, expect, it } from 'vitest';
-import { L1_DRILL, L2_DRILL, L2_TYPES, L3_DRILL, L3_FIRST_TYPES, L3_TYPES, L4_DRILL, L4_FIRST_TYPES, L5_DRILL, stop3 } from '../../content/stop3';
+import {
+  L1_CANT,
+  L1_CHAIN,
+  L1_CONTRAST,
+  L1_DRILL,
+  L1_FORK,
+  L2_DRILL,
+  L2_TYPES,
+  L3_BETWEEN,
+  L3_BETWEEN_ADD,
+  L3_CONTRAST,
+  L3_DRILL,
+  L3_FIRST_TYPES,
+  L3_TYPES,
+  L4_DRILL,
+  L4_FIRST_TYPES,
+  L4_NAMED,
+  L4_NOSPOT,
+  L4_NOSPOT_TWIN,
+  L4_PROVED,
+  L5_DRILL,
+  stop3,
+} from '../../content/stop3';
 import { checkDrill, drillSpeech, marksToTap, passState } from '../drill';
 import { freshCheckSet, looks } from '../fresh';
 import { clueHolds, grade } from '../grade';
 import {
   CANT,
+  CHAIN_VS_FORK,
+  LINE_WORDS,
+  NAMED_VS_PROVED,
   ORDERLY,
   ORDINALS,
   SKINS,
   SKIN_IDS,
   TAUGHT_TYPES,
+  TRY_VS_LINE,
   type ClueType,
   buildPuzzle,
   buildSimpler,
@@ -41,7 +67,7 @@ import { READING, fkGrade, longestSentence, sentences, words } from '../readabil
 import { createRng } from '../rng';
 import { caseText, feedbackText, teachStrings } from '../teach';
 import { explanationFor, explanationSpeech } from '../../game/explanation';
-import type { ChooseItem, DrillMark, DrillRow, DrillStep, Item, LineClue, TeachCase } from '../types';
+import type { ChooseItem, DrillMark, DrillRow, DrillStep, Item, LessonDef, LineClue, TeachCase } from '../types';
 
 const SEEDS = 300;
 
@@ -140,7 +166,8 @@ interface Checked {
 function checkCase(c: TeachCase, ctx: Ctx): Checked {
   const m = /^([A-Z][a-z ]+): ((?:[A-Za-z]+, )+[A-Za-z]+)\.$/.exec(c.label);
   expect(m, c.label).not.toBeNull();
-  expect(LINE_LABELS.has(m![1]), c.label).toBe(true);
+  // A line in the skin's own words, or the best try for one answer (lesson 3's cases: checked in its own test).
+  expect(LINE_LABELS.has(m![1]) || m![1] === 'Best try', c.label).toBe(true);
   const order = m![2].split(', ').map((s) => s.toLowerCase());
   expect([...order].sort(), c.label).toEqual([...ctx.ids].sort());
   const broken = brokenHolds(ctx.clues, order);
@@ -636,7 +663,7 @@ describe('teaching after a wrong answer: lesson 1 (chains)', () => {
           const left = [...new Set(fitHolds(mini.ids, mini.clues).map((o) => o[end]))];
           expect(left.length > 1).toBe(cant);
           const last = mini.text[mini.text.length - 1];
-          if (cant) expect(last).toMatch(/are left\. No clue compares them, so you can’t tell\.$/);
+          if (cant) expect(last).toMatch(/are left\. No clue, and no chain of clues, links them\. So you can’t tell\.$/);
           else expect(last).toMatch(new RegExp(`^Only ${SKINS[s].pool.find((p) => p.toLowerCase() === left[0])} is left\\.`));
         }
       }
@@ -1001,7 +1028,7 @@ describe('stop 3 content', () => {
   it('lesson 3 says what “breaks a clue” means the first time a card uses it', () => {
     const bodies = stop3.lessons[2].ideas.flatMap((c) => c.body);
     const first = bodies.find((b) => /\bbreak/.test(b))!;
-    expect(first).toContain('That makes the first clue false. We say it breaks the clue.');
+    expect(first).toContain('That makes the first clue false, wherever Fay and Gus stand. We say it breaks the clue.');
   });
 });
 
@@ -1129,7 +1156,8 @@ describe('review fixes: stop 3 wrong-answer teaching', () => {
       expect(m[3]).not.toBe(m[4]);
       expect(ids.length).toBe(o1.length);
       expect(item.teach!.remember![1]).toMatch(/^Ask: “Could anyone else .+\?”$/);
-      expect(item.hint).toMatch(/^Ask: “.+\?” Try each \w+\. Cross out anyone who breaks a clue\.$/);
+      // A person never breaks a clue: a line does. A try is crossed out only when no line with that person there works.
+      expect(item.hint).toMatch(/^Ask: “.+\?” Try each (\w+) there\. Cross out a \1 only when no way of placing the others keeps every clue true\.$/);
     }
   });
 
@@ -1232,6 +1260,7 @@ function readBoardClue(text: string): LineClue {
   if ((m = /^No one finished between (\w+) and (\w+)\.$/.exec(text))) return { t: 'nextTo', a: id(m[1]), b: id(m[2]) };
   if ((m = /^(\w+) did not finish (first|last)\.$/.exec(text))) return m[2] === 'first' ? { t: 'notFirst', a: id(m[1]) } : { t: 'notLast', a: id(m[1]) };
   if ((m = /^(\w+) finished (first|last)\.$/.exec(text))) return m[2] === 'first' ? { t: 'first', a: id(m[1]) } : { t: 'last', a: id(m[1]) };
+  if ((m = /^(\w+) finished (second|third|fourth)\.$/.exec(text))) return { t: 'place', a: id(m[1]), k: ['second', 'third', 'fourth'].indexOf(m[2]) + 2 };
   throw new Error(`cannot read board clue: ${text}`);
 }
 
@@ -1266,6 +1295,11 @@ function rowCtx(board: BoardCtx, row: DrillRow, more: Record<string, string[]>):
   if (left) return { ids: board.ids, clues: quotesIn(left[1]).map(readBoardClue) };
   const added = /^Now add a clue: “(.+)”$/.exec(row.label);
   if (added) return { ids: board.ids, clues: [...board.clues, readBoardClue(added[1])] };
+  // A row that turns a clue around quotes its whole clue list; a row that names two clues uses those two only.
+  const now = /Now the clues are (.+)$/.exec(row.label);
+  if (now) return { ids: board.ids, clues: quotesIn(now[1]).map(readBoardClue) };
+  const two = /^Clues \d+ and \d+ name \w+: (.+)$/.exec(row.label);
+  if (two) return { ids: board.ids, clues: quotesIn(two[1]).map(readBoardClue) };
   return { ids: more[row.id] ?? board.ids, clues: board.clues };
 }
 
@@ -1286,6 +1320,33 @@ function expectedMark(ctx: BoardCtx, row: DrillRow, m: DrillMark): string {
     const k = spotK(t[2], ids.length);
     expect(line![k - 1], row.label).toBe(who);
     return fit.some((p) => p[k - 1] === who) ? 'keep' : 'reject';
+  }
+  if ((x = /^Move the others, not (\w+)\. Which line keeps \w+ (\w+) and every clue true\?$/.exec(m.label))) {
+    // The others move, the one tested stays: every option keeps it in its spot, and the right one is the line that fits.
+    const who = x[1].toLowerCase();
+    const k = spotK(x[2], ids.length);
+    expect(line![k - 1], row.label).toBe(who);
+    const lines = m.options.filter((o) => o.id !== 'none').map((o) => o.label.toLowerCase().split(', '));
+    for (const p of lines) expect(p[k - 1]).toBe(who);
+    // Every other line with that person there is listed.
+    expect(lines.length).toBe(perms(ids).filter((p) => p[k - 1] === who && !same(p, line!)).length);
+    const good = lines.filter((p) => !brokenHolds(clues, p).length);
+    expect(good.length).toBeLessThanOrEqual(1);
+    return good.length ? m.options.find((o) => o.label === good[0].map(capName).join(', '))!.id : 'none';
+  }
+  if ((x = /^Where does (\w+) stand\?$/.exec(m.label))) {
+    // Next to two people, from the two clues the row quotes: between them in every line where those clues hold.
+    const who = x[1].toLowerCase();
+    const mid = /^Between (\w+) and (\w+)$/.exec(m.options.find((o) => o.id === 'mid')!.label)!;
+    const [a, c] = [mid[1].toLowerCase(), mid[2].toLowerCase()];
+    return fit.every((p) => holds({ t: 'between', a: who, b: a, c }, p)) ? 'mid' : 'end';
+  }
+  if (m.label === 'Which way does the block go?') {
+    expect(fit.length, `${row.label}: one order fits`).toBe(1);
+    const ways = m.options.map((o) => o.label.toLowerCase().split(', '));
+    const right = ways.filter((w) => w.every((id, i) => i === 0 || fit[0].indexOf(w[i - 1]) < fit[0].indexOf(id)));
+    expect(right.length).toBe(1);
+    return m.options[ways.indexOf(right[0])].id;
   }
   if (/^Does this (line|order) fit\?$/.test(m.label)) return brokenHolds(clues, line!).length ? 'not' : 'fit';
   if ((x = /^“(.+)”$/.exec(m.label))) {
@@ -1328,6 +1389,7 @@ function expectedMark(ctx: BoardCtx, row: DrillRow, m: DrillMark): string {
 }
 
 const ABC_IDS = ['ava', 'ben', 'cal'];
+const ABCD_IDS = ['ava', 'ben', 'cal', 'dee'];
 const EFG_IDS = ['eli', 'fay', 'gus'];
 /** Every guided board of Stop 3, with the runners its card names (the clues alone do not name everyone). */
 const DRILLS: { lesson: number; step: DrillStep; ids: string[]; more?: Record<string, string[]> }[] = [
@@ -1339,6 +1401,7 @@ const DRILLS: { lesson: number; step: DrillStep; ids: string[]; more?: Record<st
   { lesson: 2, step: L3_DRILL[2], ids: ABC_IDS },
   { lesson: 3, step: L4_DRILL[0], ids: ABC_IDS },
   { lesson: 3, step: L4_DRILL[1], ids: ABC_IDS },
+  { lesson: 3, step: L4_DRILL[2], ids: ABCD_IDS },
   { lesson: 4, step: L5_DRILL, ids: ABC_IDS },
 ];
 const boardClueTexts = (st: DrillStep) => (st.scene?.kind === 'clues' ? st.scene.clues : []);
@@ -1465,10 +1528,11 @@ describe('stop 3: See -> Do -> Quiz (skill-drill handoff)', () => {
         }
       }
     }
-    expect(checked).toBe(70);
-    // The shown case is the one its card already finished; the learner's rows are new cases.
+    expect(checked).toBe(82);
+    // The shown case is the one its card already finished; the learner's rows are new cases. On the “Between” board
+    // the shown try starts from the first line written (Ava, Ben, Cal), which breaks the clue, then moves the others.
     expect(L2_DRILL[0].rows[0].label).toBe('Finish order: Ava, Cal, Ben.');
-    expect(L3_DRILL.map((st) => st.rows[0].label)).toEqual(['Try Eli second, as in Fay, Eli, Gus.', 'Try Cal second, as in Ava, Cal, Ben.', 'Try Ava first, as in Ava, Cal, Ben.']);
+    expect(L3_DRILL.map((st) => st.rows[0].label)).toEqual(['Try Eli second, as in Fay, Eli, Gus.', 'Try Cal second, as in Ava, Cal, Ben.', 'Try Ava first, as in Ava, Ben, Cal.']);
     expect(L4_DRILL[0].rows[0].label).toBe('Finish order: Ava, Ben, Cal.');
     expect(L5_DRILL.rows[0].label).toBe('Cover up clue 3: “Ava is taller than Cal.”');
     for (const d of DRILLS) {
@@ -1480,7 +1544,7 @@ describe('stop 3: See -> Do -> Quiz (skill-drill handoff)', () => {
   });
 
   it('Do (the handoff’s Stop 3 sample): place Cal, then Ava, then Ben; then with only “Cal is taller than Ava,” Ava or Ben is Can’t tell', () => {
-    const [card, chain, nochain] = L1_DRILL.rows;
+    const [card, chain, nochain, fork] = L1_DRILL.rows;
     expect(L1_DRILL.scene).toEqual({ kind: 'clues', clues: ['Cal is taller than Ava.', 'Ava is taller than Ben.'] });
     expect(card.marks.every((m) => m.given)).toBe(true);
     expect(card.marks.map((m) => m.answer)).toEqual(['ava', 'ben', 'cal']);
@@ -1491,8 +1555,11 @@ describe('stop 3: See -> Do -> Quiz (skill-drill handoff)', () => {
     // The compared pair is placed; the pair no clue compares is Can't tell.
     expect(ask('Who is taller, Cal or Ava?').answer).toBe('cal');
     expect(ask('Who is taller, Ava or Ben?').answer).toBe(CANT);
-    expect(ask('Who is taller, Ava or Ben?').why.ava).toMatch(/No clue compares Ava and Ben\.$/);
+    expect(ask('Who is taller, Ava or Ben?').why.ava).toMatch(/No clue, and no chain of clues, links Ava and Ben\.$/);
     expect(ask('Who is the tallest?').answer).toBe(CANT);
+    // Then clue 2 turns around: a fork. Cal and Ben are each taller than Ava: the tallest is open, the shortest is Ava.
+    expect(fork.label).toBe('Turn clue 2 around. Now the clues are “Cal is taller than Ava.” “Ben is taller than Ava.”');
+    expect(fork.marks.map((m) => [m.label, m.answer])).toEqual([['Who is taller, Ben or Cal?', CANT], ['Who is the tallest?', CANT], ['Who is the shortest?', 'ava']]);
     // A wrong tap is named in plain words, and nothing else is filled in.
     const wrong = checkDrill(L1_DRILL, { ...rightPicks(L1_DRILL), 'chain-1': 'ava' });
     expect(wrong.done).toBe(false);
@@ -1510,10 +1577,13 @@ describe('stop 3: See -> Do -> Quiz (skill-drill handoff)', () => {
           if (o.id === m.answer) continue;
           const w = m.why[o.id];
           expect(w, `${d.step.id} ${m.id}: words for “${o.label}”`).toBeTruthy();
-          expect(checkDrill(d.step, { ...right, [m.id]: o.id }).message).toBe(w);
+          // The mark's own words, after the words of a mix-up when the wrong pick shows one (DrillStep.misconceptions).
+          const got = checkDrill(d.step, { ...right, [m.id]: o.id });
+          const mix = d.step.misconceptions?.find((mc) => mc.id === got.diagnosis);
+          expect(got.message).toBe(mix ? `${mix.text} ${w}` : w);
           expect(w).not.toMatch(/Look at the board again|\bWrong\b|['"]/);
           // It is about this board: it names someone on it, or a clue by its number.
-          expect(/\b(Ava|Ben|Cal|Eli|Fay|Gus|Hana)\b|\b[Cc]lue \d/.test(w), w).toBe(true);
+          expect(/\b(Ava|Ben|Cal|Dee|Eli|Fay|Gus|Hana)\b|\b[Cc]lue \d/.test(w), w).toBe(true);
           // Every sentence it quotes is on the board.
           for (const q of quotesIn(w)) expect(onBoard.has(q), `${d.step.id} ${m.id}: “${q}”`).toBe(true);
           for (const s of sentences(w)) expect(words(s).length, s).toBeLessThanOrEqual(READING.maxSentenceWords);
@@ -1574,8 +1644,11 @@ describe('stop 3: See -> Do -> Quiz (skill-drill handoff)', () => {
       expect(namesOf(p3[0]).length).toBe(3);
       for (const c of itemClues(p3[0])) expect(L3_FIRST_TYPES).toContain(c.t);
       for (const t of ['cant-tell', 'nextTo', 'between']) expect(tags(p3), `seed ${seed} ${t}`).toContain(t);
-      // Lesson 4: three people with the board's kinds of clue, then four and five.
-      expect(p4.map((x) => (x.kind === 'order' ? x.names.length : 0))).toEqual([3, 4, 5]);
+      // Lesson 4: three people with the board's kinds of clue and a spot clue; four with a spot clue; four with none.
+      expect(p4.map((x) => (x.kind === 'order' ? x.names.length : 0))).toEqual([3, 4, 4]);
+      expect(p4.map((x) => x.tags)).toEqual([['spot-clue'], ['spot-clue'], ['no-spot-clue']]);
+      const spotClue = (x: Item) => itemClues(x).some((c) => c.t === 'first' || c.t === 'last' || c.t === 'place');
+      expect(p4.map(spotClue)).toEqual([true, true, false]);
       for (const c of itemClues(p4[0])) expect(L4_FIRST_TYPES).toContain(c.t);
       expect(p4[0].prompt).not.toMatch(/ran a race/);
       // Lesson 5: the card's case in a new skin: three people, "before" clues only.
@@ -1588,17 +1661,26 @@ describe('stop 3: See -> Do -> Quiz (skill-drill handoff)', () => {
 
   it('Pass: each lesson’s include group is in every planned set, and three first-try answers without it do not pass', () => {
     const [l1, l2, l3] = stop3.lessons;
-    expect(l1.pass).toEqual({ firstTry: 3, include: [{ tag: 'cant-tell', label: 'a can’t-tell puzzle' }] });
+    // Lesson 1: a fork (Can't tell) and a puzzle the clues decide. Lesson 3: a Can't tell and a spot kept only after
+    // moving the others. Lesson 4: a line with no clue that names a spot.
+    expect(l1.pass).toEqual({ firstTry: 3, include: [{ tag: 'cant-tell', label: 'a can’t-tell puzzle' }, { tag: 'decided', label: 'a puzzle the clues decide' }] });
     expect(l2.pass?.include?.map((g) => g.tag)).toEqual(['before-trap']);
-    expect(l3.pass?.include?.map((g) => g.tag)).toEqual(['cant-tell']);
-    expect(stop3.lessons[3].pass).toBeUndefined();
+    expect(l3.pass?.include?.map((g) => g.tag)).toEqual(['cant-tell', 'move-others']);
+    expect(stop3.lessons[3].pass?.include?.map((g) => g.tag)).toEqual(['no-spot-clue']);
     expect(stop3.lessons[4].pass).toBeUndefined();
     for (let seed = 1; seed <= 60; seed++) {
       for (const l of stop3.lessons) for (const g of l.pass?.include ?? []) expect(l.practice(createRng(seed)).some((x) => x.tags?.includes(g.tag)), `${l.id} seed ${seed}`).toBe(true);
     }
     const decided = { clean: true, tags: ['decided'] };
+    const cant = { clean: true, tags: ['cant-tell'] };
     expect(passState(l1.pass, [decided, decided, decided]).met).toBe(false);
-    expect(passState(l1.pass, [decided, decided, { clean: true, tags: ['cant-tell'] }]).met).toBe(true);
+    expect(passState(l1.pass, [cant, cant, cant]).met).toBe(false);
+    expect(passState(l1.pass, [decided, decided, cant]).met).toBe(true);
+    expect(passState(l3.pass, [cant, cant, cant]).met).toBe(false);
+    expect(passState(l3.pass, [cant, decided, { clean: true, tags: ['decided', 'move-others'] }]).met).toBe(true);
+    const spotted = { clean: true, tags: ['spot-clue'] };
+    expect(passState(stop3.lessons[3].pass, [spotted, spotted, spotted]).met).toBe(false);
+    expect(passState(stop3.lessons[3].pass, [spotted, spotted, { clean: true, tags: ['no-spot-clue'] }]).met).toBe(true);
     expect(passState(l2.pass, [{ clean: true, tags: ['must'] }, { clean: true, tags: ['cant'] }, { clean: true, tags: ['might'] }]).met).toBe(false);
     expect(passState(l2.pass, [{ clean: true, tags: ['might', 'before-trap'] }, { clean: true, tags: ['cant'] }, { clean: true, tags: ['must'] }]).met).toBe(true);
   });
@@ -1675,7 +1757,7 @@ describe('stop 3: See -> Do -> Quiz (skill-drill handoff)', () => {
 describe('stop 3: review fixes (skill-drill handoff)', () => {
   it('a twin board says what changed once: in its twin note, which the board draws and reads aloud', () => {
     const twins = DRILLS.filter((d) => d.step.twin);
-    expect(twins.map((d) => d.step.id)).toEqual(['s3.l1-do', 's3.l4-do2']);
+    expect(twins.map((d) => d.step.id)).toEqual(['s3.l1-do', 's3.l4-do2', 's3.l4-do3']);
     for (const d of twins) {
       expect(d.step.twin, d.step.id).toMatch(/changed\. “.+” is now “.+”$/);
       expect(d.step.body.join(' '), d.step.id).not.toContain(d.step.twin);
@@ -1733,5 +1815,466 @@ describe('stop 3: review fixes (skill-drill handoff)', () => {
       }
     }
     expect(single, 'items where only one order fits').toBeGreaterThan(50);
+  });
+});
+
+// ---------- the hidden-distinction audit: chain vs fork, a try vs one line, a named spot vs a proved one ----------
+//
+// docs/audit/hidden-distinctions.md, findings s3-l1-chain-vs-fork, s3-l3-try-vs-one-line and
+// s3-l4-no-spot-clue-strategy. Every truth on a contrast card and every mark is worked out again here with `holds`.
+
+/** Each "I’m confused" question has exactly one right option and a “Not sure”, in curly quotes only. */
+function confusedOk(qs: readonly { q: string; options: { label: string; right?: boolean }[]; teach: string }[] | undefined, where: string) {
+  expect(qs?.length ?? 0, where).toBeGreaterThanOrEqual(1);
+  expect(qs!.length, where).toBeLessThanOrEqual(3);
+  for (const q of qs!) {
+    expect(q.options.filter((o) => o.right).length, `${where}: ${q.q}`).toBe(1);
+    expect(q.options.some((o) => o.label === 'Not sure'), `${where}: ${q.q}`).toBe(true);
+    expect([q.q, q.teach, ...q.options.map((o) => o.label)].join(' ')).not.toMatch(/['"=≠✓→&]/);
+  }
+}
+/** Lines named in a text: "Ava, Cal, Ben". */
+const linesIn = (s: string) => [...s.matchAll(/((?:[A-Z][a-z]+, )+[A-Z][a-z]+)/g)].map((m) => m[1].toLowerCase().split(', '));
+const contrastOf = (c: { scene?: unknown }) => {
+  const sc = c.scene as { kind: string };
+  if (sc?.kind !== 'contrast') throw new Error('not a contrast card');
+  return c.scene as Extract<NonNullable<Item['scene']>, { kind: 'contrast' }>;
+};
+
+describe('stop 3: distinctions taught apart (hidden-distinction audit)', () => {
+  it('chain vs fork (lesson 1): the contrast card turns one clue around, and each panel’s truth and lines come from the clues', () => {
+    const l1 = stop3.lessons[0];
+    expect(l1.distinctions).toEqual([CHAIN_VS_FORK]);
+    // The card sits last, right before the board that has both a chain and a fork.
+    expect(l1.ideas[l1.ideas.length - 1]).toBe(L1_CONTRAST);
+    expect(l1.ideas.length).toBeLessThanOrEqual(7);
+    expect(L1_CONTRAST.distinction).toBe(CHAIN_VS_FORK.id);
+    // Same people; only clue 2 turned around.
+    expect(L1_CANT.clues[0]).toEqual(L1_CHAIN.clues[0]);
+    const [c2, f2] = [L1_CHAIN.clues[1], L1_CANT.clues[1]];
+    if (c2.t !== 'before' || f2.t !== 'before') throw new Error('before clues');
+    expect([f2.a, f2.b]).toEqual([c2.b, c2.a]);
+    const sc = contrastOf(L1_CONTRAST);
+    sc.pairs.forEach((p, i) => {
+      const clues = p.world.split(/(?<=\.) /).map(readBoardClue);
+      expect(clues).toEqual([L1_CHAIN, L1_CANT][i].clues);
+      const fit = fitHolds(ABC_IDS, clues);
+      expect(p.truth, p.world).toBe(new Set(fit.map((o) => o[0])).size === 1);
+      expect(p.says).toBe('Who is the tallest?');
+      // The lines it lists are every line that fits, and no other.
+      expect(linesIn(p.then!).map((o) => o.join()).sort()).toEqual(fit.map((o) => o.join()).sort());
+    });
+    expect(sc.pairs.map((p) => p.truth)).toEqual([true, false]);
+    expect(sc.pairs[0].because).toBe('Ben links Ava and Cal: Ava is taller than Ben, and Ben is taller than Cal. So Ava must be the tallest.');
+    expect(sc.pairs[1].because).toBe('Ava is taller than Ben, and Cal is taller than Ben. No clue, and no chain of clues, links Ava and Cal.');
+    expect(sc.ask).toEqual({ q: 'Did the people change?', a: 'No. Only clue 2 turned around. Now Ben is not in the middle, so Ben does not link Ava and Cal.' });
+    expect(sc.words).toEqual({ worldTag: 'The clues', saysWord: 'asks:', truth: 'You can tell', untruth: 'You can’t tell' });
+    // No chain links Ava and Cal on the fork: a line fits with each one ahead.
+    const fork = fitHolds(ABC_IDS, L1_CANT.clues);
+    expect(fork.some((o) => o.indexOf('ava') < o.indexOf('cal')) && fork.some((o) => o.indexOf('cal') < o.indexOf('ava'))).toBe(true);
+  });
+
+  it('chain vs fork (lesson 1): the board’s fork row, its mix-ups, and its I’m confused questions', () => {
+    expect(L1_DRILL.distinction).toBe(CHAIN_VS_FORK.id);
+    expect(L1_DRILL.scaffold).toBe('full');
+    expect(L1_DRILL.words?.says).toBe(LINE_WORDS.says);
+    // The fork row is the board's own chain with clue 2 turned around: the quiz's try 2 shape, on the board.
+    expect(L1_FORK.clues[0]).toEqual(L1_DRILL.scene!.kind === 'clues' ? readBoardClue(L1_DRILL.scene!.clues[0]) : null);
+    const fork = L1_DRILL.rows.find((r) => r.id === 'fork')!;
+    expect(fork.needs).toBe('A chain needs a middle person: shorter than one and taller than the other.');
+    const fit = fitHolds(ABC_IDS, L1_FORK.clues);
+    expect(new Set(fit.map((o) => o[0]))).toEqual(new Set(['ben', 'cal']));
+    expect(new Set(fit.map((o) => o[2]))).toEqual(new Set(['ava']));
+    expect(fork.note).toBe('Ben and Cal are each taller than Ava, so Ava is the shortest. That is a fork: nothing links Ben and Cal, so you can’t tell who is the tallest.');
+    // fork-linked: a name on the fork, as if it were a chain. Only when the rows before it are right.
+    const right = rightPicks(L1_DRILL);
+    expect(checkDrill(L1_DRILL, right).diagnosis).toBeUndefined();
+    for (const [m, name] of [['fork-1', 'ben'], ['fork-1', 'cal'], ['fork-2', 'ben'], ['fork-2', 'cal']]) {
+      const r = checkDrill(L1_DRILL, { ...right, [m]: name });
+      expect(r.diagnosis, `${m} ${name}`).toBe(`fork-linked-${m}-${name}`);
+      expect(r.message).toMatch(/^You may be treating a chain and a fork as the same thing\. They are two different things: /);
+      expect(r.message).toContain('Here Ava is shorter than Ben and shorter than Cal, so Ava links no one.');
+    }
+    // Its mirror: Can't tell carried over to the shortest, which the fork decides.
+    expect(checkDrill(L1_DRILL, { ...right, 'fork-3': CANT }).diagnosis).toBe('fork-all-open-cant');
+    // Other mistakes are not this mix-up: a name for the shortest, or a fork pick after a wrong chain.
+    expect(checkDrill(L1_DRILL, { ...right, 'fork-3': 'cal' }).diagnosis).toBeUndefined();
+    expect(checkDrill(L1_DRILL, { ...right, 'chain-1': 'ava', 'fork-2': 'cal' }).diagnosis).toBeUndefined();
+    for (const mc of L1_DRILL.misconceptions!) {
+      expect(mc.text).toMatch(/^You may be treating .+ as the same thing\. They are two different things/);
+      expect(sentences(mc.text).length).toBeLessThanOrEqual(4);
+    }
+    confusedOk(L1_DRILL.confused, 's3.l1-do');
+    // The questions use the card's fork (Ava, Ben, Cal), never the board's own fork row.
+    for (const q of L1_DRILL.confused!) expect(q.q).not.toMatch(/Ben is taller than Ava/);
+  });
+
+  it('chain vs fork (lesson 1): a name picked on a can’t-tell quiz says first that it is not a chain, and that holds', () => {
+    let forks = 0;
+    for (let seed = 1; seed <= 150; seed++) {
+      const { item, ids, clues, ask } = chainPuzzle(createRng(seed), { id: 'x', skin: skinAt(seed), cantTell: true });
+      const texts = sceneClues(item);
+      const end = ask === 'first' ? 0 : ids.length - 1;
+      const fit = fitHolds(ids, clues);
+      const ends = new Set(fit.map((o) => o[end]));
+      const name = (s: string) => item.choices.find((c) => c.label === s)!.id;
+      for (const id of ends) {
+        const first = item.feedback![id].detail[0];
+        const m = /^(?:(.+), and (.+)\. No chain links (\S+) and (\S+)\.|No clue, and no chain of clues, links (\S+) and (\S+)\.)$/.exec(first);
+        expect(m, first).not.toBeNull();
+        if (m![1]) {
+          forks++;
+          // Each half is one of the puzzle's clues, word for word.
+          expect(texts).toContain(`${m![1]}.`);
+          expect(texts).toContain(`${m![2].charAt(0).toUpperCase()}${m![2].slice(1)}.`);
+        }
+        const [x, y] = (m![3] ? [m![3], m![4]] : [m![5], m![6]]).map(name);
+        expect(x).toBe(id);
+        expect(ends.has(y)).toBe(true);
+        // Nothing links them: one line that fits has x ahead, another has y ahead.
+        expect(fit.some((o) => o.indexOf(x) < o.indexOf(y)) && fit.some((o) => o.indexOf(y) < o.indexOf(x))).toBe(true);
+      }
+      expect(item.explain).toMatch(/No clue, and no chain of clues, links them\. So you can’t tell\.$/);
+    }
+    expect(forks).toBeGreaterThan(100);
+  });
+
+  it('try vs one line (lesson 3): the contrast card pins Ava first twice; the first line breaks the clue, moving the others keeps it', () => {
+    const l3 = stop3.lessons[2];
+    expect(l3.distinctions).toEqual([TRY_VS_LINE]);
+    expect(l3.ideas[l3.ideas.length - 1]).toBe(L3_CONTRAST);
+    const sc = contrastOf(L3_CONTRAST);
+    const clue = readBoardClue(sc.pairs[0].says);
+    expect(clue).toEqual(L3_BETWEEN.clues[0]);
+    const lines = sc.pairs.map((p) => /^Ava first: ((?:[A-Z][a-z]+, )+[A-Z][a-z]+)\.$/.exec(p.world)![1].toLowerCase().split(', '));
+    // The first line written: Ava first, the others in the board's order. The second: only the others moved.
+    expect(lines).toEqual([['ava', 'ben', 'cal'], ['ava', 'cal', 'ben']]);
+    expect(sc.pairs.map((p) => p.truth)).toEqual(lines.map((o) => holds(clue, o)));
+    expect(sc.pairs.map((p) => p.truth)).toEqual([false, true]);
+    expect(brokenHolds(L3_BETWEEN.clues, lines[1])).toEqual([]);
+    expect(sc.pairs.map((p) => p.because)).toEqual([
+      'Ava finished first, Ben finished second and Cal finished last. So the clue breaks.',
+      'Ava finished first, Cal finished second and Ben finished last. So the clue holds.',
+    ]);
+    expect(sc.ask).toEqual({ q: 'Did Ava move?', a: 'No. Only the others moved. So one broken line does not cross out Ava first.' });
+    expect(L3_CONTRAST.body.join(' ')).toContain('In Ava, Ben, Cal, the clue breaks. Move Ben and Cal to get Ava, Cal, Ben, and it holds.');
+    expect(L3_CONTRAST.body.join(' ')).toContain('Cross out a spot only when no way of placing the others keeps every clue true.');
+  });
+
+  it('try vs one line (lesson 3): every try shows its test world; the “Between” board moves the others before keeping or crossing out', () => {
+    for (const st of L3_DRILL) {
+      expect(st.words, st.id).toEqual(expect.objectContaining({ says: 'Clue', world: 'This line', so: 'So', needs: '' }));
+      for (const r of st.rows.filter((x) => x.id !== 'ask' && x.id !== 'add' && x.id !== 'four')) {
+        const t = /^Try (\w+) (\w+), as in /.exec(r.label)!;
+        expect(r.needs, r.label).toBe(`Testing: ${t[1]} finished ${t[2]}. The others can move.`);
+        const line = lineIn(r.label)!;
+        const clues = boardClueTexts(st).map(readBoardClue);
+        // A crossed-out try says why in the killers() wording, and it holds for every line with that person there.
+        const keep = r.marks.find((m) => m.label === 'Keep or cross out?')!;
+        const who = t[1].toLowerCase();
+        const k = spotK(t[2], line.length);
+        if (keep.answer === 'reject') {
+          const one = /^Every line with \w+ \w+ makes clue (\d+) false\. So /.exec(r.note!);
+          expect(one, r.note).not.toBeNull();
+          for (const o of perms(EFG_IDS.includes(who) ? EFG_IDS : ABC_IDS).filter((p) => p[k - 1] === who)) expect(holds(clues[Number(one![1]) - 1], o)).toBe(false);
+        }
+        // Each clue mark carries the two facts to compare: the clue's words, and the line.
+        for (const m of r.marks.filter((x) => x.label.startsWith('Clue '))) {
+          expect(m.compare?.says, m.id).toBe(/“(.+)”$/.exec(m.label)![1]);
+          expect(m.compare?.world.startsWith(`${line.map(capName).join(', ')}. `), m.id).toBe(true);
+        }
+      }
+    }
+    const do3 = L3_DRILL[2];
+    expect(do3.distinction).toBe(TRY_VS_LINE.id);
+    expect(do3.scaffold).toBe('full');
+    expect(do3.steps?.length).toBeGreaterThanOrEqual(3);
+    // On every try the first line written breaks the clue, so the learner meets the boundary each time.
+    for (const id of ['ava1', 'ben1', 'cal1']) {
+      const r = do3.rows.find((x) => x.id === id)!;
+      expect(brokenHolds(L3_BETWEEN.clues, lineIn(r.label)!).length, id).toBeGreaterThan(0);
+      expect(r.marks.map((m) => m.id)).toEqual([`${id}-c1`, `${id}-move`, `${id}-keep`]);
+    }
+    expect(do3.rows.find((x) => x.id === 'ben1')!.marks.map((m) => m.answer)).toEqual(['false', 'o-ben-cal-ava', 'keep']);
+    expect(do3.rows.find((x) => x.id === 'cal1')!.marks.map((m) => m.answer)).toEqual(['false', 'none', 'reject']);
+  });
+
+  it('try vs one line (lesson 3): cross-too-soon and the other mix-ups fire on the audit’s wrong picks, never on right ones', () => {
+    const [do1, , do3] = L3_DRILL;
+    const right = rightPicks(do3);
+    expect(checkDrill(do3, right).done).toBe(true);
+    expect(checkDrill(do3, right).diagnosis).toBeUndefined();
+    // One broken line taken as every line: “No line works” for Ben first, or a crossed-out Ben first.
+    const soon = checkDrill(do3, { ...right, 'ben1-move': 'none' });
+    expect(soon.diagnosis).toBe('cross-too-soon');
+    expect(soon.message).toMatch(/^You may be treating one line and every line with Ben first as the same thing\. They are two different things: Ben stays first, but Ava and Cal can move\. Ben, Ava, Cal breaks the clue\. Check Ben, Cal, Ava before you cross out\. /);
+    expect(checkDrill(do3, { ...right, 'ben1-move': 'none', 'ben1-keep': 'reject' }).diagnosis).toBe('cross-too-soon');
+    expect(checkDrill(do3, { ...right, 'ben1-keep': 'reject' }).diagnosis).toBe('cross-too-soon-keep');
+    // Right lines, wrong decision: Cal first kept though no line works.
+    expect(checkDrill(do3, { ...right, 'cal1-keep': 'keep' }).diagnosis).toBe('verdict-only');
+    // A wrong clue mark is a slip, not this mix-up; so is picking a line that breaks the clue.
+    expect(checkDrill(do3, { ...right, 'ben1-c1': 'true' }).diagnosis).toBeUndefined();
+    expect(checkDrill(do3, { ...right, 'cal1-move': 'o-cal-ben-ava' }).diagnosis).toBeUndefined();
+    // Try each spot: Eli first kept, though the broken clue is about Eli's own spot.
+    const r1 = rightPicks(do1);
+    expect(checkDrill(do1, { ...r1, 'eli1-keep': 'keep' }).diagnosis).toBe('own-spot-kept');
+    expect(checkDrill(do1, { ...r1, 'eli1-c1': 'true' }).diagnosis).toBeUndefined();
+    for (const st of L3_DRILL) {
+      confusedOk(st.confused, st.id);
+      for (const mc of st.misconceptions ?? []) {
+        expect(mc.text).toMatch(/^You may be treating .+ as the same thing\. They are two different things/);
+        expect(sentences(mc.text).length, mc.text).toBeLessThanOrEqual(4);
+      }
+    }
+  });
+
+  it('try vs one line (lesson 3): every rule and hint says to cross out a spot only when no way of placing the others works', () => {
+    const NO_WAY = 'only when no way of placing the others keeps every clue true.';
+    for (let seed = 1; seed <= 60; seed++) {
+      for (const it of [...stop3.lessons[2].practice(createRng(seed)), ...stop3.check!(createRng(seed)).filter((x) => x.lesson === 's3.l3')]) {
+        if (it.kind !== 'choose') continue;
+        const text = playerText(it).join(' ');
+        expect(text).not.toMatch(/breaks a clue\. If one|Cross out any spot that breaks|anyone who breaks a clue|No clue compares/);
+        expect(it.teach!.rule).toContain(NO_WAY);
+        expect(it.hint!.endsWith(NO_WAY), it.hint).toBe(true);
+        // The cases are best tries: no line with that answer breaks fewer clues. The first broken one says so.
+        const ids = settingNames(it.prompt);
+        const clues = itemClues(it);
+        const where = it.choices.some((c) => c.id === 'p1');
+        const cases = it.teach!.cases!;
+        const lines = cases.map((c) => lineIn(c.label)!);
+        // The cases go answer by answer: where is x (x in spot 1, 2, …), or who is in spot k (each name in turn).
+        const x = ids.find((id) => lines.every((l, i) => l.indexOf(id) === i));
+        const k = ids.map((_, i) => i).find((i) => lines.every((l, j) => l[i] === ids[j]));
+        expect(where ? x : k, it.prompt).toBeDefined();
+        let said = 0;
+        for (const [i, c] of cases.entries()) {
+          expect(c.label.startsWith('Best try: '), c.label).toBe(true);
+          const line = lines[i];
+          const same = perms(ids).filter((p) => (where ? p.indexOf(x!) === i : p[k!] === ids[i]));
+          expect(brokenHolds(clues, line).length).toBe(Math.min(...same.map((p) => brokenHolds(clues, p).length)));
+          if (c.note!.includes('No way of placing the others keeps every clue true.')) {
+            said++;
+            expect(brokenHolds(clues, line).length).toBeGreaterThan(0);
+          }
+        }
+        expect(said).toBe(cases.some((c) => brokenHolds(clues, lineIn(c.label)!).length) ? 1 : 0);
+      }
+    }
+  });
+
+  it('try vs one line (lesson 3): each question has the test board and I’m confused; the move-others tag is computed and in every pack', () => {
+    for (let seed = 1; seed <= 60; seed++) {
+      const pack = stop3.lessons[2].practice(createRng(seed));
+      expect(pack.some((x) => x.tags?.includes('move-others')), `seed ${seed}`).toBe(true);
+      for (const it of pack) {
+        if (it.kind !== 'choose') continue;
+        const ids = settingNames(it.prompt);
+        const clues = itemClues(it);
+        const fit = fitHolds(ids, clues);
+        const where = it.choices.some((c) => c.id === 'p1');
+        confusedOk(it.confused, it.id);
+        expect(it.scratchLabel).toBe('the test board');
+        const sc = it.scratch!;
+        expect(sc.words?.closing).toMatch(/^Those ideas are apart now\. Back to the question: /);
+        expect(sc.rows.length).toBe(ids.length);
+        for (const r of sc.rows) expect(r.needs).toMatch(/^Testing: .+\. The others can move\.$/);
+        // Each try on the test board is kept exactly when some line that fits puts that answer there.
+        const target = /where is (\w+)|did (\w+) finish/i.exec(it.prompt);
+        const x = where ? (target![1] ?? target![2]).toLowerCase() : '';
+        const keptOf = (r: DrillRow) => r.marks[0].answer === 'keep';
+        if (where) {
+          for (const r of sc.rows) expect(keptOf(r), `${it.id} ${r.id}`).toBe(fit.some((p) => p.indexOf(x) + 1 === Number(r.id.slice('try-'.length))));
+        } else {
+          // A who question: the rows are the people, and some spot k makes the kept ones exactly who can stand there.
+          const kept = sc.rows.filter(keptOf).map((r) => r.id.slice('try-'.length)).sort();
+          const ks = ids.map((_, i) => i).filter((i) => JSON.stringify([...new Set(fit.map((p) => p[i]))].sort()) === JSON.stringify(kept));
+          expect(ks.length, `${it.id} ${it.prompt}`).toBeGreaterThan(0);
+          expect(kept.length === 1 ? it.answer === kept[0] : it.answer === CANT).toBe(true);
+        }
+        // move-others: some answer the clues keep has its first line (the others in the order the prompt names them) broken.
+        const natural = (pin: string, at: number) => {
+          const rest = ids.filter((id) => id !== pin);
+          return [...rest.slice(0, at - 1), pin, ...rest.slice(at - 1)];
+        };
+        if (where) {
+          const kept = [...new Set(fit.map((p) => p.indexOf(x) + 1))];
+          const tag = kept.some((at) => brokenHolds(clues, natural(x, at)).length > 0);
+          expect(!!it.tags?.includes('move-others'), `${it.id} ${it.prompt}`).toBe(tag);
+        }
+      }
+    }
+  });
+
+  it('a named spot vs a proved one (lesson 4): the contrast card, the worked example and the no-spot board, worked out again', () => {
+    const l4 = stop3.lessons[3];
+    expect(l4.distinctions).toEqual([NAMED_VS_PROVED]);
+    expect(l4.ideas.length).toBeLessThanOrEqual(7);
+    const card = l4.ideas.find((c) => c.distinction === NAMED_VS_PROVED.id)!;
+    const sc = contrastOf(card);
+    sc.pairs.forEach((p, i) => {
+      const b = [L4_NAMED, L4_PROVED][i];
+      expect(p.world.split(/(?<=\.) /).map(readBoardClue)).toEqual(b.clues);
+      const fit = fitHolds(ABC_IDS, b.clues);
+      expect(p.truth).toBe(new Set(fit.map((o) => o.indexOf('ben'))).size === 1);
+      expect(p.then).toBe('Ben finished second in every line that fits.');
+    });
+    expect(sc.pairs.map((p) => p.truth)).toEqual([true, true]);
+    // No clue names a spot on the second board, yet every line that fits puts Ben between Ava and Cal.
+    expect(L4_PROVED.clues.some((c) => ['first', 'last', 'place'].includes(c.t))).toBe(false);
+    expect(fitHolds(ABC_IDS, L4_PROVED.clues).every((o) => holds({ t: 'between', a: 'ben', b: 'ava', c: 'cal' }, o))).toBe(true);
+    // The worked example: no spot clue, one line, and the card names it.
+    const ex = l4.ideas.find((c) => c.title === 'No clue names a spot')!;
+    expect(L4_NOSPOT.clues.some((c) => ['first', 'last', 'place'].includes(c.t))).toBe(false);
+    const only = fitHolds(ABCD_IDS, L4_NOSPOT.clues);
+    expect(only.length).toBe(1);
+    expect(ex.scene!.kind === 'clues' && ex.scene!.line?.names.map((s) => s.toLowerCase())).toEqual(only[0]);
+    expect(ex.body.join(' ')).toContain(`That gives ${only[0].map(capName).join(', ')}.`);
+    // Clues 1 and 2 alone put Ben between Ava and Dee.
+    expect(fitHolds(ABCD_IDS, L4_NOSPOT.clues.slice(0, 2)).every((o) => holds({ t: 'between', a: 'ben', b: 'ava', c: 'dee' }, o))).toBe(true);
+    // The board: a twin (clue 3 changed) whose line is different.
+    const do3 = L4_DRILL[2];
+    expect(do3.distinction).toBe(NAMED_VS_PROVED.id);
+    expect(fitHolds(ABCD_IDS, L4_NOSPOT_TWIN.clues)).toEqual([['cal', 'dee', 'ben', 'ava']]);
+    expect(do3.done).toContain('The line is Cal, Dee, Ben, Ava.');
+    const right = rightPicks(do3);
+    expect(checkDrill(do3, { ...right, 'mid-where': 'end' }).diagnosis).toBe('next-to-end');
+    expect(checkDrill(do3, { ...right, 'block-way': 'o-ava-ben-dee' }).diagnosis).toBeUndefined();
+    expect(checkDrill(do3, right).diagnosis).toBeUndefined();
+    confusedOk(do3.confused, do3.id);
+  });
+
+  it('a named spot vs a proved one (lesson 4): with no spot clue, the hint names a first step that the clues prove', () => {
+    const kinds = new Set<string>();
+    for (let seed = 1; seed <= 150; seed++) {
+      const skin = skinAt(seed);
+      const { item, ids, clues } = buildPuzzle(createRng(seed), { id: 'x', skin, n: 4, types: TAUGHT_TYPES, anchor: false });
+      expect(clues.some((c) => ['first', 'last', 'place'].includes(c.t))).toBe(false);
+      expect(item.tags).toEqual(['no-spot-clue']);
+      const fit = fitHolds(ids, clues);
+      const h = item.hint!.replace(/^Here is one line, checked clue by clue\. /, '');
+      const name = (s: string) => s.toLowerCase();
+      let m: RegExpExecArray | null;
+      if ((m = /^Cross out .+\. Only (\w+) is left, so \w+ (?:must|must have|must be) (?:finished |be )?(.+?)\. Then place the rest one by one\.$/.exec(h))) {
+        kinds.add('end');
+        const end = /first|front|tallest|longest|left end/.test(m[2]) ? 0 : ids.length - 1;
+        expect(fit.every((o) => o[end] === name(m![1])), h).toBe(true);
+      } else if ((m = /^Look at “(.+)” and “(.+)” (\w+) is next to (\w+) and next to (\w+)\. So .+\. Then place the rest one by one\.$/.exec(h))) {
+        kinds.add('between');
+        const two = [m[1], m[2]].map((s) => classify(/[.?]$/.test(s) ? s : `${s}.`));
+        expect(fitHolds(ids, two).every((o) => holds({ t: 'between', a: name(m![3]), b: name(m![4]), c: name(m![5]) }, o)), h).toBe(true);
+      } else if ((m = /^Look at “(.+)” and “(.+)” Together they put three in order\. [A-Z][a-z ]+: (\w+), then (\w+), then (\w+)\. Then place the rest one by one\.$/.exec(h))) {
+        kinds.add('order3');
+        const two = [m[1], m[2]].map((s) => classify(/[.?]$/.test(s) ? s : `${s}.`));
+        const [a, b, c] = [m[3], m[4], m[5]].map(name);
+        expect(fitHolds(ids, two).every((o) => o.indexOf(a) < o.indexOf(b) && o.indexOf(b) < o.indexOf(c)), h).toBe(true);
+      } else if ((m = /^Start with “(.+)” (\w+) and (\w+) stand together as a pair\. Then place the rest one by one\.$/.exec(h))) {
+        kinds.add('pair');
+        const c = classify(/[.?]$/.test(m[1]) ? m[1] : `${m[1]}.`);
+        expect(['nextTo', 'rightBefore']).toContain(c.t);
+      } else {
+        expect(h).toBe('No clue names a spot, and no pair has to stand together. Try a line, check every clue, and fix it.');
+        expect(clues.some((c) => c.t === 'nextTo' || c.t === 'rightBefore')).toBe(false);
+        kinds.add('try');
+      }
+      expect(item.explain.endsWith(`Only one order keeps every clue true: ${item.answer.map((id) => item.names.find((c) => c.id === id)!.label).join(', ')}${SKINS[skin].orderNote ? ` (${SKINS[skin].orderNote})` : ''}.`)).toBe(true);
+    }
+    expect([...kinds].sort()).toEqual(expect.arrayContaining(['between', 'end', 'order3']));
+    // “Explain more simply” for a line with no spot clue: one answer, and it says no clue names a spot.
+    for (const s of SKIN_IDS) {
+      const mini = buildSimpler(SKINS[s], [], false);
+      expect(fitHolds(mini.ids, mini.clues).length).toBe(1);
+      expect(mini.clues.some((c) => ['first', 'last', 'place'].includes(c.t))).toBe(false);
+      expect(mini.text[1]).toMatch(/^No clue names a spot\. /);
+    }
+  });
+
+  it('reworded: “No clue compares” is gone from every card, board, question and real-life line of the stop', () => {
+    const cardWords = stop3.lessons.flatMap((l) => l.ideas.flatMap((c) => [...c.body, ...(c.scene?.kind === 'contrast' ? c.scene.pairs.flatMap((p) => [p.world, p.says, p.because, p.then ?? '']) : [])]));
+    const boardWords = stop3.lessons.flatMap((l) => (l.drill ?? []).flatMap((st) => [...drillWords(st), ...st.rows.map((r) => r.needs ?? ''), ...(st.misconceptions ?? []).map((m) => m.text), ...(st.confused ?? []).flatMap((q) => [q.q, q.teach])]));
+    const quizWords = [1, 2, 3, 4, 5].flatMap((seed) => [...stop3.lessons.flatMap((l) => l.practice(createRng(seed))), ...stop3.check!(createRng(seed))].flatMap(playerText));
+    const all = [...cardWords, ...boardWords, ...quizWords].join('\n');
+    expect(all).not.toMatch(/No clue compares|no clue compares/);
+    expect(all).toContain('No clue, and no chain of clues, links');
+    expect(all).not.toMatch(/['"]|\bWrong\b|[=≠✓→&]/);
+  });
+});
+
+// ---------- review of the distinction fixes: flow, words that do not repeat, and truths said in the text ----------
+
+/** Where the lesson runner opens each board (LessonRunner lessonStages): after card afterCard, else after the last card. */
+function boardSlots(l: LessonDef): number[] {
+  let floor = 0;
+  return (l.drill ?? []).map((st) => (floor = Math.max(floor, Math.min(l.ideas.length - 1, st.afterCard ?? l.ideas.length - 1))));
+}
+
+describe('stop 3: review of the distinction fixes', () => {
+  it('each distinction board is the first board after its contrast card; lesson 3 and 4 boards sit next to their own cards', () => {
+    for (const l of stop3.lessons) {
+      const slots = boardSlots(l);
+      for (const d of l.distinctions ?? []) {
+        const card = l.ideas.findIndex((c) => c.distinction === d.id);
+        const j = (l.drill ?? []).findIndex((b) => b.distinction === d.id);
+        expect(card, `${l.id} ${d.id} card`).toBeGreaterThanOrEqual(0);
+        expect(slots[j], `${l.id}: ${d.id} board comes after its card`).toBeGreaterThanOrEqual(card);
+        for (let k = 0; k < j; k++) expect(slots[k], `${l.id}: board ${k + 1} comes before the ${d.id} card`).toBeLessThan(card);
+      }
+    }
+    const at = (l: LessonDef, title: string) => l.ideas.findIndex((c) => c.title === title);
+    const [, , l3, l4] = stop3.lessons;
+    expect(boardSlots(l3)).toEqual([at(l3, 'Try each spot'), at(l3, 'Next to'), l3.ideas.length - 1]);
+    expect(boardSlots(l4)).toEqual([at(l4, 'A worked example'), at(l4, 'Test and fix'), l4.ideas.length - 1]);
+    // The “Between” card comes before the try-vs-line card that uses its clue; “Try each spot” before any board's tries.
+    expect(at(l3, 'Between')).toBeLessThan(l3.ideas.indexOf(L3_CONTRAST));
+    expect(at(l3, 'Try each spot')).toBeLessThan(at(l3, 'Next to'));
+  });
+
+  it('a mix-up’s words and the wrong mark’s own words never say the same sentence twice', () => {
+    for (const l of stop3.lessons) {
+      for (const st of l.drill ?? []) {
+        if (!st.misconceptions?.length) continue;
+        const right = rightPicks(st);
+        let fired = 0;
+        for (const m of marksToTap(st)) {
+          for (const o of m.options) {
+            if (o.id === m.answer) continue;
+            const got = checkDrill(st, { ...right, [m.id]: o.id });
+            if (!got.diagnosis) continue;
+            fired++;
+            const said = sentences(got.message);
+            expect(new Set(said).size, `${st.id} ${m.id}=${o.id}: ${got.message}`).toBe(said.length);
+          }
+        }
+        expect(fired, `${st.id}: some wrong pick shows a mix-up`).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('the truths the new texts state hold: the “Between” board’s done line, the no-spot worked example, the named-or-proved answer', () => {
+    // “One more clue decides the whole line.”
+    expect(L3_DRILL[2].done).toContain('One more clue decides the whole line.');
+    expect(fitHolds(['ava', 'ben', 'cal'], [...L3_BETWEEN.clues, L3_BETWEEN_ADD]).length).toBe(1);
+    // “Cal is just ahead of her. … Ben is behind her.”: in the one line, Cal is right before Ava and Ben right after.
+    const ex = stop3.lessons[3].ideas.find((c) => c.title === 'No clue names a spot')!;
+    expect(ex.body.join(' ')).toContain('Cal finished right before Ava, so Cal is just ahead of her. Ben is on Ava’s other side, so Ben is behind her.');
+    const [line] = fitHolds(['ava', 'ben', 'cal', 'dee'], L4_NOSPOT.clues);
+    expect(line.indexOf('cal') + 1).toBe(line.indexOf('ava'));
+    expect(line.indexOf('ava') + 1).toBe(line.indexOf('ben'));
+    // “Ben finished second both times”, worked out from both boards.
+    const sc = contrastOf(stop3.lessons[3].ideas.find((c) => c.distinction === NAMED_VS_PROVED.id)!);
+    for (const b of [L4_NAMED, L4_PROVED]) expect(new Set(fitHolds(['ava', 'ben', 'cal'], b.clues).map((o) => o.indexOf('ben')))).toEqual(new Set([1]));
+    expect(sc.ask!.a).toBe('No. Ben finished second both times. Only the way we know it changed: one clue names it, or two clues prove it together.');
+  });
+
+  it('the test board names each try’s spot the same way in its row and in its Testing line', () => {
+    const SPOT_WORDS = /\b(first|second|third|fourth|fifth|last|tallest|shortest|longest|front|back|left|right)\b/g;
+    for (let seed = 1; seed <= 40; seed++) {
+      for (const it of stop3.lessons[2].practice(createRng(seed))) {
+        for (const r of it.scratch?.rows ?? []) {
+          const spot = (s: string) => [...s.matchAll(SPOT_WORDS)].map((m) => m[1]).join(' ');
+          expect(spot(r.label), `${it.id}: ${r.label} / ${r.needs}`).toBe(spot(r.needs!.replace(/ The others can move\.$/, '')));
+        }
+      }
+    }
   });
 });

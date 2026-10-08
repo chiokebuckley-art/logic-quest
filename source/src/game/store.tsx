@@ -13,6 +13,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useReducer,
 import * as mastery from '../engine/journey/mastery';
 import type { CheckKind, CheckOutcome } from '../engine/journey/mastery';
 import * as saves from '../engine/save/save';
+import * as evidence from '../engine/evidence';
 import * as notebook from '../engine/notebook';
 import type { KV, Player, Registry, SaveData, Settings } from '../engine/save/save';
 import * as sync from '../engine/save/sync';
@@ -33,7 +34,7 @@ export type Route =
   | { name: 'players'; mode?: 'list' | 'new' | 'import' | 'link'; pinFor?: string }
   | { name: 'pattern'; workshop?: boolean; event?: string }
   | { name: 'home' }
-  | { name: 'journey'; track?: 'main' | 'side' }
+  | { name: 'journey'; track?: 'main' | 'side' | 'observatory' }
   /** One page per stop: lessons, checks, practice, Pattern Lab events and repair cards. */
   | { name: 'stop'; stopId: string }
   /** `stop`: open that stop's section (the Real life view). */
@@ -50,7 +51,13 @@ export type Route =
   /** The Wrong-Answer Notebook. `fix`: fixing the ready cards (the tab bar hides, like practice). */
   | { name: 'notebook'; fix?: boolean }
   /** `section: 'sync'` scrolls to Sync across devices. */
-  | { name: 'settings'; section?: 'sync' };
+  | { name: 'settings'; section?: 'sync' }
+  /** The Pattern Observatory's evidence checks on one place: the independent check, a delayed review, or a primer. */
+  | { name: 'evidence'; stopId: string; lessonId: string; kind: EvidenceKind }
+  /** The Pattern Observatory's short diagnostic: an entry level per track. */
+  | { name: 'diagnostic' };
+
+export type EvidenceKind = 'independent' | 'review' | 'primer';
 
 export type Tab = 'home' | 'journey' | 'arcade' | 'library' | 'me';
 
@@ -216,6 +223,17 @@ export interface Actions {
   setPatternPath(path: AgePath): void;
   finishPatternBridge(ids: string[], workshop: boolean): void;
   updateSettings(patch: Partial<Settings>): void;
+  // ---- Pattern Observatory evidence (engine/evidence.ts) ----
+  /** Log one answered Observatory item by meaning (first try, hints, supported, phase, confidence). */
+  recordEvidence(record: AnswerRecord, phase: evidence.EvidencePhase): void;
+  /** An independent check, a delayed review or a primer finished with `right` of `of` items right. */
+  finishEvidence(lessonId: string, kind: EvidenceKind, right: number, of: number): void;
+  /** The diagnostic finished (or a grown-up changed its levels). */
+  setDiagnostic(d: evidence.Diagnostic): void;
+  /** Plain labels for grown-ups on the Observatory screens. */
+  setPlainLabels(on: boolean): void;
+  /** A Pattern Lab bridge round's first answer, so bridges count as practice. */
+  recordBridgeFirst(eventId: string, first: boolean): void;
   /** Add a player from an export file. `play` also switches to them. */
   importSave(text: string, play: boolean): { name: string } | { error: string };
   /** The active player's export file, or null. */
@@ -498,7 +516,9 @@ export function StoreProvider({ children, kv: kvProp, fetchFn = browserFetch }: 
           fn: (d) => {
             // The guided boards come first: without them the lesson is not passed, whatever called this.
             if (lesson?.drill?.length && !d.drilled.includes(lessonId)) return d;
-            return { ...d, lessonRun: d.lessonRun?.lessonId === lessonId ? null : d.lessonRun, stops: { ...d.stops, [stopId]: mastery.completeLesson(d.stops[stopId], lessonId) } };
+            const next = { ...d, lessonRun: d.lessonRun?.lessonId === lessonId ? null : d.lessonRun, stops: { ...d.stops, [stopId]: mastery.completeLesson(d.stops[stopId], lessonId) } };
+            // An Observatory place: Lesson complete on the evidence profile, and the first delayed review in about two days.
+            return lesson?.routine ? { ...next, evidence: evidence.markComplete(next.evidence, lessonId, todayNow()) } : next;
           },
         });
       },
@@ -572,6 +592,47 @@ export function StoreProvider({ children, kv: kvProp, fetchFn = browserFetch }: 
       },
       updateSettings: (patch) => {
         dispatch({ type: 'save', fn: (d) => ({ ...d, settings: { ...d.settings, ...patch } }) });
+      },
+
+      recordEvidence: (r, phase) => {
+        const day = todayNow();
+        const entry: evidence.EvidenceEntry = {
+          item: r.itemId,
+          lesson: r.lesson,
+          skill: r.skill,
+          phase,
+          day,
+          right: r.correct,
+          first: r.firstTry && !r.help?.hint,
+          hints: r.help?.hint ? 1 : 0,
+          // A repair of the same item, a hinted answer, a board fixed first: practice with help, never independent.
+          supported: !r.firstTry || !!r.help?.hint || !!r.help?.boardFixed,
+          version: evidence.CONTENT_VERSION,
+          ...(r.conf !== undefined ? { conf: r.conf } : {}),
+        };
+        dispatch({ type: 'save', fn: (d) => ({ ...d, evidence: evidence.logAnswer(d.evidence, entry) }) });
+      },
+      finishEvidence: (lessonId, kind, right, of) => {
+        const day = todayNow();
+        dispatch({
+          type: 'save',
+          fn: (d) => {
+            let e = d.evidence;
+            if (kind === 'independent') e = evidence.recordIndependent(e, lessonId, right, of, day);
+            else if (kind === 'review') e = evidence.recordReview(e, lessonId, right, day);
+            else if (right >= evidence.EVIDENCE.primer.need) e = evidence.passPrimer(e, lessonId);
+            return { ...d, evidence: e };
+          },
+        });
+      },
+      setDiagnostic: (diag) => {
+        dispatch({ type: 'save', fn: (d) => ({ ...d, evidence: evidence.setDiagnostic(d.evidence, diag) }) });
+      },
+      setPlainLabels: (on) => {
+        dispatch({ type: 'save', fn: (d) => ({ ...d, evidence: evidence.setPlain(d.evidence, on) }) });
+      },
+      recordBridgeFirst: (eventId, first) => {
+        dispatch({ type: 'save', fn: (d) => ({ ...d, evidence: evidence.recordBridgeFirst(d.evidence, eventId, first) }) });
       },
 
       importSave: (text, play) => {
@@ -886,6 +947,8 @@ export function parentRoute(route: Route): Route | null {
   switch (route.name) {
     case 'home': case 'players': return null;
     case 'stop': return { name: 'journey' };
+    case 'evidence': return { name: 'stop', stopId: route.stopId };
+    case 'diagnostic': return { name: 'journey', track: 'observatory' };
     case 'learn': return { name: 'library', kind: 'ideas' };
     case 'pattern': return { name: 'library', kind: 'lab' };
     case 'progress': case 'notebook': case 'grownups': case 'settings': return { name: 'me' };

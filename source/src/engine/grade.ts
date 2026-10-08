@@ -217,6 +217,13 @@ export function grade(item: Item, answer: Answer | null): Graded {
       if (correct) return { correct, feedback: '', broken: [] };
       return { correct, ...assignFeedback(item, answer.values) };
     }
+    case 'number': {
+      if (answer.kind !== 'number') return { correct: false, feedback: item.explain };
+      const correct = answer.value === item.answer;
+      if (correct) return { correct, feedback: '' };
+      const why = item.whyWrong?.[String(answer.value)];
+      return { correct, feedback: why ?? `Your answer was ${answer.value}. The rule gives ${item.answer}${item.unit ? ` ${item.unit}` : ''}.` };
+    }
     case 'multi': {
       if (answer.kind !== 'multi') return { correct: false, feedback: item.explain };
       const correct = sameSet(answer.ids, item.answer);

@@ -5,24 +5,31 @@
 import { describe, expect, it } from 'vitest';
 import { arcadeItem, checkItems, freshItems, lesson } from '../../content/stop7/explanations';
 import {
+  FITS_CLOSING,
+  FITS_VS_EXPLAINS,
+  L2_CARDS,
   MAKERS,
   STORIES,
+  WHOLE_STORY,
   WORKED,
   WORKED_BOARD,
   WORKED_NEW,
   WORKED_SHOWN,
   EXPLAIN_SECONDS,
+  fitsQuestion,
+  wholeStoryQuestion,
   type Clue,
   type ExplainKind,
   type ExplainMade,
   type ExplainSkin,
   type Idea,
 } from '../puzzles/explanations';
+import { checkDrill, marksToTap } from '../drill';
 import { looks } from '../fresh';
 import { READING, fkGrade, longestSentence } from '../readability';
 import { createRng } from '../rng';
 import { teachStrings } from '../teach';
-import type { ChooseItem, Item } from '../types';
+import type { ChooseItem, ConfusedQuestion, DrillStep, Item, Scene } from '../types';
 
 const SEEDS = 240;
 const SKINS: ExplainSkin[] = ['everyday', 'fantasy', 'abstract'];
@@ -291,10 +298,11 @@ describe('the lesson', () => {
   });
 
   it('the boards: the worked example’s grid, every mark computed from the model, words for every wrong mark', () => {
-    const [b1, b2] = lesson.drill!;
+    // Board 1 is the fits-vs-explains board (tested below); boards 2 and 3 are on the worked example's grid.
+    const [, b1, b2] = lesson.drill!;
     type Grid = Extract<NonNullable<typeof b1.scene>, { kind: 'grid' }>;
-    // Board 1 is the worked example's grid with no best guess named (so no board mark can be copied from a caption).
-    const worked = lesson.ideas[3].scene as Grid;
+    // Board 2 is the worked example's grid with no best guess named (so no board mark can be copied from a caption).
+    const worked = lesson.ideas[L2_CARDS.example].scene as Grid;
     const g1 = b1.scene as Grid;
     expect(b1.twin?.trim()).toBeTruthy();
     expect({ ...g1, caption: '' }).toEqual({ ...worked, caption: '' });
@@ -332,7 +340,7 @@ describe('the lesson', () => {
   });
 
   it('the Do has the learner break a tie by extra things: board 2 first picks the best guess from the first two clues', () => {
-    const b2 = lesson.drill![1];
+    const b2 = lesson.drill![2];
     const row = b2.rows[0];
     expect(row.id).toBe('first');
     const pair = WORKED.ideas.filter((i) => fitsEvery(i, WORKED_SHOWN));
@@ -357,7 +365,7 @@ describe('the lesson', () => {
     const pair = WORKED.ideas.filter((i) => fitsEvery(i, WORKED_SHOWN));
     const splits = (c: Clue) => pair.filter((i) => c.fits[i.id]).length === 1;
     // Card 5: the rule, a check both ideas fit (can't tell them apart), and one they disagree on, drawn as a "?" column.
-    const card = lesson.ideas[4];
+    const card = lesson.ideas[L2_CARDS.example + 1];
     const body = card.body.join(' ');
     expect(body).toContain('look for a clue that one idea fits and the other does not');
     const same = WORKED_SHOWN.find((c) => !splits(c))!;
@@ -370,9 +378,9 @@ describe('the lesson', () => {
     for (const i of WORKED.ideas) expect(g.marks[i.id][WORKED_NEW.id]).toBe(WORKED_NEW.fits[i.id] ? 'yes' : 'no');
     // Board 1's done line: the roof splits the two ideas, so it is a good check.
     expect(splits(WORKED_BOARD)).toBe(true);
-    expect(lesson.drill![0].done).toContain('good check');
+    expect(lesson.drill![1].done).toContain('good check');
     // Board 2: a check mark whose answer is the clue the two ideas disagree on; every wrong option says why.
-    const m = lesson.drill![1].rows.find((r) => r.id === 'check')!.marks[0];
+    const m = lesson.drill![2].rows.find((r) => r.id === 'check')!.marks[0];
     const byId = (id: string) => [...WORKED_SHOWN, WORKED_BOARD, WORKED_NEW].find((c) => c.id === id);
     for (const o of m.options) {
       const c = byId(o.id);
@@ -382,7 +390,7 @@ describe('the lesson', () => {
     }
     expect(m.options.some((o) => o.id === 'none')).toBe(true);
     // The check board comes before the quiz, and the quiz's check item is item 2.
-    expect(lesson.drill![1].afterCard).toBeLessThan(lesson.ideas.length);
+    expect(lesson.drill![2].afterCard).toBeLessThan(lesson.ideas.length);
   });
 
   it('every explanation item gets 120 seconds in a check (they read long), and the “Was it a proof?” story 150', () => {
@@ -458,5 +466,267 @@ describe('the lesson', () => {
     const long = longestSentence(all);
     expect(long.words, long.sentence).toBeLessThanOrEqual(READING.maxSentenceWords);
     expect(all).not.toMatch(/["']/);
+  });
+});
+
+// ---------- the whole story, and fits vs explains (docs/CONTENT_GUIDE.md, “Distinctions”) ----------
+
+/** The words of a check or clue that name what it looks at: everything but small words and the story’s own names. */
+const STOP_WORDS = new Set(['a', 'an', 'the', 'at', 'in', 'on', 'for', 'of', 'to', 'if', 'is', 'was', 'are', 'be', 'when', 'what', 'where', 'who', 'how', 'look', 'ask', 'see', 'find', 'out', 'go', 'and', 'with', 'from', 'by', 'it', 'its', 'still', 'this', 'that', 'has', 'have', 'had', 'his', 'her', 'any', 'all', 'today', 'not', 'no', 'does', 'did', 'got']);
+const topics = (text: string, names: readonly string[]) =>
+  text
+    .toLowerCase()
+    .replace(/’s\b/g, '')
+    .split(/[^a-z]+/)
+    .filter((w) => w && !STOP_WORDS.has(w) && !names.includes(w));
+
+describe('a check that can’t tell two ideas apart (s7-rev-1)', () => {
+  it('in every story, the “same” check looks at something no ruling-out clue is about, so it can never rule an idea out', () => {
+    for (const s of STORIES) {
+      const names = [s.who.toLowerCase()];
+      const check = topics(s.neutral!.check, names);
+      expect(check.length, s.id).toBeGreaterThan(0);
+      for (const c of s.clues.slice(1)) {
+        const about = new Set([...topics(c.text, names), ...topics(c.check, names)]);
+        for (const w of check) expect(about.has(w), `${s.id}: “${s.neutral!.check}” could find “${c.text}” (${w})`).toBe(false);
+      }
+      // Every idea fits what it could find, and none explains it.
+      expect(s.ideas.every((i) => s.neutral!.fits[i.id] && !s.neutral!.explains?.includes(i.id)), s.id).toBe(true);
+    }
+    // The old mud check would fail this: looking in Rex’s bed shows whether Rex is wet.
+    const mud = STORIES.find((s) => s.id === 'mud')!;
+    const wet = mud.clues.find((c) => c.text === 'Rex is soaking wet.')!;
+    expect(topics('Look in Rex’s bed.', ['omar']).some((w) => topics(wet.text, ['omar']).includes(w))).toBe(true);
+    expect(mud.neutral!.check).toBe('Ask when Omar got home.');
+    expect(mud.neutral!.text).toBe('Omar got home at four.');
+  });
+
+  it('a mud “which check” item never offers a check that could rule an idea out as the wrong “same” choice', () => {
+    let seen = 0;
+    for (let seed = 1; seed <= SEEDS; seed++) {
+      const m = made('test', 'everyday', seed);
+      if (m.case.story.id !== 'mud') continue;
+      const it = choose(m);
+      const same = it.choices.find((c) => c.id === 'same')!;
+      expect(same.label).toBe('Ask when Omar got home.');
+      expect(it.feedback!.same.detail.join(' ')).toContain('Whatever it shows, both ideas stay in.');
+      seen++;
+    }
+    expect(seen).toBeGreaterThan(0);
+  });
+});
+
+describe('fits is not explains: each idea is the whole story (s7-l2-fits-vs-explains, s7-rev-2)', () => {
+  type Contrast = Extract<Scene, { kind: 'contrast' }>;
+  const plant = STORIES.find((s) => s.id === 'plant')!;
+  const cold = plant.ideas.find((i) => i.id === 'cold')!;
+  const soil = plant.clues.find((c) => c.text === 'The soil in the pot is still wet.')!;
+  const sprinkler = WORKED.ideas.find((i) => i.id === 'sprinkler')!;
+  const street = WORKED.clues.find((c) => c.short === 'Street wet')!;
+
+  it('card 2 states the whole-story rule and the Stop 6 bridge; the terms say it too', () => {
+    const card = lesson.ideas.find((c) => c.title === 'Fit every clue')!.body.join(' ');
+    expect(card).toContain('Picture the idea as the whole story of what happened. It fits a clue if the clue could still be true in that story. It misses a clue if the story would make the clue different.');
+    expect(card).toContain('In Stop 6, you asked: could it happen another way? Here, each idea is the whole story.');
+    expect(card).toContain('If it was all that happened, the street would be dry.');
+    expect(card).not.toContain('makes sense if the idea is true');
+    const it = choose(made('best', 'everyday', 1));
+    const terms = Object.fromEntries((it.teach!.terms ?? []).map((t) => [t.word, t.meaning]));
+    expect(terms['Fits a clue']).toBe('the clue could still be true in the idea’s whole story. The idea does not have to explain it.');
+    expect(terms['Misses a clue']).toBe('the idea’s story would make the clue different.');
+    expect(terms['The whole story']).toBeTruthy();
+    expect(lesson.ideas.length).toBeLessThanOrEqual(7);
+  });
+
+  it('the contrast card: the sprinkler and “Street wet” misses; the cold room and “Soil still wet” fits without explaining it', () => {
+    expect(lesson.distinctions).toEqual([FITS_VS_EXPLAINS]);
+    const k = lesson.ideas.findIndex((c) => c.distinction === FITS_VS_EXPLAINS.id);
+    expect(k).toBe(L2_CARDS.contrast);
+    expect(k).toBeLessThan(L2_CARDS.example);
+    const s = lesson.ideas[k].scene as Contrast;
+    expect(s.kind).toBe('contrast');
+    const [a, b] = s.pairs;
+    expect([a.world, a.says]).toEqual([`${sprinkler.text}.`, street.text]);
+    expect([b.world, b.says]).toEqual([`${cold.text}.`, soil.text]);
+    // The truths, from the model data here.
+    expect(a.truth).toBe(street.fits.sprinkler);
+    expect(a.truth).toBe(false);
+    expect(b.truth).toBe(soil.fits.cold);
+    expect(b.truth).toBe(true);
+    expect(soil.explains ?? []).not.toContain('cold');
+    expect(s.words).toMatchObject({ worldTag: 'Whole story', truth: 'Fits', untruth: 'Misses' });
+    expect(s.ask?.q).toBe('Does an idea have to explain a clue to fit it?');
+    expect(s.ask?.a.startsWith('No.')).toBe(true);
+  });
+
+  it('its board sits right after it: each case’s marks come from the model, and the right marks pass', () => {
+    const b = lesson.drill![0];
+    expect(b.distinction).toBe(FITS_VS_EXPLAINS.id);
+    expect(b.afterCard).toBe(L2_CARDS.contrast);
+    expect(b.scene).toEqual(lesson.ideas[L2_CARDS.contrast].scene);
+    expect(b.scaffold).toBe('full');
+    const all = [...STORIES, WORKED];
+    for (const r of b.rows) {
+      const [, ideaText, clueText] = /^Whole story: (.+)\. Clue: (.+)$/.exec(r.label)!;
+      const st = all.find((x) => x.ideas.some((i) => i.text === ideaText))!;
+      const idea = st.ideas.find((i) => i.text === ideaText)!;
+      const clue = st.clues.find((c) => c.text === clueText)!;
+      const [exp, fit] = r.marks;
+      expect(exp.answer).toBe(clue.explains?.includes(idea.id) ? 'yes' : 'no');
+      expect(fit.answer).toBe(clue.fits[idea.id] ? 'fit' : 'miss');
+      // An idea that explains a clue always fits it.
+      if (exp.answer === 'yes') expect(fit.answer).toBe('fit');
+      expect(fit.compare).toEqual({ says: clue.text, world: `${idea.text}.` });
+    }
+    // The cases hold every kind: a miss, a fit it does not explain, and a fit it does explain.
+    const kinds = b.rows.map((r) => r.marks.map((m) => m.answer).join('/'));
+    expect(kinds).toContain('no/miss');
+    expect(kinds).toContain('no/fit');
+    expect(kinds).toContain('yes/fit');
+    expect(checkDrill(b, Object.fromEntries(marksToTap(b).map((m) => [m.id, m.answer]))).done).toBe(true);
+  });
+
+  it('the mix-ups: a fit marked a miss because the idea does not explain it; a miss kept by adding another way', () => {
+    const b = lesson.drill![0];
+    const right = Object.fromEntries(marksToTap(b).map((m) => [m.id, m.answer]));
+    const diag = (wrong: Record<string, string>) => checkDrill(b, { ...right, ...wrong }).diagnosis;
+    const caseOf = (pred: (exp: string, fit: string) => boolean) => b.rows.find((r) => pred(r.marks[0].answer, r.marks[1].answer))!.id;
+    const fitNoExplain = caseOf((e, f) => e === 'no' && f === 'fit');
+    const miss = caseOf((e, f) => e === 'no' && f === 'miss');
+    const explained = caseOf((e) => e === 'yes');
+    expect(diag({ [`${fitNoExplain}-fit`]: 'miss' })).toBe('fits-as-explains');
+    expect(diag({ [`${miss}-fit`]: 'fit' })).toBe('not-whole-story');
+    expect(diag({ [`${explained}-fit`]: 'miss' })).toBeUndefined();
+    expect(diag({ [`${fitNoExplain}-explain`]: 'yes' })).toBeUndefined();
+    expect(diag({})).toBeUndefined();
+    const msg = checkDrill(b, { ...right, [`${fitNoExplain}-fit`]: 'miss' }).message;
+    expect(msg.startsWith('You may be treating “fits” and “explains” as the same thing. They are two different things.')).toBe(true);
+    for (const m of b.misconceptions!) {
+      expect(m.when).toBe('picks');
+      expect(m.text.startsWith('You may be treating')).toBe(true);
+    }
+  });
+
+  it('the grid board names fits-as-explains: a ✗ on the dry roof for an idea whose story leaves it possible; the rain box is a plain slip', () => {
+    const g = lesson.drill!.find((d) => d.id === 's7.l2-do1')!;
+    const right = Object.fromEntries(marksToTap(g).map((m) => [m.id, m.answer]));
+    const diag = (wrong: Record<string, string>) => checkDrill(g, { ...right, ...wrong }).diagnosis;
+    // Worked out here from the model: the ideas that fit the roof clue without explaining it.
+    const quiet = WORKED.ideas.filter((i) => WORKED_BOARD.fits[i.id] && !(WORKED_BOARD.explains ?? []).includes(i.id));
+    expect(quiet.map((i) => i.id).sort()).toEqual(['sprinkler', 'truck']);
+    for (const i of quiet) expect(diag({ [`${i.id}-${WORKED_BOARD.id}`]: 'no' }), i.id).toBe('fits-as-explains');
+    const missed = WORKED.ideas.find((i) => !WORKED_BOARD.fits[i.id])!;
+    expect(diag({ [`${missed.id}-${WORKED_BOARD.id}`]: 'yes' })).toBeUndefined();
+    expect(diag({})).toBeUndefined();
+    expect(g.confused?.length).toBe(2);
+    expect(g.words?.closing).toBe(FITS_CLOSING);
+  });
+
+  it('story questions say the rule, carry “I’m confused” and the clue board; grids and “was it a proof?” items do not', () => {
+    const wellFormed = (qs: readonly ConfusedQuestion[], where: string) => {
+      expect(qs.length, where).toBeGreaterThanOrEqual(1);
+      expect(qs.length, where).toBeLessThanOrEqual(3);
+      for (const q of qs) {
+        expect(q.options.filter((o) => o.right).length, `${where} ${q.q}`).toBe(1);
+        expect(q.options.some((o) => o.label === 'Not sure'), `${where} ${q.q}`).toBe(true);
+      }
+    };
+    wellFormed(lesson.drill![0].confused!, 'board');
+    expect(lesson.drill![0].words?.closing).toBe(FITS_CLOSING);
+    for (const kind of KINDS) for (const skin of SKINS) for (let seed = 1; seed <= 40; seed++) {
+      const m = made(kind, skin, seed);
+      const it = choose(m);
+      const story = !m.case.story.letters;
+      if (!story || kind === 'revise') {
+        expect(it.confused, `${kind} ${skin}`).toBeUndefined();
+        expect(it.scratch, `${kind} ${skin}`).toBeUndefined();
+        if (story) expect(it.prompt).not.toContain(WHOLE_STORY);
+        continue;
+      }
+      expect(it.prompt.startsWith(`${m.case.story.setting} ${WHOLE_STORY}`), it.prompt).toBe(true);
+      wellFormed(it.confused!, `${kind} ${seed}`);
+      expect(it.confused).toEqual([fitsQuestion(m.case.story.id), wholeStoryQuestion()]);
+      // The fits question is about another story, so it never gives this item’s answer.
+      const said = it.confused!.flatMap((q) => [q.q, q.teach, ...q.options.map((o) => o.label)]).join(' ');
+      for (const i of m.case.ideas) expect(said, `${kind} ${seed}`).not.toContain(i.text);
+      // The clue board: every idea by every clue, marked from the model; its closing line speaks of clues, not signs.
+      expect(it.scratchLabel).toBe('the clue board');
+      const s = it.scratch as DrillStep;
+      const clues = [...m.case.shown, ...(m.case.added ? [m.case.added] : [])];
+      expect(s.rows.map((r) => r.id)).toEqual(m.case.ideas.map((i) => i.id));
+      for (const r of s.rows) {
+        expect(r.label).toContain(m.case.ideas.find((i) => i.id === r.id)!.text);
+        expect(r.marks.map((mk) => mk.answer)).toEqual(clues.map((c) => (c.fits[r.id] ? 'fit' : 'miss')));
+        r.marks.forEach((mk, k) => expect(mk.label.endsWith(clues[k].text)).toBe(true));
+      }
+      expect(s.words?.closing).toBe(FITS_CLOSING);
+    }
+  });
+
+  it('the fits question uses a fit that does not explain, from another story; the whole-story question names the truck idea', () => {
+    for (const s of STORIES) {
+      const q = fitsQuestion(s.id);
+      const [, ideaText, clueText] = /^Say “(.+)” is the whole story\. Could “(.+)” still be true\?$/.exec(q.q)!;
+      const st = STORIES.find((x) => x.ideas.some((i) => i.text === ideaText))!;
+      expect(st.id).not.toBe(s.id);
+      const idea = st.ideas.find((i) => i.text === ideaText)!;
+      const clue = st.clues.find((c) => c.text === `${clueText}.`)!;
+      expect(clue.fits[idea.id]).toBe(true);
+      expect(clue.explains ?? []).not.toContain(idea.id);
+    }
+    expect(fitsQuestion('mud').q).toBe('Say “Nobody watered it” is the whole story. Could “The plant sits in the sunny window” still be true?');
+    const truck = WORKED.ideas.find((i) => i.id === 'truck')!;
+    expect(wholeStoryQuestion().teach).toContain(truck.text);
+    expect(truck.extras.length).toBeGreaterThan(sprinkler.extras.length);
+  });
+
+  it('a fit is never worded as a bare “fits it”: the idea explains it, or its whole story leaves the clue possible', () => {
+    for (const kind of KINDS) for (const skin of ['everyday', 'fantasy'] as ExplainSkin[]) for (let seed = 1; seed <= 60; seed++) {
+      const it = choose(made(kind, skin, seed));
+      const text = [it.explain, ...teachStrings(it), ...Object.values(it.whyWrong ?? {})].join(' ');
+      expect(text, `${kind} ${skin} ${seed}`).not.toMatch(/(^|\. )(The [a-z ]+ idea|Idea [XYZ]) fits it\./);
+      // The old test (“would it make sense if the idea were true?”) reads fits as explains; the whole-story test replaces it.
+      expect(text, `${kind} ${skin} ${seed}`).not.toMatch(/make sense if the idea/);
+    }
+    // The paint idea misses “Rex is soaking wet” because its whole story leaves Rex dry.
+    const mud = STORIES.find((s) => s.id === 'mud')!;
+    expect(mud.clues.find((c) => c.text === 'Rex is soaking wet.')!.why.paint).toBe('If the paint joke is the whole story, nothing made Rex wet.');
+  });
+
+  it('the board scenes say “Each idea is the whole story” in their captions', () => {
+    for (const d of lesson.drill!.slice(1)) {
+      const g = d.scene as Extract<Scene, { kind: 'grid' }>;
+      expect(g.caption!.startsWith(WHOLE_STORY), d.id).toBe(true);
+      if (d.caption) expect(d.caption.startsWith(WHOLE_STORY)).toBe(true);
+    }
+    expect((lesson.ideas[L2_CARDS.example].scene as Extract<Scene, { kind: 'grid' }>).caption!.startsWith(WHOLE_STORY)).toBe(true);
+  });
+
+  it('the new cards, board, mix-ups, questions and clue boards read at grade 7 or lower, with curly quotes only', () => {
+    const text: string[] = [];
+    for (const c of lesson.ideas) {
+      text.push(...c.body);
+      if (c.scene?.kind === 'contrast') text.push(...c.scene.pairs.flatMap((p) => [p.world, p.says, p.because, p.then ?? '']), c.scene.ask!.q, c.scene.ask!.a);
+    }
+    const boardText = (d: DrillStep) => [
+      d.title,
+      ...d.body,
+      d.done,
+      ...d.rows.flatMap((r) => [r.label, ...r.marks.flatMap((m) => [m.label, ...Object.values(m.why), m.compare?.says ?? '', m.compare?.world ?? ''])]),
+      ...(d.misconceptions ?? []).map((m) => m.text),
+      ...(d.confused ?? []).flatMap((q) => [q.q, q.teach, ...q.options.map((o) => o.label)]),
+      ...Object.values(d.words ?? {}),
+    ];
+    text.push(...boardText(lesson.drill![0]));
+    for (const kind of ['best', 'test', 'new-clue'] as ExplainKind[]) for (let seed = 1; seed <= 20; seed++) {
+      const it = choose(made(kind, 'everyday', seed));
+      text.push(...boardText(it.scratch!), ...it.confused!.flatMap((q) => [q.q, q.teach, ...q.options.map((o) => o.label)]));
+    }
+    const all = text.filter(Boolean).join('\n');
+    expect(fkGrade(all)).toBeLessThanOrEqual(READING.maxGrade);
+    const long = longestSentence(all);
+    expect(long.words, long.sentence).toBeLessThanOrEqual(READING.maxSentenceWords);
+    expect(all).not.toMatch(/['"]/);
+    expect(all).not.toMatch(/[=≠→&]/);
   });
 });

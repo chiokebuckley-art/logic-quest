@@ -14,7 +14,7 @@
  * a guided board the learner marks by taps (LessonDef.drill), then quiz items of only the rule family those taught.
  */
 import { syncWhyWrong } from '../engine/teach';
-import type { Choice, ChoiceFeedback, ChooseItem, DrillRow, DrillStep, Item, LessonDef, Rng, Scene, StopDef, TeachCase, Thing, Truth } from '../engine/types';
+import type { Choice, ChoiceFeedback, ChooseItem, Distinction, DrillRow, DrillStep, IdeaCard, Item, LessonDef, Rng, Scene, StopDef, TeachCase, Thing, Truth } from '../engine/types';
 import {
   FRAMES,
   NOT_COMPARE_KEYS,
@@ -34,11 +34,19 @@ import {
   type Verdict,
 } from '../engine/puzzles/statements';
 import {
+  RULE_VS_STAMP,
   SIGN_RULES,
   SIGN_SKINS,
+  TREASURE_VS_SIGN,
   signCaseNote,
+  signContrastCard,
+  signDistinctionDrill,
   signDrill,
   signItem,
+  signOwnerContrastCard,
+  signOwnerDrill,
+  signRuleContrastCard,
+  signRuleStampDrill,
   signTwins,
   signWalk,
   signWords,
@@ -701,7 +709,25 @@ export const L4_DRILL = signDrill(L4_EXAMPLE, 'chest', {
   shown: [1, 2],
   mark: [0],
   done: 'Right. With the treasure in the Gold chest, two signs are true. The rule needs exactly one, so Gold is crossed out. You just did a case check.',
+  scaffold: 'full',
 });
+
+/**
+ * Before any case is marked: the distinction the chests rest on, where the treasure is vs whether a sign's words are
+ * true, as a contrast card (card 2) and a two-sign board right after it. Silver's own sign is false with the treasure
+ * in Silver, so the example itself shows that a chest can hold the treasure under a false sign.
+ */
+export const L4_CONTRAST = signContrastCard(L4_EXAMPLE, 'chest');
+export const L4_DISTINCTION_DRILL = signDistinctionDrill(L4_EXAMPLE, 'chest', 's1.l4-two-things', 1);
+
+/**
+ * Then the second distinction, the rule vs the stamps, before the worked example: card 3 and its board. The test is
+ * the Gold chest, where the words make two signs true (Gold's “in this chest” and Silver's “not in this chest”) under
+ * “Exactly one sign is true.” Both are stamped True; then the rule rejects Gold. The rule never changes a stamp.
+ */
+export const L4_RULE_TEST = 0;
+export const L4_RULE_CONTRAST = signRuleContrastCard(L4_EXAMPLE, 'chest', L4_RULE_TEST);
+export const L4_RULE_DRILL = signRuleStampDrill(L4_EXAMPLE, 'chest', 's1.l4-rule-last', 2, L4_RULE_TEST);
 
 /**
  * The first quiz: the example's chests with one sign changed. Bronze's sign loses its “not”: “The treasure is in the
@@ -719,6 +745,7 @@ export const L4_TWIN_WORK = signDrill(L4_TWIN, 'chest', {
   mark: [0, 1, 2],
   done: 'Every chest is checked. Now answer the question.',
   twin: twinOf(L4_EXAMPLE, L4_TWIN, 'chest'),
+  scaffold: 'full',
 });
 
 /**
@@ -798,7 +825,39 @@ interface SignLessonSpec {
   twin: SignPuzzle;
   /** The cards before the worked example: the new rule, and how to check it. */
   intro: { title: string; body: string[] }[];
+  /**
+   * The reminder cards after the intro, one per distinction taught in Treasure signs, in this rule's words. Default:
+   * the shared treasure-vs-sign reminder.
+   */
+  remember?: IdeaCard[];
+  /** A contrast card of this lesson's own, after the reminders, and its board (afterCard: that card). */
+  contrast?: { card: IdeaCard; board: DrillStep };
+  /** The distinctions this lesson relies on, each taught in Treasure signs. Default: treasure-vs-sign. */
+  distinctions?: Distinction[];
 }
+
+/** A distinction Treasure signs teaches, as a later sign lesson declares it. */
+const fromL4 = (d: Distinction): Distinction => ({ ...d, taughtIn: 's1.l4' });
+
+/**
+ * The shared reminder: where the treasure is vs whether a sign is true, in the words of a count rule. Both ways: the
+ * treasure's place makes a sign neither true nor false (s1-rev-1), so it never says a test makes every sign false.
+ */
+const REMEMBER_SIGN: IdeaCard = {
+  title: 'Remember: two different things',
+  distinction: TREASURE_VS_SIGN.id,
+  body: [
+    'Where the treasure is and whether a sign is true are two different things.',
+    'Where the treasure is does not make a sign true, and it does not make it false. Only the words on the sign decide, checked against the test.',
+  ],
+};
+
+/** The rule vs the stamps, said again in a count rule's words: a test may break the rule, and that rejects the chest. */
+const rememberRule = (inTest: string): IdeaCard => ({
+  title: 'Remember: stamps first, rule last',
+  distinction: RULE_VS_STAMP.id,
+  body: [`The rule is about the real place. ${inTest}`, 'Never change a stamp to make it fit the rule.'],
+});
 
 /**
  * One sign-rule lesson: the intro cards, the worked example on the case board one chest at a time (See), one chest
@@ -819,7 +878,12 @@ function signLesson(o: SignLessonSpec): LessonDef {
     shown: others,
     mark: [reject],
     done: `Right. ${signCaseNote(p, 'chest', reject)} So ${w.the(reject)} is crossed out. You just did a case check.`,
+    scaffold: 'full',
   });
+  // The distinctions from Treasure signs, said again before this rule's cases, in this rule's words.
+  const remember = o.remember ?? [REMEMBER_SIGN];
+  const cards = [...o.intro, ...remember];
+  if (o.contrast && o.contrast.board.afterCard !== cards.length) throw new Error(`${o.id}: the contrast board opens right after its card`);
   const twinWork = signDrill(o.twin, 'chest', {
     id: `${o.id}-p1-work`,
     title: 'Check each chest',
@@ -832,8 +896,9 @@ function signLesson(o: SignLessonSpec): LessonDef {
   return {
     id: o.id,
     title: o.title,
-    ideas: [...o.intro, ...signWalk(p, 'chest')],
-    drill: [drill],
+    ideas: [...cards, ...(o.contrast ? [o.contrast.card] : []), ...signWalk(p, 'chest')],
+    drill: [...(o.contrast ? [o.contrast.board] : []), drill],
+    distinctions: o.distinctions ?? [fromL4(TREASURE_VS_SIGN)],
     // Quiz: try 1 is the twin (one sign changed, a different answer), checked on the case board; then a door, a cave
     // and a box board in any order. Every one uses this lesson's rule and nothing else.
     practice: practiceOf(o.id, (rng) => {
@@ -847,6 +912,12 @@ function signLesson(o: SignLessonSpec): LessonDef {
   };
 }
 
+/**
+ * Every sign is false. The rule is about the real place; in a test a sign can still come out True, and that True
+ * stamp is what rejects the chest (the Do board's Gold case has all three signs True). So the reminders never say
+ * "every sign is false" about a test: one card for each distinction Treasure signs taught. The two intro cards are
+ * one card, to make room.
+ */
 const L5 = signLesson({
   id: 's1.l5',
   title: 'Every sign is false',
@@ -857,20 +928,21 @@ const L5 = signLesson({
       title: 'A new rule',
       body: [
         'Here is a new rule: “Every sign is false.”',
-        'It means no sign tells the truth. The number of true signs is 0.',
-        'The rule is always right, just like before.',
-      ],
-    },
-    {
-      title: 'The same check',
-      body: [
+        'It means no sign tells the truth. The number of true signs is 0. The rule is always right, just like before.',
         'Check each chest the same way. Pretend the treasure is in it. Mark each sign true or false.',
         'Count the true signs. Keep the chest where no sign is true. Reject the others.',
       ],
     },
   ],
+  remember: [REMEMBER_SIGN, rememberRule('In a test, a sign can come out True. Stamp from the words. A True stamp just means: reject this chest.')],
+  distinctions: [fromL4(TREASURE_VS_SIGN), fromL4(RULE_VS_STAMP)],
 });
 
+/**
+ * Exactly two signs are true. The same two reminders as Every sign is false: in a test the words can give 0, 1 or 3
+ * True stamps (the Do board's Silver case gives 1), and that count is what rejects the chest. The two intro cards are
+ * one card, to make room.
+ */
 const L6 = signLesson({
   id: 's1.l6',
   title: 'Exactly two signs are true',
@@ -881,19 +953,25 @@ const L6 = signLesson({
       title: 'A new rule',
       body: [
         'Here is a new rule: “Exactly two signs are true.”',
-        'It means two signs tell the truth, and one does not. The number of true signs is 2.',
-        '“Exactly two” means 2, no more and no fewer. Three true signs do not fit.',
-      ],
-    },
-    {
-      title: 'The same check',
-      body: [
+        'It means two signs tell the truth, and one does not. The number of true signs is 2. “Exactly two” means 2, no more and no fewer. Three true signs do not fit.',
         'Check each chest the same way. Pretend the treasure is in it. Mark each sign true or false.',
         'Count the true signs. Keep the chest that makes exactly two signs true. Reject the others.',
       ],
     },
   ],
+  remember: [REMEMBER_SIGN, rememberRule('In a test, you may get 0, 1 or 3 True stamps. Stamp from the words anyway. A count that is not 2 just means: reject this chest.')],
+  distinctions: [fromL4(TREASURE_VS_SIGN), fromL4(RULE_VS_STAMP)],
 });
+
+/**
+ * The owner's sign. Its rule ties the real treasure chest to a true sign, so a reminder that "the chest with the
+ * treasure can have a false sign" would seem to contradict it. Here the reminder says the rule is about the real chest and
+ * is checked after the stamps, and a contrast card shows it: the same test (the Do board's chest), two signs on it,
+ * True passes part 1 and False fails it. The two intro cards are one card, to make room.
+ */
+const L7_TEST = [0, 1, 2].find((b) => b !== L7_EXAMPLE.answer)!;
+export const L7_OWNER_CONTRAST = signOwnerContrastCard(L7_EXAMPLE, 'chest', L7_TEST);
+export const L7_OWNER_DRILL = signOwnerDrill(L7_EXAMPLE, 'chest', 's1.l7-part-one', 2, L7_TEST);
 
 const L7 = signLesson({
   id: 's1.l7',
@@ -906,16 +984,23 @@ const L7 = signLesson({
       body: [
         'Here is a new rule: “The sign on the chest with the treasure is true. The other signs are false.”',
         'Counting is not enough here. The one true sign has to be on the chest with the treasure.',
-      ],
-    },
-    {
-      title: 'Check two things',
-      body: [
-        'Pretend the treasure is in a chest. First, is that chest’s own sign true?',
-        'Then look at the other two signs. Both must be false. If either part fails, reject the chest.',
+        'Pretend the treasure is in a chest. Stamp each sign from its words. Part 1: is that chest’s own sign True? Part 2: are the other two signs False?',
+        'If either part fails, reject the chest.',
       ],
     },
   ],
+  remember: [
+    {
+      title: 'Remember: two different things',
+      distinction: TREASURE_VS_SIGN.id,
+      body: [
+        'Where we pretend the treasure is and whether a sign is true are two different things. The pretend place does not make a sign true, and it does not make it false.',
+        'The rule is about the real treasure chest. In a test, it does not make a sign true. First stamp each sign from its words. Then check the rule: is the pretend chest’s own stamp True?',
+      ],
+    },
+  ],
+  contrast: { card: L7_OWNER_CONTRAST, board: L7_OWNER_DRILL },
+  distinctions: [fromL4(TREASURE_VS_SIGN), fromL4(RULE_VS_STAMP)],
 });
 
 const lessons: LessonDef[] = [
@@ -1092,24 +1177,23 @@ const lessons: LessonDef[] = [
     id: 's1.l4',
     title: 'Treasure signs',
     ideas: [
+      // The first two cards are one, so both distinctions fit before the worked example (7 cards at most).
       {
         title: 'Three chests and a rule',
         body: [
           'There are three chests. The treasure is in just one of them. Each chest has a sign.',
-          'A sign might tell the truth, or it might not. A rule tells you about the signs: “Exactly one sign is true.”',
-          'The rule is always right. Use it to find the treasure.',
+          'A sign might tell the truth, or it might not. A rule tells you about the signs: “Exactly one sign is true.” The rule is always right. Use it to find the treasure.',
+          'Try each chest. Pretend the treasure is in one chest. That is your test. Check each sign against the test: do its words fit? A sign that says “this chest” means the chest it is on.',
+          'Count the true signs. Compare the count with the rule. Keep the chest if it fits. If not, reject it: cross it out. Then try the next chest.',
         ],
       },
-      {
-        title: 'Try each chest',
-        body: [
-          'Pretend the treasure is in one chest. Check each sign: is it true or false? A sign that says “this chest” means the chest it is on.',
-          'Count the true signs. Keep the chest if the count fits the rule. If not, reject it: cross it out. Then try the next chest.',
-        ],
-      },
+      L4_CONTRAST,
+      L4_RULE_CONTRAST,
       ...signWalk(L4_EXAMPLE, 'chest'),
     ],
-    drill: [L4_DRILL],
+    // The Do for each distinction sits right after its card; the case board comes after the worked example.
+    drill: [L4_DISTINCTION_DRILL, L4_RULE_DRILL, L4_DRILL],
+    distinctions: [TREASURE_VS_SIGN, RULE_VS_STAMP],
     practice: practiceOf('s1.l4', lesson4Practice),
   },
   L5,

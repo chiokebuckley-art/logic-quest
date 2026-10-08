@@ -81,10 +81,12 @@ function expectedTruths(skin: SignSkin, boxes: SignBox[], rule: string, t: numbe
 function expectedHeadline(skin: SignSkin, rule: string, tr: boolean[], b: number): string {
   const w = signWords(skin);
   const on = tr.flatMap((v, i) => (v ? [i] : []));
+  // The owner's rule: the headline says the truth comes from the sign's words, so it never reads as the rule setting it.
   if (rule.startsWith('The sign on')) {
-    if (!tr[b]) return `Your answer makes ${w.signOf(b)} false, but the rule needs it to be true.`;
+    if (!tr[b]) return `Your answer makes ${w.signOf(b)} false, from its words, but the rule needs it to be true.`;
     const others = on.filter((i) => i !== b);
-    return `Your answer makes ${w.signList(others)} true too, but the rule needs ${others.length === 1 ? 'it' : 'them'} to be false.`;
+    const one = others.length === 1;
+    return `Your answer makes ${w.signList(others)} true too, from ${one ? 'its' : 'their'} words, but the rule needs ${one ? 'it' : 'them'} to be false.`;
   }
   if (rule === 'Every sign is false.') return `Your answer makes ${w.signList(on)} true, but the rule says every sign is false.`;
   const need = rule.startsWith('Exactly one') ? 'one' : 'two';
@@ -196,11 +198,12 @@ describe('treasure signs', () => {
           expect(fb.example!.truths!.at(-1)).toEqual({ who: 'Fits the rule', value: false });
           // T-kind: the headline names the gap the words show.
           expect(fb.headline, fb.headline).toBe(expectedHeadline(skin, rule, truths, b));
-          // A sign that points to this box makes it look right; the detail says signs can be false.
+          // A sign that points to this box makes it look right; the detail says a sign can be false, and that a
+          // stamp comes from the words in a test (the rule only picks the test to keep).
           const pointer = boxes.findIndex((x, i) => x.sign === `The ${w.item} is ${w.prep} ${i === b ? `this ${w.noun}` : w.the(b)}.`);
-          const trust = `${cap(w.signOf(pointer))} says the ${w.item} is ${w.prep} ${w.the(b)}. But signs can be false. Only the rule tells you which signs to trust.`;
+          const trust = `${cap(w.signOf(pointer))} says the ${w.item} is ${w.prep} ${w.the(b)}. But a sign can be false. Stamp it from its words in each test. Then the rule says which test to keep.`;
           if (pointer >= 0) expect(fb.detail).toContain(trust);
-          else expect(fb.detail.join(' ')).not.toContain('But signs can be false.');
+          else expect(fb.detail.join(' ')).not.toContain('But a sign can be false.');
         }
 
         // The explanation: at most 3 short sentences, ending on the right box, with the right counts.
@@ -246,7 +249,7 @@ describe('treasure signs', () => {
   it('See: the worked example is one chest per card on the case board (Gold, Silver, Bronze), stamped from the words', () => {
     expect(solutions(L4_EXAMPLE.signs, L4_EXAMPLE.rule)).toEqual([1]);
     expect(explainSigns(L4_EXAMPLE, 'chest')).toContain('Only the Silver chest makes exactly one sign true, so the treasure is in it.');
-    const walk = stop1.lessons[3].ideas.slice(2);
+    const walk = stop1.lessons[3].ideas.slice(3);
     expect(walk.map((c) => c.title)).toEqual(['Example: the Gold chest', 'Example: the Silver chest', 'Example: the Bronze chest', 'Example: only one chest fits']);
     const scenes = walk.map((c) => c.scene as Extract<Scene, { kind: 'cases' }>);
     for (const sc of scenes) expect(sc.kind).toBe('cases');
@@ -335,7 +338,7 @@ describe('treasure signs', () => {
           const b = it.scene.boxes.findIndex((x) => x.id === id);
           const key = mistakeKind(it.scene.rule.replace(/(chest|door|cave|box) with the (treasure|prize|dragon egg)/, 'X'), truthsFromText(skin, it.scene.boxes, b), b);
           if (!heads.has(key)) heads.set(key, new Set());
-          heads.get(key)!.add(fb.headline.replace(names, 'SIGNS').replace(/needs (it|them) to/, 'needs IT to'));
+          heads.get(key)!.add(fb.headline.replace(names, 'SIGNS').replace(/needs (it|them) to/, 'needs IT to').replace(/from (its|their) words/, 'from ITS words'));
         }
       }
     }
@@ -417,7 +420,10 @@ describe('treasure signs', () => {
 
   it('lesson 4 teaches one rule: the chest example stays, “Other rules” is gone, and every quiz, check and arcade item says “Exactly one sign is true.”', () => {
     const l4 = stop1.lessons[3];
-    expect(l4.ideas.map((c) => c.title)).toEqual(['Three chests and a rule', 'Try each chest', 'Example: the Gold chest', 'Example: the Silver chest', 'Example: the Bronze chest', 'Example: only one chest fits']);
+    // The two intro cards are one (“Try each chest” is its third paragraph), so both distinction cards fit in 7.
+    expect(l4.ideas.map((c) => c.title)).toEqual(['Three chests and a rule', 'Two different things', 'Before you start: stamps first, rule last', 'Example: the Gold chest', 'Example: the Silver chest', 'Example: the Bronze chest', 'Example: only one chest fits']);
+    expect(l4.ideas[0].body.join(' ')).toContain('Try each chest. Pretend the treasure is in one chest. That is your test.');
+    expect(l4.ideas[0].body.join(' ')).toContain('Count the true signs. Compare the count with the rule.');
     const ruleOf = (it: Item) => (it.scene?.kind === 'boxes' ? it.scene.rule : '');
     for (let seed = 1; seed <= 40; seed++) {
       for (const it of l4.practice(createRng(seed))) expect(ruleOf(it), it.id).toBe('Exactly one sign is true.');
@@ -429,11 +435,13 @@ describe('treasure signs', () => {
 
   it('Do: the same chest board as the example. Silver and Bronze are shown; the learner checks Gold (True, True, False, counted 2, Reject)', () => {
     const l4 = stop1.lessons[3];
-    const step = l4.drill![0];
-    expect(l4.drill!.length).toBe(1);
+    // The first two boards are the two distinction boards (the two signs, then the rule last); the case board comes
+    // after the worked example.
+    const step = l4.drill![2];
+    expect(l4.drill!.length).toBe(3);
     expect(step).toBe(L4_DRILL);
     expect(step.layout).toBe('cases');
-    const walk = l4.ideas[2].scene as Extract<Scene, { kind: 'cases' }>;
+    const walk = l4.ideas[3].scene as Extract<Scene, { kind: 'cases' }>;
     expect(step.scene).toEqual({ kind: 'boxes', boxes: walk.boxes, rule: walk.rule });
     const [silver, bronze, gold] = step.rows;
     expect(step.rows.map((r) => r.case)).toEqual([{ box: 1, name: 'the Silver chest' }, { box: 2, name: 'the Bronze chest' }, { box: 0, name: 'the Gold chest' }]);
@@ -473,7 +481,9 @@ describe('treasure signs', () => {
     expect(wrong.message).toBe('If the treasure is in the Gold chest, the Silver chest sign is true. It says, “The treasure is not in this chest.” The treasure is not in the Silver chest.');
     const kept = checkDrill(step, { ...right, 'case0-decide': 'keep' });
     expect(kept.done).toBe(false);
-    expect(kept.message).toBe('The rule needs exactly 1 true sign. This case has 2 true signs. So reject the Gold chest.');
+    // Right stamps and a wrong Keep show the count was not compared with the rule: the belief is named, then the case.
+    expect(kept.diagnosis).toBe('verdict-only');
+    expect(kept.message).toBe('Your stamps are right. Now compare them with the rule. The rule says how many signs must be true. If the count is not that number, reject the chest. The rule needs exactly 1 true sign. This case has 2 true signs. So reject the Gold chest.');
     // Every wrong option of every mark has its own words, at the reading level.
     for (const m of marksToTap(step)) {
       for (const o of m.options) if (o.id !== m.answer) expect(m.why[o.id], `${m.id}:${o.id}`).toBeTruthy();
@@ -553,7 +563,8 @@ describe('treasure signs', () => {
       const bad = checkDrill(work, { ...right, 'case2-decide': 'reject' });
       expect(bad.done).toBe(false);
       expect(bad.row).toBe('case2');
-      expect(bad.message).toBe('The rule needs exactly 1 true sign. This case has that. So keep the Bronze chest.');
+      expect(bad.diagnosis).toBe('verdict-only');
+      expect(bad.message).toContain('The rule needs exactly 1 true sign. This case has that. So keep the Bronze chest.');
       expect(checkDrill(work, right).done).toBe(true);
     }
   });
@@ -649,7 +660,8 @@ describe('the other sign rules: one lesson each, See -> Do -> Quiz (skill-drill 
   it.each(SPECS)('$id See: the worked example is one chest per card on the case board, computed from its words, ending on the one chest that fits', ({ id, rule, text, example }) => {
     const l = lessonOf(id);
     const walk = l.ideas.slice(-4);
-    expect(l.ideas.length).toBe(6);
+    expect(l.ideas.length).toBe(7);
+    expect(l.ideas.find((c) => c.distinction === 'treasure-vs-sign')?.title).toBe('Remember: two different things');
     const w = signWords('chest');
     expect(walk.slice(0, 3).map((c) => c.title)).toEqual([0, 1, 2].map((b) => `Example: ${w.the(b)}`));
     const scenes = walk.map((c) => c.scene as Extract<Scene, { kind: 'cases' }>);
@@ -670,8 +682,9 @@ describe('the other sign rules: one lesson each, See -> Do -> Quiz (skill-drill 
 
   it.each(SPECS)('$id Do: the same board; the kept chest and one more are shown, the learner checks the other, every mark from the words', ({ id, example }) => {
     const l = lessonOf(id);
-    const step = l.drill![0];
-    expect(l.drill!.length).toBe(1);
+    // The owner's lesson has its contrast board first; the case board is always the last board.
+    const step = l.drill![l.drill!.length - 1];
+    expect(l.drill!.length).toBe(id === 's1.l7' ? 2 : 1);
     expect(step.layout).toBe('cases');
     const walk = l.ideas[l.ideas.length - 1].scene as Extract<Scene, { kind: 'cases' }>;
     expect(step.scene).toEqual({ kind: 'boxes', boxes: walk.boxes, rule: walk.rule });

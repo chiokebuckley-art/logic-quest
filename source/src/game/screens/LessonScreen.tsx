@@ -6,6 +6,7 @@ import { MAX_RUN } from '../../engine/save/save';
 import { stopById } from '../../content/stops';
 import { useStore, type Route } from '../store';
 import { LessonRunner } from '../components/LessonRunner';
+import { lessonLevel, placeNeeds } from '../observatory';
 
 type LessonRoute = Extract<Route, { name: 'lesson' }>;
 
@@ -13,6 +14,8 @@ export function LessonScreen({ route }: { route: LessonRoute }) {
   const { state, player, save, actions } = useStore();
   const stop = stopById(route.stopId);
   const lesson = stop?.lessons.find((l) => l.id === route.lessonId);
+  // An Observatory place plays at the learner's level on its track (from the diagnostic), so its quiz and its saved plan agree.
+  const level = lessonLevel(stop, lesson, save);
   // A lesson left partway (a refresh, a closed app) picks up at the same try with the same questions.
   // Otherwise a new seed on every visit, so a repeated lesson brings new tries.
   // Not resumed: "Learn this again" after a check (a fresh redo, with its key ideas and boards), a run saved before
@@ -23,7 +26,7 @@ export function LessonScreen({ route }: { route: LessonRoute }) {
     if (!r || !lesson || r.lessonId !== route.lessonId || r.stopId !== route.stopId || route.from === 'check') return null;
     if (r.next > 0 && !r.results) return null;
     if (r.next >= MAX_RUN) return null;
-    if (r.plan !== planKey(lesson, r.seed)) return null;
+    if (r.plan !== planKey(lesson, r.seed, level)) return null;
     return r;
   });
   const newSeed = () => seedFor(player?.id ?? 'guest', route.lessonId, save?.stops[route.stopId]?.lessonsDone.length ?? 0, Date.now());
@@ -63,6 +66,24 @@ export function LessonScreen({ route }: { route: LessonRoute }) {
     );
   }
 
+  // An Observatory place opens on skills: the lessons it requires (anywhere), the diagnostic's credit, or its primer.
+  const needs = stop.lessonOrder === 'free' ? placeNeeds(lesson, save) : [];
+  if (needs.length) {
+    return (
+      <div className="page">
+        <p className="soft-text">
+          {lesson.title} needs {needs.map((n) => n.title).join(' and ')} first.{lesson.primer ? ' Or take its three-question primer to show you have the skill.' : ''}
+        </p>
+        {lesson.primer && (
+          <button type="button" className="btn primary" onClick={() => actions.navigate({ name: 'evidence', stopId: stop.id, lessonId: lesson.id, kind: 'primer' })}>
+            Take the primer
+          </button>
+        )}
+        <button type="button" className="btn ghost" onClick={() => actions.navigate(back())}>Back</button>
+      </div>
+    );
+  }
+
   // Lessons open in teaching order (from the Library or a search too): the lesson before must be done, or its
   // guided boards marked, first.
   const waits = lessonWaitsFor(stop, lesson.id, save.stops[stop.id]?.lessonsDone ?? [], save.drilled ?? []);
@@ -88,15 +109,20 @@ export function LessonScreen({ route }: { route: LessonRoute }) {
         stop={stop}
         lesson={lesson}
         seed={seed}
+        level={level}
         readAloud={save.settings.readAloud}
-        onAnswer={(r) => actions.recordAnswer(r)}
+        onAnswer={(r) => {
+          actions.recordAnswer(r);
+          // An Observatory place logs every answer by meaning: first try, hints, supported or not, the phase.
+          if (lesson.routine) actions.recordEvidence(r, r.phase ?? 'do');
+        }}
         start={run ? { next: run.next, firstTry: run.firstTry, drilled: run.drilled, results: run.results, missed: run.missed } : undefined}
         onRestart={() => {
           actions.setLessonRun(null);
           setRun(null);
           setSeed(newSeed() + 1);
         }}
-        onProgress={(p) => actions.setLessonRun({ stopId: stop.id, lessonId: lesson.id, seed, plan: planKey(lesson, seed), ...p })}
+        onProgress={(p) => actions.setLessonRun({ stopId: stop.id, lessonId: lesson.id, seed, plan: planKey(lesson, seed, level), ...p })}
         onDrilled={() => actions.markDrilled(lesson.id)}
         onComplete={() => {
           actions.completeLesson(stop.id, lesson.id);

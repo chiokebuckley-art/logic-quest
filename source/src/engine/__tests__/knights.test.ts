@@ -11,16 +11,23 @@
 import { describe, expect, it } from 'vitest';
 import {
   CARD_QUESTIONS,
+  L1_CONTRAST,
+  L1_CONTRAST_SCENE,
   L1_DRILL,
   L1_WELL_SCENE,
   L2_DRILL,
   L2_EXAMPLE,
   L2_SCENE,
+  L2_TWIN_SCENE,
+  L3_CONTRAST_SCENE,
   L3_DRILL,
   L3_EXAMPLE,
+  L3_GUESS_SCENE,
   L3_SCENE,
+  L4_CONTRAST_SCENE,
   L4_DRILL,
   L4_EXAMPLE,
+  L4_GUESS_SCENE,
   L4_SCENE,
   L4_STRONG_SCENE,
   L5_AND_SCENE,
@@ -35,8 +42,13 @@ import { NEUTRAL_TITLE, explanationFor } from '../../game/explanation';
 import { checkDrill, marksToTap, passState } from '../drill';
 import { freshCheckSet, looks } from '../fresh';
 import {
+  CASE_WORDS,
+  GUESS_VS_KNOWN,
+  KIND_VS_TRUTH,
   KNOWN_FACTS,
   ME,
+  PUZZLE_RULE,
+  SAY_WORDS,
   SKINS,
   SKIN_IDS,
   andOrItem,
@@ -120,6 +132,68 @@ function readWords(text: string, speaker: string, idOf: (name: string) => string
   throw new Error(`cannot read: ${text}`);
 }
 
+const NUMBER: Record<string, number> = { zero: 0, one: 1, two: 2, three: 3 };
+
+/**
+ * A sentence about who is what, with names only (never "I"), read back as a test on a case: the forms whenTrue and
+ * whenFalse write ("Ava and Ben are the same kind", "the number of knights among A, B and C is zero, two or three",
+ * "Ava is a knave, or Ben is a knave"). `us` is everyone in the puzzle. Throws on anything it cannot read.
+ */
+function readNamed(text: string, idOf: (n: string) => string, us: string[]): Meaning {
+  const t = text.replace(/\.$/, '');
+  const names = (s: string) => s.split(/, | and /).map(idOf);
+  for (const [sep, join] of [[', or ', (x: boolean, y: boolean) => x || y], [', and ', (x: boolean, y: boolean) => x && y]] as const) {
+    const parts = t.split(sep);
+    if (parts.length === 2) {
+      const [p, q] = parts.map((x) => readNamed(x, idOf, us));
+      return (k) => join(p(k), q(k));
+    }
+  }
+  let m: RegExpMatchArray | null;
+  if ((m = t.match(/^it is not true that (.+)$/))) { const p = readNamed(m[1], idOf, us); return (k) => !p(k); }
+  if ((m = t.match(/^(\w+) is a (knight|knave)$/i))) { const id = idOf(m[1]); const v = m[2] as Kind; return (k) => k[id] === v; }
+  if ((m = t.match(/^(\w+) and (\w+) are the same kind$/i))) { const x = idOf(m[1]), y = idOf(m[2]); return (k) => k[x] === k[y]; }
+  if ((m = t.match(/^(\w+) and (\w+) are different kinds$/i))) { const x = idOf(m[1]), y = idOf(m[2]); return (k) => k[x] !== k[y]; }
+  if ((m = t.match(/^(.+) are (both|all) (knight|knave)s$/i))) {
+    const ids = names(m[1]);
+    expect(ids.length, text).toBe(m[2] === 'both' ? 2 : 3);
+    const v = m[3] as Kind;
+    return (k) => ids.every((id) => k[id] === v);
+  }
+  const count = (list: string, v: Kind, ok: (c: number) => boolean): Meaning => {
+    expect(names(list).sort(), `${text}: “us” is everyone`).toEqual([...us].sort());
+    return (k) => ok(us.filter((id) => k[id] === v).length);
+  };
+  if ((m = t.match(/^(at least|at most|exactly) (one|two|three) of (.+?) (?:is a|are) (knight|knave)s?$/i))) {
+    const n = NUMBER[m[2]], op = m[1].toLowerCase();
+    return count(m[3], m[4] as Kind, (c) => (op === 'at least' ? c >= n : op === 'at most' ? c <= n : c === n));
+  }
+  if ((m = t.match(/^none of (.+) is a (knight|knave)$/i))) return count(m[1], m[2] as Kind, (c) => c === 0);
+  if ((m = t.match(/^the number of (knight|knave)s among (.+) is (.+)$/i))) {
+    const ns = m[3].split(/, | or /).map((w) => NUMBER[w]);
+    return count(m[2], m[1] as Kind, (c) => ns.includes(c));
+  }
+  throw new Error(`cannot read: ${text}`);
+}
+
+/** Truth rows without their reasons, for comparing with rows re-computed from the bubbles. */
+const bare = (ts: readonly { who: string; value: boolean }[] | undefined) => (ts ?? []).map(({ who, value }) => ({ who, value }));
+
+/**
+ * A truth's reason (Truth.because) re-checked from its own words: it is there, its verdict is the truth's value, and
+ * what it says (read with readNamed), checked in the world it names (read as kinds), gives that value. The speaker's
+ * kind never appears in it.
+ */
+function checkBecause(t: { who: string; value: boolean; because?: { says: string; world: string; match: boolean } }, idOf: (n: string) => string, us: string[]) {
+  expect(t.because, `${t.who} has its reason`).toBeDefined();
+  const b = t.because!;
+  expect(b.match, `${t.who}: the reason’s verdict`).toBe(t.value);
+  const says = readNamed(b.says, idOf, us);
+  const world = readFacts(b.world.replace(/\.$/, '').replace(/^(.+) are (both|all) (knight|knave)s$/, (_, l: string, _w, v: string) => l.split(/, | and /).map((n) => `${n} is a ${v}`).join(' and ')), idOf);
+  // Every case that agrees with the named world gives the same verdict, so the comparison alone decides it.
+  for (const k of cases(us, world)) expect(says(k), `${b.says} / ${b.world}`).toBe(t.value);
+}
+
 /** A speakers scene read back: people in order, and what each one's words mean. */
 function readScene(item: Item) {
   return readSpeakers(item.scene);
@@ -189,6 +263,11 @@ function readFacts(text: string, idOf: (n: string) => string): K {
  * Walk a puzzle explanation. Each step is checked against the cases still open: what "so" says must
  * hold in every case where the speaker fits; a crash must hold in every case; a supposition must be the
  * wrong kind and must end in a crash. Outside a supposition every fact must match the answer.
+ *
+ * Every need says "must be" (never "are"): "Then Tia’s words must be false." A need that settles kinds is followed by
+ * what the words say ("They say …", with names, re-read and checked to mean exactly the bubble's words), then, for
+ * false words, what false means ("False means …", checked to hold exactly when the words are false), then "So …".
+ * What is found inside a supposition says "So, inside the guess, …", and nothing outside one does.
  */
 function replay(item: AssignItem) {
   const { ids, names, meaning } = readScene(item);
@@ -237,27 +316,43 @@ function replay(item: AssignItem) {
       expect(kind, `${id} is known: ${s}`).toBeDefined();
       if (m[2]) expect(m[2]).toBe(kind);
       else expect(sup?.id, `“Then” follows the supposition: ${item.explain}`).toBe(id);
+      expect(m[4], `a need says “must be”: ${s}`).toBe('must be');
       const need = m[5] === 'true';
       expect(need).toBe(kind === 'knight');
       const next = ss[i + 1] ?? '';
-      if (m[4] === 'must be') {
-        const b = next.match(/^But with (.+), they are (true|false)\.$/);
-        expect(b, `crash reason follows: ${item.explain}`).not.toBe(null);
-        expect(b![2] === 'true').toBe(!need);
-        const w = b![1].split(/, | and /).map((p) => p.match(/^(\w+) a (knight|knave)$/)!);
+      const b = next.match(/^But with (.+), they are (true|false)\.$/);
+      if (b) {
+        expect(b[2] === 'true').toBe(!need);
+        const w = b[1].split(/, | and /).map((p) => p.match(/^(\w+) a (knight|knave)$/)!);
         for (const x of w) expect(known[idOf(x[1])], s).toBe(x[2]);
         for (const k of open()) expect(meaning[id](k), `crash holds in every open case: ${item.explain}`).toBe(!need);
         crashed = true;
+        i += 2;
       } else {
-        const so = next.match(/^So (.+)\.$/);
+        // What the words say, with names: exactly the bubble's meaning, in every case.
+        const say = next.match(/^They say (.+)\.$/);
+        expect(say, `what the words say follows: ${item.explain}`).not.toBe(null);
+        const said = readNamed(say![1], idOf, ids);
+        for (const k of cases(ids)) expect(said(k), `${next} means the words: ${item.explain}`).toBe(meaning[id](k));
+        let j = i + 2;
+        if (!need) {
+          // False words: what false means, true exactly when the words are false.
+          const f = (ss[j] ?? '').match(/^False means (.+)\.$/);
+          expect(f, `what false means follows: ${item.explain}`).not.toBe(null);
+          const means = readNamed(f![1], idOf, ids);
+          for (const k of cases(ids)) expect(means(k), `${ss[j]}: ${item.explain}`).toBe(!meaning[id](k));
+          j++;
+        }
+        const so = (ss[j] ?? '').match(/^So(, inside the guess,)? (.+)\.$/);
         expect(so, `a “So” follows: ${item.explain}`).not.toBe(null);
-        const facts = readFacts(so![1], idOf);
+        expect(!!so![1], `“inside the guess” exactly inside a supposition: ${ss[j]}`).toBe(!!sup);
+        const facts = readFacts(so![2], idOf);
         const good = open().filter((k) => meaning[id](k) === need);
         expect(good.length).toBeGreaterThan(0);
         for (const [f, v] of Object.entries(facts)) for (const k of good) expect(k[f], `${so![0]} in every case where ${id} fits`).toBe(v);
         addFacts(facts);
+        i = j + 1;
       }
-      i += 2;
     } else if ((m = s.match(/^If (\w+) were a (knight|knave), \1 would be a \2 saying something (true|false)\.$/))) {
       const id = idOf(m[1]);
       expect(known[id]).toBeUndefined();
@@ -265,10 +360,11 @@ function replay(item: AssignItem) {
       expect(m[3] === 'true').toBe(as === 'knave');
       for (const k of open().filter((c) => c[id] === as)) expect(meaning[id](k), `${s} in every open case`).toBe(m[3] === 'true');
       const next = ss[i + 1] ?? '';
-      const self = next.match(/^So (\w+) is a (knight|knave)\.$/);
+      const self = next.match(/^So(, inside the guess,)? (\w+) is a (knight|knave)\.$/);
       if (self) {
-        expect(idOf(self[1])).toBe(id);
-        expect(self[2]).toBe(other(as));
+        expect(!!self[1], `“inside the guess” exactly inside a supposition: ${next}`).toBe(!!sup);
+        expect(idOf(self[2])).toBe(id);
+        expect(self[3]).toBe(other(as));
         addFacts({ [id]: other(as) });
         i += 2;
       } else {
@@ -566,6 +662,8 @@ describe('lesson 2: who could say it?', () => {
     expect(mean(k('knave')), 'from a knave: true').toBe(true);
     const card = stop5.lessons[1].ideas.find((c) => c.title === 'It can depend on others')!;
     expect(card.body.join(' ')).toContain('no one could say it');
+    // Would be, then must be: the words are worked out first, then compared with what each kind needs.
+    expect(card.body.at(-1)).toBe('Now compare. A knight’s words must be true, so a knight can’t say it. A knave’s words must be false, so a knave can’t say it. So no one could say it.');
     expect(claimText(L2_EXAMPLE.claim, ME, (id) => (id === ME ? 'Someone' : 'Ben'), 2)).toBe('Ben and I are the same kind.');
   });
 });
@@ -615,7 +713,8 @@ describe('lesson 5: a knave’s “and” and “or”', () => {
         const allowed = choiceCases(c.label, X, Y);
         const i = caseIndex(fb.example!.label, X, Y);
         expect(allowed[i] !== keep[i], `${c.id}: ${fb.example!.label}`).toBe(true);
-        expect(fb.example!.truths).toEqual([{ who: `${S}’s words`, value: mean(all[i]) }, { who: 'Your answer', value: allowed[i] }, { who: 'The right answer', value: keep[i] }]);
+        expect(bare(fb.example!.truths)).toEqual([{ who: `${S}’s words`, value: mean(all[i]) }, { who: 'Your answer', value: allowed[i] }, { who: 'The right answer', value: keep[i] }]);
+        checkBecause(fb.example!.truths![0], lower, [X, Y].map(lower));
         for (const line of [...fb.detail, ...(fb.simpler ?? [])]) {
           const named = line.match(/the case where (.+?)\. There, \w+’s words are (true|false)/);
           if (named) expect(mean(all[caseIndex(named[1], X, Y)]), line).toBe(named[2] === 'true');
@@ -633,35 +732,69 @@ describe('lesson 5: a knave’s “and” and “or”', () => {
 });
 
 describe('stop 5 content', () => {
-  it('the lesson 3 example has one answer, and the engine explains it the way the card does', () => {
+  it('the lesson 3 example has one answer, and the engine explains it the way the cards do: inside the guess, then after the crash', () => {
     const { ids, claims, answer } = L3_EXAMPLE;
     expect(solutions(ids, claims)).toEqual([answer]);
     const nm = (id: string) => (id === 'ava' ? 'Ava' : 'Ben');
     const solve = explainSolve(ids, claims, answer, nm)!;
     expect(solve.supposed).toEqual(['ava']);
-    expect(solve.lines.slice(0, 3)).toEqual(['Suppose Ava is a knave.', 'Then Ava’s words are false. So Ben is a knight.', 'Ben is a knight, so Ben’s words must be true. But with Ava a knave and Ben a knight, they are false.']);
-    const card = stop5.lessons[2].ideas.find((c) => c.title === 'A worked example')!;
-    if (card.scene?.kind !== 'speakers') throw new Error('no scene');
-    expect(card.scene.speakers.map((s) => s.says)).toEqual(ids.map((id) => claimText(claims[id], id, nm, 2)));
-    expect(card.body[0]).toBe('Suppose Ava is a knave. Then Ava’s words are false. So Ben is a knight.');
-    expect(card.body[2]).toContain('So Ava is a knight.');
-    expect(card.body[2]).toContain('Ben is a knave');
+    expect(solve.lines.slice(0, 4)).toEqual([
+      'Suppose Ava is a knave.',
+      'Then Ava’s words must be false. They say Ben is a knave. False means Ben is a knight. So, inside the guess, Ben is a knight.',
+      'Ben is a knight, so Ben’s words must be true. But with Ava a knave and Ben a knight, they are false.',
+      'That guess crashes, so Ava is a knight.',
+    ]);
+    expect(solve.guesses).toEqual([{ who: 'ava', kind: 'knave', inside: { ava: 'knave', ben: 'knight' }, world: { ava: 'knave', ben: 'knight' }, breaker: 'ben' }]);
+    const l3 = stop5.lessons[2];
+    const inside = l3.ideas.find((c) => c.title === 'Inside the guess')!;
+    const after = l3.ideas.find((c) => c.title === 'After the crash')!;
+    expect(inside.scene).toBe(L3_GUESS_SCENE);
+    if (inside.scene?.kind !== 'speakers') throw new Error('no scene');
+    expect(inside.scene.speakers.map((s) => s.says)).toEqual(ids.map((id) => claimText(claims[id], id, nm, 2)));
+    // The guess is the test-world banner, never a fact.
+    expect(inside.scene.test).toBe('Ava is a knave. This is a guess.');
+    expect(inside.scene.fact).toBeUndefined();
+    // Each step on the cards holds in every case left when it is said: Need, Says, So.
+    const mean = readSpeakers(inside.scene).meaning;
+    expect(cases(ids, { ava: 'knave' }).filter((k) => fits(mean, 'ava', k)).every((k) => k.ben === 'knight')).toBe(true);
+    expect(cases(ids, { ava: 'knave', ben: 'knight' }).some((k) => fits(mean, 'ben', k))).toBe(false);
+    expect(cases(ids, { ava: 'knight' }).filter((k) => fits(mean, 'ava', k)).every((k) => k.ben === 'knave')).toBe(true);
+    expect(allFit(ids, mean, answer)).toBe(true);
+    expect(inside.body[0]).toBe('Suppose Ava is a knave. That is a guess, so everything we find now is inside the guess.');
+    expect(inside.body[1]).toBe('Need: Ava’s words must be false. Says: Ben is a knave. So: false means Ben is a knight, inside the guess.');
+    expect(inside.body[2]).toMatch(/The guess crashes!$/);
+    expect(after.body[0]).toBe('The guess crashed, so throw it away, and everything inside it. Now we know: Ava is a knight.');
+    expect(after.body.join(' ')).toContain('So: Ben is a knave. This is known.');
+    expect(after.body.at(-1)).toBe('Ben was a knight inside the guess. Now Ben is a knave. That is fine: the first was only pretend.');
   });
 
-  it('the lesson 4 example has one answer, and supposing Ava is a knight crashes', () => {
+  it('the lesson 4 example has one answer, and supposing Ava is a knight crashes; Ben and Cal both flip after the crash', () => {
     const { ids, claims, answer } = L4_EXAMPLE;
     expect(solutions(ids, claims)).toEqual([answer]);
     expect(solutions(ids, claims, { ava: 'knight' })).toEqual([]);
     const nm = (id: string) => id.charAt(0).toUpperCase() + id.slice(1);
-    const card = stop5.lessons[3].ideas.find((c) => c.title === 'A worked example')!;
-    if (card.scene?.kind !== 'speakers') throw new Error('no scene');
-    expect(card.scene.speakers.map((s) => s.says)).toEqual(ids.map((id) => claimText(claims[id], id, nm, 3)));
-    // Each step on the card holds in every case that is left when it is said.
-    const mean = readSpeakers(card.scene).meaning;
+    const l4 = stop5.lessons[3];
+    const inside = l4.ideas.find((c) => c.title === 'Inside the guess')!;
+    const after = l4.ideas.find((c) => c.title === 'After the crash')!;
+    expect(inside.scene).toBe(L4_GUESS_SCENE);
+    if (inside.scene?.kind !== 'speakers') throw new Error('no scene');
+    expect(inside.scene.speakers.map((s) => s.says)).toEqual(ids.map((id) => claimText(claims[id], id, nm, 3)));
+    expect(inside.scene.test).toBe('Ava is a knight. This is a guess.');
+    // Each step on the cards holds in every case that is left when it is said.
+    const mean = readSpeakers(inside.scene).meaning;
     expect(cases(ids, { ava: 'knight' }).filter((k) => fits(mean, 'ava', k)).every((k) => k.ben === 'knave')).toBe(true);
     expect(cases(ids, { ava: 'knight', ben: 'knave' }).filter((k) => fits(mean, 'ben', k)).every((k) => k.cal === 'knight')).toBe(true);
     expect(cases(ids, { ava: 'knight', ben: 'knave', cal: 'knight' }).some((k) => fits(mean, 'cal', k))).toBe(false);
-    expect(card.body[2]).toBe('So Ava is a knave. Then Ben is a knight, and Cal is a knave.');
+    expect(cases(ids, { ava: 'knave' }).filter((k) => fits(mean, 'ava', k)).every((k) => k.ben === 'knight')).toBe(true);
+    expect(cases(ids, { ava: 'knave', ben: 'knight' }).filter((k) => fits(mean, 'ben', k)).every((k) => k.cal === 'knave')).toBe(true);
+    expect(inside.body.join(' ')).toContain('So: false means Cal is a knight, inside the guess.');
+    expect(after.body[0]).toBe('The guess crashed, so throw it away, and everything inside it. Now we know: Ava is a knave.');
+    expect(after.body.join(' ')).toContain('Says: Ben is a knave. So: false means Ben is a knight.');
+    expect(after.body.join(' ')).toContain('Says: Cal is a knave. So: Cal is a knave.');
+    // Ben and Cal flip from inside the guess to known, as the card says.
+    const g = explainSolve(ids, claims, answer, nm)!.guesses[0];
+    expect(['ben', 'cal'].every((id) => g.inside[id] !== answer[id])).toBe(true);
+    expect(after.body.at(-1)).toBe('Ben and Cal both flip. That is fine: the first ones were only pretend.');
   });
 
   it('the lesson 5 example: Raj and Vic are both knaves', () => {
@@ -884,7 +1017,13 @@ function readL1(item: ChooseItem) {
     expect(mo[1]).toBe(otherName![1]);
     return { s: m[2] as Kind, p: true, o: mo[2] as Kind };
   };
-  return { S, said, fact, otherName, known: unique, wordsTrue, fits, asks, qOf, key, speakerKind, readLabel, fill };
+  const cap1 = (x: string) => `${x.charAt(0).toUpperCase()}${x.slice(1)}.`;
+  /** The reason behind the words' truth in a case: what they say (the speaker named), what is so there, and the match. */
+  const because = (w: W) =>
+    fact
+      ? { says: cap1(fill(fact.f.say === said ? fact.f.yes : fact.f.no)), world: cap1(fill(w.p ? fact.f.yes : fact.f.no)), match: wordsTrue(w) }
+      : { says: `${otherName![1]} is a ${otherName![2]}.`, world: `${otherName![1]} is a ${w.o}.`, match: wordsTrue(w) };
+  return { S, said, fact, otherName, known: unique, wordsTrue, fits, asks, qOf, key, speakerKind, readLabel, fill, because };
 }
 
 const L1_KINDS: Record<string, RegExp> = {
@@ -936,9 +1075,15 @@ describe('wrong answers teach first (handoff v1.0)', () => {
       expect(cases.map((c) => r.key(r.readLabel(c.label))).sort(), item.prompt).toEqual(r.known.map(r.key).sort());
       for (const c of cases) {
         const w = r.readLabel(c.label);
-        expect(c.truths).toEqual([{ who: `${r.S}’s words`, value: r.wordsTrue(w) }]);
+        expect(bare(c.truths)).toEqual([{ who: `${r.S}’s words`, value: r.wordsTrue(w) }]);
+        // Each truth comes with its reason: what the words say and what is so, never the speaker's kind.
+        expect(c.truths![0].because, c.label).toEqual(r.because(w));
+        expect(c.words?.world).toBe('In this case');
         expect(works(c), c.label).toBe(r.fits(w));
       }
+      // What the question states is the fact banner over the bubble.
+      if (item.scene?.kind === 'speakers' && r.speakerKind) expect(item.scene.fact).toBe(`${r.S} is a ${r.speakerKind}.`);
+      if (item.scene?.kind === 'speakers' && /^No one knows/.test(item.prompt)) expect(item.scene.fact).toBeUndefined();
       // The meaning says when the words are true, and the right answer is what the working cases agree on.
       expect(item.teach!.meaning).toContain(`${r.S}’s words, “${r.said.replace(/\.$/, '')},” are true only when`);
       const answers = [...new Set(r.known.filter(r.fits).map(r.qOf))];
@@ -948,7 +1093,8 @@ describe('wrong answers teach first (handoff v1.0)', () => {
         const fb = item.feedback![c.id];
         const ex = r.readLabel(fb.example!.label);
         expect(r.known.map(r.key), 'the example is a case the question allows').toContain(r.key(ex));
-        expect(fb.example!.truths![0]).toEqual({ who: `${r.S}’s words`, value: r.wordsTrue(ex) });
+        expect(bare([fb.example!.truths![0]])[0]).toEqual({ who: `${r.S}’s words`, value: r.wordsTrue(ex) });
+        expect(fb.example!.truths![0].because).toEqual(r.because(ex));
         const yours = fb.example!.truths!.find((t) => t.who === 'Your answer');
         if (yours) expect(yours.value, 'your answer’s truth in the example').toBe(r.qOf(ex) === c.id);
         let kind: string;
@@ -1021,7 +1167,16 @@ describe('wrong answers teach first (handoff v1.0)', () => {
         const k = m[1] as Kind;
         expect(k).toBe(KINDS[i]);
         if (known) expect([m[2], m[3]]).toEqual([known[1], known[2]]);
-        expect(c.truths).toEqual([{ who: 'The words', value: as[k] }]);
+        expect(bare(c.truths)).toEqual([{ who: 'The words', value: as[k] }]);
+        // The reason: what the words say ("I" read as the pretend speaker), in this case's world, and the verdict.
+        const bc = c.truths![0].because!;
+        expect(bc.match).toBe(as[k]);
+        if (!fact) {
+          const said2 = readNamed(bc.says.replace(/\b[Tt]he speaker\b/g, 'Speaker'), (n) => (n === 'Speaker' ? ME : n.toLowerCase()), known ? [ME, known[1].toLowerCase()] : [ME]);
+          expect(said2({ [ME]: k, ...(known ? { [known[1].toLowerCase()]: known[2] as Kind } : {}) }), bc.says).toBe(as[k]);
+          expect(bc.world).toBe(c.label);
+        }
+        expect(c.words?.world).toBe('Pretend');
         expect(c.note!.endsWith(`could say it.`), c.note).toBe(can[k]);
       });
       for (const c of item.choices) {
@@ -1037,7 +1192,7 @@ describe('wrong answers teach first (handoff v1.0)', () => {
         // The example is a kind of speaker the pick is wrong about.
         const ek = (fb.example!.label.match(/^The speaker is a (knight|knave)/)![1]) as Kind;
         expect(ek === 'knight' ? offK : offV, fb.example!.label).toBe(true);
-        expect(fb.example!.truths).toEqual([{ who: 'The words', value: as[ek] }]);
+        expect(bare(fb.example!.truths)).toEqual([{ who: 'The words', value: as[ek] }]);
       }
     }
     expect([...seen].sort()).toEqual(Object.keys(L2_KINDS).sort());
@@ -1063,15 +1218,18 @@ describe('wrong answers teach first (handoff v1.0)', () => {
       expect(cases.map((c) => readCase(c.label, idOf))).toEqual([caseOf('knight'), caseOf('knave')]);
       for (const c of cases) {
         const k = readCase(c.label, idOf);
-        expect(c.truths).toEqual(speakerTruths(item, k));
+        expect(bare(c.truths)).toEqual(speakerTruths(item, k));
+        for (const t of c.truths!) checkBecause(t, idOf, ids);
         expect(works(c)).toBe(allFit(ids, meaning, k));
       }
+      // The guess is drawn as the test-world banner, never as a fact.
+      if (item.scene?.kind === 'speakers') expect(item.scene.test).toBe(`${m[1]} is a ${kx}. This is a guess.`);
       for (const c of item.choices) {
         if (c.id === item.answer) continue;
         const fb = item.feedback![c.id];
         const ex = readCase(fb.example!.label, idOf);
         expect(ex[x], 'the example keeps the guess').toBe(kx);
-        expect(fb.example!.truths).toEqual(speakerTruths(item, ex));
+        expect(bare(fb.example!.truths)).toEqual(speakerTruths(item, ex));
         const exWorks = allFit(ids, meaning, ex);
         let kind: string;
         if (c.id === 'knight' || c.id === 'knave') {
@@ -1132,9 +1290,12 @@ describe('wrong answers teach first (handoff v1.0)', () => {
       // Remember gives the rule for the words this speaker says: true ones from a knight, false ones from a knave.
       expect(item.teach!.remember![0]).toMatch(need ? /^A true “and” needs every part to be true\./ : /^A false “and” needs just one false part\./);
       cases.forEach((c, i) => {
-        expect(c.truths).toEqual([{ who: `${S}’s words`, value: mean(all[i]) }]);
+        expect(bare(c.truths)).toEqual([{ who: `${S}’s words`, value: mean(all[i]) }]);
+        checkBecause(c.truths![0], lower, [X, Y].map(lower));
         expect(works(c)).toBe(keep[i]);
       });
+      // The speaker's stated kind is the fact banner; the four cases are what you test.
+      if (item.scene?.kind === 'speakers') expect([item.scene.fact, item.scene.test]).toEqual([`${S} is a ${sk}.`, `Try the four cases for ${X} and ${Y}.`]);
       // "Keep it" / "Cross it out", case by case.
       for (const line of item.teach!.simpler!.slice(1, 5)) {
         const lm = line.match(/^(.+): the words are (true|false)\. (Keep it|Cross it out)\.$/)!;
@@ -1157,7 +1318,7 @@ describe('wrong answers teach first (handoff v1.0)', () => {
         // Like the NOT flip's example row: the speaker's words, your answer and the right answer, each in that case.
         // Your answer and the right answer disagree there, which is what the example proves.
         const right = choiceCases(item.choices.find((x) => x.id === item.answer)!.label, X, Y);
-        expect(fb.example!.truths).toEqual([
+        expect(bare(fb.example!.truths)).toEqual([
           { who: `${S}’s words`, value: mean(all[i]) },
           { who: 'Your answer', value: allowed[i] },
           { who: 'The right answer', value: right[i] },
@@ -1195,7 +1356,8 @@ describe('wrong answers teach first (handoff v1.0)', () => {
           expect(shown.slice(1)).toEqual(ids.map((id) => ({ ...answer, [id]: other(answer[id]) })));
         }
         item.teach!.cases!.forEach((c, i) => {
-          expect(c.truths).toEqual(speakerTruths(item, shown[i]));
+          expect(bare(c.truths)).toEqual(speakerTruths(item, shown[i]));
+          for (const t of c.truths!) checkBecause(t, idOf, ids);
           expect(works(c)).toBe(allFit(ids, meaning, shown[i]));
           for (const b of (c.note ?? '').matchAll(/(\w+) is a (knight|knave) with (true|false) words\./g)) {
             expect(fits(meaning, idOf(b[1]), shown[i]), c.note).toBe(false);
@@ -1346,7 +1508,7 @@ describe('wrong answers teach first (handoff v1.0)', () => {
 
 /** "Ava and Ben are both knights." / "Ava, Ben and Cal are all knaves." / "Ava is a knight and Ben is a knave." -> kinds. */
 function readKinds(label: string, idOf: (n: string) => string): K {
-  const t = label.replace(/\.$/, '');
+  const t = label.replace(/^Test: /, '').replace(/\.$/, '');
   const m = t.match(/^(.+) are (both|all) (knight|knave)s$/);
   if (m) {
     const names = m[1].split(/, | and /);
@@ -1405,16 +1567,27 @@ function factWordsTrue(says: string, fact: string): boolean {
   throw new Error(`cannot read: ${says}`);
 }
 
-/** A lesson 1 fact row: "Ben is a knave, and the well is full." -> each mark, from the speaker's bubble. */
-function factMarks(step: DrillStep, row: DrillRow): { name: string; kind: Kind; fact: string; words: boolean; fits: boolean; marks: Record<string, string> } {
-  const m = row.label.match(/^(\w+) is a (knight|knave), and (.+)\.$/);
+/**
+ * A lesson 1 fact row: "Test: Ben is a knave. Fact: the well is full." (the fact known on the board) or "Test: Cal is a
+ * knight, and Cal can swim." (both tried) -> each mark, from the speaker's bubble. A contrast board has no bubbles: its
+ * words are the panels' (`says`).
+ */
+function factMarks(step: DrillStep, row: DrillRow, says?: string): { name: string; kind: Kind; fact: string; known: boolean; words: boolean; fits: boolean; marks: Record<string, string> } {
+  const m = row.label.match(/^Test: (\w+) is a (knight|knave)(?:, and (.+)|\. Fact: (.+))\.$/);
   if (!m) throw new Error(`cannot read row: ${row.label}`);
-  const [, name, kind, fact] = m;
+  const [, name, kind] = m;
+  const fact = m[3] ?? m[4];
+  const known = m[4] !== undefined;
+  if (says !== undefined) {
+    const words = factWordsTrue(says, fact);
+    const fits = (kind === 'knight') === words;
+    return { name, kind: kind as Kind, fact, known, words, fits, marks: { [`${name}’s words`]: tfWord(words), 'This case': fits ? 'holds' : 'crashes' } };
+  }
   const sp = boardSpeakers(step).find((x) => x.name === name)!;
   expect(sp, `${name} is on the board`).toBeDefined();
   const words = factWordsTrue(sp.says, fact);
   const fits = (kind === 'knight') === words;
-  return { name, kind: kind as Kind, fact, words, fits, marks: { [`${name}’s words`]: tfWord(words), 'This case': fits ? 'holds' : 'crashes' } };
+  return { name, kind: kind as Kind, fact, known, words, fits, marks: { [`${name}’s words`]: tfWord(words), 'This case': fits ? 'holds' : 'crashes' } };
 }
 
 /** A lesson 2 row: "The speaker is a knave, and Ben is a knight." -> the words' truth from that kind, and could it say them. */
@@ -1425,7 +1598,7 @@ function sayMarks(step: DrillStep, row: DrillRow): { k: Kind; can: boolean; mark
   const [said] = boardSpeakers(step).map((x) => x.says);
   const v = readWords(said, ME, lower, [ME, lower(m[2])])({ [ME]: k, [lower(m[2])]: m[3] as Kind });
   const can = (k === 'knight') === v;
-  return { k, can, marks: { 'The words': tfWord(v), [`Could a ${k} say it?`]: can ? 'yes' : 'no' } };
+  return { k, can, marks: { 'The words would be': tfWord(v), [`Could a ${k} say it?`]: can ? 'yes' : 'no' } };
 }
 
 const shownRows = (step: DrillStep) => step.rows.filter((r) => r.marks.every((m) => m.given));
@@ -1444,21 +1617,23 @@ describe('See -> Do -> Quiz (skill-drill handoff)', () => {
         expect(marksToTap(st).length, st.id).toBeLessThanOrEqual(12);
         expect(tapRows(st).length + shownRows(st).length, `${st.id}: a row is all shown or all the learner's`).toBe(st.rows.length);
         // No final-answer buttons: every mark is about one case.
-        for (const m of st.rows.flatMap((r) => r.marks)) expect(m.label).toMatch(/’s words$|^This case$|^Keep or cross out\?$|^The words$|^Could a (knight|knave) say it\?$/);
+        for (const m of st.rows.flatMap((r) => r.marks)) expect(m.label).toMatch(/’s words$|^This case$|^Keep or cross out\?$|^The words would be$|^Could a (knight|knave) say it\?$|^Inside the guess, or known\?$/);
       }
     }
     for (const l of stop5.lessons) expect(passState(l.pass, []).met, l.id).toBe(false);
   });
 
-  it('See: each first board is the very board of a key-idea card, with that card’s case shown already checked; a twin says what changed', () => {
+  it('See: each first case board is the very board of a key-idea card, with that card’s case shown already checked; a twin says what changed', () => {
     for (const l of stop5.lessons) {
       const scenes = l.ideas.map((c) => c.scene).filter(Boolean);
       for (const st of l.drill!) {
         if (st.twin) continue;
         expect(scenes.includes(st.scene), `${st.id} uses a card's own board`).toBe(true);
       }
-      expect(scenes.includes(l.drill![0].scene), `${l.id}: the first board is a card's board`).toBe(true);
-      expect(shownRows(l.drill![0]).length, `${l.id}: one case already checked`).toBe(1);
+      // A distinction's own board (on its contrast picture) comes first where it is taught; then the case boards.
+      const first = l.drill!.find((st) => st.scene?.kind === 'speakers')!;
+      expect(scenes.includes(first.scene), `${l.id}: the first case board is a card's board`).toBe(true);
+      expect(shownRows(first).length, `${l.id}: one case already checked`).toBe(1);
       // A board that names its card names the card whose picture it shows (a lesson can have several such cards).
       for (const st of l.drill!) {
         const named = st.body.join(' ').match(/the board from the card “(.+?)\.?”/);
@@ -1466,65 +1641,92 @@ describe('See -> Do -> Quiz (skill-drill handoff)', () => {
         if (/the board from the card[^ “]/.test(st.body.join(' '))) throw new Error(`${st.id}: “the card” without its name`);
       }
     }
-    // The twins: lesson 2 keeps the board and gives Ben the other kind; lesson 3 changes Ava's words, nothing else.
+    // The twins: lesson 2 keeps the board and gives Ben the other kind (its fact banner says so); lesson 3 changes Ava's
+    // words, nothing else.
     const [, benKnight] = L2_DRILL;
-    expect(benKnight.scene).toBe(L2_SCENE);
+    expect(benKnight.scene).toBe(L2_TWIN_SCENE);
+    expect(L2_TWIN_SCENE).toEqual({ ...L2_SCENE, fact: 'Ben is a knight.' });
+    expect(L2_SCENE.kind === 'speakers' && L2_SCENE.fact).toBe('Ben is a knave.');
     expect(benKnight.twin).toBe('Ben is a knight now. The words are the same.');
     expect(benKnight.rows.every((r) => r.label.endsWith('and Ben is a knight.'))).toBe(true);
-    const [, twoHold] = L3_DRILL;
-    const before = boardSpeakers(L3_DRILL[0]).map((x) => x.says), after = boardSpeakers(twoHold).map((x) => x.says);
+    const [, l3first, twoHold] = L3_DRILL;
+    const before = boardSpeakers(l3first).map((x) => x.says), after = boardSpeakers(twoHold).map((x) => x.says);
     expect(after.filter((x, i) => x !== before[i])).toEqual(['I am a knight.']);
     expect(twoHold.twin).toBe('Ava’s words changed. Now Ava says, “I am a knight.”');
     // Each worked example's board is the card's board, drawn from the same data the boards use.
     const cardScene = (i: number, title: string) => stop5.lessons[i].ideas.find((c) => c.title === title)!.scene;
     expect(cardScene(0, 'Check a case')).toBe(L1_WELL_SCENE);
+    expect(cardScene(0, 'Two different things')).toBe(L1_CONTRAST_SCENE);
     expect(cardScene(1, 'It can depend on others')).toBe(L2_SCENE);
-    expect(cardScene(2, 'A worked example')).toBe(L3_SCENE);
+    expect(cardScene(2, 'Inside the guess')).toBe(L3_GUESS_SCENE);
+    expect(cardScene(2, 'After the crash')).toBe(L3_CONTRAST_SCENE);
+    expect(cardScene(2, 'Four possible answers')).toBe(L3_SCENE);
     expect(cardScene(3, 'Start with a strong clue')).toBe(L4_STRONG_SCENE);
-    expect(cardScene(3, 'A worked example')).toBe(L4_SCENE);
+    expect(cardScene(3, 'Inside the guess')).toBe(L4_GUESS_SCENE);
+    expect(cardScene(3, 'After the crash')).toBe(L4_CONTRAST_SCENE);
+    expect(cardScene(3, 'Check your answer')).toBe(L4_SCENE);
     expect(cardScene(4, 'A knave’s “and”')).toBe(L5_AND_SCENE);
     expect(cardScene(4, 'A knave’s “or”')).toBe(L5_OR_SCENE);
     expect(cardScene(4, 'When “I” is one part')).toBe(L5_SCENE);
   });
 
-  it('lesson 1, the handoff’s board: the well is full; the card checks a given knight; the learner checks Ada (a given knight) and Ben (a given knave)', () => {
+  it('lesson 1, the handoff’s board: the well is a fact; the card tests Fay as a knight; the learner tests Ada (a knight) and Ben (a knave)', () => {
     const l1 = stop5.lessons[0];
     const see = l1.ideas.find((c) => c.title === 'Check a case')!;
-    expect(l1.ideas.length).toBe(6);
-    expect(see.body[0]).toBe('The well is full. Each islander here is given a kind: knight or knave.');
-    expect(see.body.join(' ')).toContain('Fay is given as a knight. Fay says, “The well is not full.” The well is full, so Fay’s words are false.');
-    expect(see.body.at(-1)).toBe('A knight said something false. That breaks the rule, so this case crashes.');
-    const [board] = L1_DRILL;
+    expect(l1.ideas.length).toBe(7);
+    expect(l1.ideas.map((c) => c.title)).toEqual(['Riddle Island', 'A knight’s words', 'A knave’s words', 'Two different things', 'Check a case', 'When you can’t tell', 'Words about others']);
+    // The fact and the test are told apart: "given" is gone, the well is "a fact", and Fay's kind is a test.
+    expect(see.body[0]).toBe('On this board, the well is full. That is a fact, so it stays the same in every case here.');
+    expect(see.body.join(' ')).toContain('Test: Fay is a knight. Fay says, “The well is not full.” The well is full, so Fay’s words are false.');
+    expect(see.body.join(' ')).toContain('A knight’s words must be true. False words from a knight break the rule, so this case crashes.');
+    expect(see.body.at(-1)).toBe('A crash shows the test is wrong, never the fact. So Fay can’t be a knight.');
+    expect(JSON.stringify(l1.ideas)).not.toMatch(/\bgiven\b/);
+    const board = L1_DRILL[1];
+    expect(board.id).toBe('s5.l1-do2');
     expect(board.scene).toBe(see.scene);
     expect(boardSpeakers(board).map((x) => `${x.name}: ${x.says}`)).toEqual(['Ada: The well is full.', 'Ben: The well is full.', 'Fay: The well is not full.']);
-    // The picture's fact stays in sight: first in the board's words, and in every row.
-    expect(board.body[0]).toMatch(/^The well is full\. This is the board from the card “Check a case\.”/);
-    for (const r of board.rows) expect(r.label).toMatch(/, and the well is full\.$/);
+    // The fact is the "What is true" banner, the kinds are the "Test world" banner, and the rule is a need.
+    if (board.scene?.kind !== 'speakers') throw new Error('no scene');
+    expect([board.scene.fact, board.scene.test, board.scene.rule]).toEqual(['The well is full.', 'We test a kind for each islander.', PUZZLE_RULE]);
+    expect(board.body[0]).toMatch(/^The well is full: a fact\. This is the board from the card “Check a case\.”/);
+    expect([board.title, ...board.body, board.done, ...board.rows.flatMap((r) => [r.label, r.note ?? ''])].join(' ')).not.toMatch(/\bgiven\b/);
+    // Every row names its test apart from the fact.
+    for (const r of board.rows) expect(r.label).toMatch(/^Test: \w+ is a (knight|knave)\. Fact: the well is full\.$/);
     const read = board.rows.map((r) => factMarks(board, r));
     board.rows.forEach((r, i) => expect(marksOf(r), r.label).toEqual(read[i].marks));
     // Shown: the card's case. The learner's: the handoff's sample taps.
     const [fay, ada, ben] = board.rows;
     expect(shownRows(board)).toEqual([fay]);
-    expect([fay.label, fay.marks.map((m) => m.answer)]).toEqual(['Fay is a knight, and the well is full.', ['false', 'crashes']]);
-    expect([ada.label, ada.marks.map((m) => m.answer)]).toEqual(['Ada is a knight, and the well is full.', ['true', 'holds']]);
-    expect([ben.label, ben.marks.map((m) => m.answer)]).toEqual(['Ben is a knave, and the well is full.', ['true', 'crashes']]);
-    // A wrong tap stays wrong and names the mismatch, from the sentence: a knave's sentence came out true.
+    expect([fay.label, fay.marks.map((m) => m.answer)]).toEqual(['Test: Fay is a knight. Fact: the well is full.', ['false', 'crashes']]);
+    expect([ada.label, ada.marks.map((m) => m.answer)]).toEqual(['Test: Ada is a knight. Fact: the well is full.', ['true', 'holds']]);
+    expect([ben.label, ben.marks.map((m) => m.answer)]).toEqual(['Test: Ben is a knave. Fact: the well is full.', ['true', 'crashes']]);
+    // The need sits on its own line over each row.
+    expect(board.rows.map((r) => r.needs)).toEqual(['Fay is a knight: Fay’s words must be true.', 'Ada is a knight: Ada’s words must be true.', 'Ben is a knave: Ben’s words must be false.']);
+    // A wrong tap stays wrong and names the mismatch, from the sentence: a knave's sentence came out true. Right words
+    // with a wrong verdict first name the belief (the verdict was not compared with the kind).
     const right = Object.fromEntries(marksToTap(board).map((m) => [m.id, m.answer]));
     expect(checkDrill(board, right).done).toBe(true);
-    expect(checkDrill(board, { ...right, 'ben-knave-yes-case': 'holds' }).message).toBe('Ben is a knave, and Ben’s words came out true. A knave never says true words, so this case crashes.');
+    const verdict = checkDrill(board, { ...right, 'ben-knave-yes-case': 'holds' });
+    expect(verdict.diagnosis).toBe('verdict-only');
+    expect(verdict.message.endsWith('Ben is a knave, and Ben’s words came out true. A knave never says true words, so this case crashes.')).toBe(true);
     expect(checkDrill(board, { ...right, 'ada-knight-yes-words': 'false' }).message).toBe('In this case, the well is full. Ada says, “The well is full.” So Ada’s words are true.');
+    // The done line says what the crashes mean: Ben can't be a knave, and the fact never moved.
+    expect(board.done).toBe('Right. Ada’s case holds. Ben’s case crashes, so Ben can’t be a knave: true words come from a knight. Fay’s case crashed too, so Fay is a knave. The well never changed.');
     expect(JSON.stringify(board)).not.toMatch(/Is the well full|Who is|Which/);
   });
 
   it('lesson 1, Can’t tell and words about others: every case re-solved from the bubble, and the boards’ last words hold', () => {
-    const [, swim, others] = L1_DRILL;
+    const [, , swim, others] = L1_DRILL;
     const rows = swim.rows.map((r) => factMarks(swim, r));
     swim.rows.forEach((r, i) => expect(marksOf(r), r.label).toEqual(rows[i].marks));
     expect(new Set(rows.map((x) => `${x.kind}|${x.fact}`)).size, 'four different cases').toBe(4);
+    // Both unknowns are tried in each row: the kind and whether Cal can swim.
+    expect(rows.every((x) => !x.known)).toBe(true);
     const hold = rows.filter((x) => x.fits);
     expect(hold.length).toBe(2);
     expect(new Set(hold.map((x) => /cannot/.test(x.fact))).size, 'the two cases that hold disagree').toBe(2);
     expect(swim.done).toContain('you can’t tell');
+    expect(swim.body[0]).toBe('No one knows Cal’s kind, or if Cal can swim. So there are four cases. The first one is already checked.');
     // Dee says "Eli is a knave."
     const cases = others.rows.map((r) => caseMarks(others, r));
     others.rows.forEach((r, i) => expect(marksOf(r), r.label).toEqual(cases[i].marks));
@@ -1538,8 +1740,13 @@ describe('See -> Do -> Quiz (skill-drill handoff)', () => {
     expect(holding).toEqual([{ dee: 'knave', eli: 'knight' }, { dee: 'knight', eli: 'knave' }]);
     expect(others.done).toBe('Right. Two cases hold. If Dee is a knave, Eli is a knight. If Dee is a knight, Eli is a knave. So when no one knows Dee’s kind, you can’t tell what Eli is.');
     // The card's own case is the one shown; the learner marks the three new ones.
-    expect(shownRows(others).map((r) => r.label)).toEqual(['Dee and Eli are both knaves.']);
+    expect(shownRows(others).map((r) => r.label)).toEqual(['Test: Dee and Eli are both knaves.']);
     expect(swim.done).toContain('or what kind Cal is');
+    // The swim card works the four cases from two unknowns, and its shown case is the board's.
+    const card = stop5.lessons[0].ideas.find((c) => c.title === 'When you can’t tell')!;
+    expect(card.body[0]).toBe('Cal says, “I can swim.” No one knows Cal’s kind, or if Cal can swim. Two things are unknown, and each can go two ways. So there are four cases.');
+    expect(card.body[1]).toContain(`${shownRows(swim)[0].label}`);
+    expect(rows[0].fits, 'the card’s case holds').toBe(true);
   });
 
   it('lesson 2: test each kind on the card’s board (no one), then its twin with Ben a knight (either kind)', () => {
@@ -1552,12 +1759,16 @@ describe('See -> Do -> Quiz (skill-drill handoff)', () => {
     expect(can(knight)).toEqual(['knight:true', 'knave:true']);
     expect(knight.done).toContain('So either kind could say it.');
     // The card says what the shown knight row shows: from a knight, the words would be false.
-    expect(stop5.lessons[1].ideas[4].body[1]).toBe('A knight is not the same kind as Ben. So from a knight, the words would be false.');
+    expect(stop5.lessons[1].ideas.find((c) => c.title === 'It can depend on others')!.body[1]).toBe('A knight is not the same kind as Ben. So from a knight, the words would be false.');
     expect(shownRows(knave)[0].marks.map((m) => m.answer)).toEqual(['false', 'no']);
+    // Two steps, never one: what the words would be, then what that kind needs, on its own line.
+    expect(knave.rows.map((r) => r.needs)).toEqual(['A knight’s words must be true.', 'A knave’s words must be false.']);
+    expect(knave.body[1]).toBe('“I” is the speaker. Here we pretend the speaker is a knave. First mark what the words would be. Then say if a knave could say it.');
+    expect([knave.scaffold, knight.scaffold]).toEqual(['full', 'light']);
   });
 
   it('lessons 3-5: every case row re-solved from the bubbles, and each board’s last words are what its rows show', () => {
-    for (const st of [...L3_DRILL, ...L4_DRILL, ...L5_DRILL]) {
+    for (const st of [...L3_DRILL, ...L4_DRILL, ...L5_DRILL].filter((x) => x.scene?.kind === 'speakers')) {
       const cases = st.rows.map((r) => caseMarks(st, r));
       st.rows.forEach((r, i) => expect(marksOf(r), `${st.id} ${r.label}`).toEqual(cases[i].marks));
       expect(new Set(cases.map((c) => JSON.stringify(c.kinds))).size, `${st.id}: no case twice`).toBe(cases.length);
@@ -1565,11 +1776,11 @@ describe('See -> Do -> Quiz (skill-drill handoff)', () => {
     const fitting = (st: DrillStep) => st.rows.map((r) => caseMarks(st, r)).filter((c) => c.fits).map((c) => c.kinds);
     const all = (st: DrillStep) => st.rows.map((r) => caseMarks(st, r));
     // Lesson 3: all four cases of the card's board. Ava as a knave crashes both ways; the one case that holds is the answer.
-    const [l3, twin] = L3_DRILL;
+    const [, l3, twin] = L3_DRILL;
     expect(all(l3).length).toBe(4);
     expect(all(l3).filter((c) => c.kinds.ava === 'knave').every((c) => !c.fits)).toBe(true);
     expect(fitting(l3)).toEqual([L3_EXAMPLE.answer]);
-    expect(shownRows(l3)[0].label).toBe('Ava is a knave and Ben is a knight.');
+    expect(shownRows(l3)[0].label).toBe('Test: Ava is a knave and Ben is a knight.');
     // The twin: with Ava a knight, both cases hold, so you can't tell what Ben is.
     expect(all(twin).every((c) => c.kinds.ava === 'knight' && c.fits)).toBe(true);
     expect(new Set(all(twin).map((c) => c.kinds.ben)).size).toBe(2);
@@ -1580,7 +1791,7 @@ describe('See -> Do -> Quiz (skill-drill handoff)', () => {
     for (const c of all(strong)) expect(c.fits, JSON.stringify(c.kinds)).toBe(c.kinds.ava === 'knight' && (c.kinds.ben === 'knave' || c.kinds.cal === 'knave'));
     expect(all(strong).some((c) => c.kinds.ava === 'knave' && c.kinds.ben === 'knave' && c.kinds.cal === 'knave'), 'a knave Ava crashes even among knaves').toBe(true);
     expect(fitting(l4)).toEqual([L4_EXAMPLE.answer]);
-    expect(shownRows(l4)[0].label).toBe('Ava is a knight, Ben is a knave and Cal is a knight.');
+    expect(shownRows(l4)[0].label).toBe('Test: Ava is a knight, Ben is a knave and Cal is a knight.');
     // Lesson 5: a knave's "and" keeps every case with a knave; a knave's "or" keeps only both knaves; Raj and Vic.
     const [and, or, raj] = L5_DRILL;
     const pairs = (st: DrillStep) => all(st).map((c) => `${c.kinds.ava},${c.kinds.ben}`).sort();
@@ -1606,16 +1817,20 @@ describe('See -> Do -> Quiz (skill-drill handoff)', () => {
               if (o.id === m.answer) continue;
               const why = m.why[o.id];
               expect(why, `${st.id} ${m.id} ${o.id}`).toBeTruthy();
-              expect(checkDrill(st, { ...right, [m.id]: o.id }).message).toBe(why);
+              // A mix-up the wrong mark shows is named first; the mark's own words follow as the concrete case.
+              const got = checkDrill(st, { ...right, [m.id]: o.id });
+              const named = st.misconceptions?.find((x) => x.id === got.diagnosis);
+              expect(got.message).toBe(named ? `${named.text} ${why}` : why);
               if (/words$/.test(m.label)) expect(why, why).toMatch(/“.+”/);
+              else if (m.label === 'Inside the guess, or known?') expect(why, why).toMatch(/^“.+” (is the guess itself|came from pretending|comes after the crash)/);
               else expect(why, why).toMatch(/words|would be/);
               expect(why).not.toMatch(/['"]|\bWrong\b|that row|the opposite|undefined/);
               for (const b of why.matchAll(/\b[Bb]oth\b(?: (\S+))?/g)) expect(b[1], why).toMatch(/^(knights|knaves|parts|hold|cases)\b/);
               for (const sent of sentences(why)) expect(words(sent).length, sent).toBeLessThanOrEqual(READING.maxSentenceWords);
             }
           }
-          // Once the row's marks are right, its note says what the case does.
-          expect(r.note, r.label).toMatch(/holds|crashes|keep this case|cross this case out|could say it|can’t say it/);
+          // Once the row's marks are right, its note says what the case does (a sorting line has no case).
+          if (st.id !== SORT_ID) expect(r.note, r.label).toMatch(/holds|crashes|keep this case|cross this case out|could say it|can’t say it/);
         }
       }
     }
@@ -1680,7 +1895,7 @@ describe('See -> Do -> Quiz (skill-drill handoff)', () => {
           const idOf = (n: string) => [...names].find(([, v]) => v === n)![0];
           const k = readKinds(hc.label, idOf);
           expect(ids.every((id) => k[id] === it.answer[id].kind), 'not the answer').toBe(false);
-          expect(hc.truths).toEqual(speakerTruths(it, k));
+          expect(bare(hc.truths)).toEqual(speakerTruths(it, k));
           expect(hc.note, 'the board’s own words').toMatch(/(That breaks|Each one breaks) the rule, so this case crashes\.$/);
           seen.add('puzzle');
         } else if (it.kind === 'choose' && it.skill === 's5.suppose') {
@@ -1689,7 +1904,7 @@ describe('See -> Do -> Quiz (skill-drill handoff)', () => {
           const m = it.prompt.match(/ Suppose (\w+) is a (knight|knave)\. What must (\w+) be\?/)!;
           const k = readKinds(hc.label, idOf);
           expect(k[idOf(m[1])], 'the hint keeps the guess').toBe(m[2]);
-          expect(hc.truths).toEqual(speakerTruths(it, k));
+          expect(bare(hc.truths)).toEqual(speakerTruths(it, k));
           const ok = KINDS.filter((v) => allFit(ids, meaning, { [idOf(m[1])]: m[2] as Kind, [idOf(m[3])]: v }));
           if (ok.length < 2) expect(allFit(ids, meaning, k), 'a case that breaks the rule').toBe(false);
           expect(hc.note).toMatch(allFit(ids, meaning, k) ? /This case holds\.$/ : /so this case crashes\.$/);
@@ -1700,7 +1915,7 @@ describe('See -> Do -> Quiz (skill-drill handoff)', () => {
           const w = r.readLabel(hc.label);
           expect(r.known.map(r.key), 'a case the question allows').toContain(r.key(w));
           expect(r.fits(w), 'a case that breaks the rule').toBe(false);
-          expect(hc.truths).toEqual([{ who: `${r.S}’s words`, value: r.wordsTrue(w) }]);
+          expect(bare(hc.truths)).toEqual([{ who: `${r.S}’s words`, value: r.wordsTrue(w) }]);
           expect(hc.note).toMatch(/so this case crashes\.$/);
           seen.add('words');
         } else if (it.kind === 'choose' && it.skill === 's5.cant-say') {
@@ -1710,7 +1925,7 @@ describe('See -> Do -> Quiz (skill-drill handoff)', () => {
           const k = hc.label.match(/^The speaker is a (knight|knave)/)![1] as Kind;
           const fact = KNOWN_FACTS.find((x) => x.text === said);
           const as = (kind: Kind) => (fact ? fact.truth : readWords(said, ME, lower, known ? [ME, lower(known[1])] : [ME])({ [ME]: kind, ...(known ? { [lower(known[1])]: known[2] as Kind } : {}) }));
-          expect(hc.truths).toEqual([{ who: 'The words', value: as(k) }]);
+          expect(bare(hc.truths)).toEqual([{ who: 'The words', value: as(k) }]);
           const can = (kind: Kind) => (kind === 'knight') === as(kind);
           if (KINDS.some((x) => !can(x))) expect(can(k), 'a kind that can’t say it').toBe(false);
           seen.add('say');
@@ -1721,7 +1936,7 @@ describe('See -> Do -> Quiz (skill-drill handoff)', () => {
           const all: K[] = [['knight', 'knight'], ['knight', 'knave'], ['knave', 'knight'], ['knave', 'knave']].map(([p, q]) => ({ [lower(X)]: p as Kind, [lower(Y)]: q as Kind }));
           const i = caseIndex(hc.label, X, Y);
           expect(mean(all[i]) === (sk === 'knight'), 'a case that is crossed out').toBe(false);
-          expect(hc.truths).toEqual([{ who: `${S}’s words`, value: mean(all[i]) }]);
+          expect(bare(hc.truths)).toEqual([{ who: `${S}’s words`, value: mean(all[i]) }]);
           expect(hc.note).toMatch(/so cross this case out\.$/);
           seen.add('andor');
         } else throw new Error(`unexpected item ${it.skill}`);
@@ -1730,12 +1945,399 @@ describe('See -> Do -> Quiz (skill-drill handoff)', () => {
     expect([...seen].sort()).toEqual(['andor', 'puzzle', 'say', 'suppose', 'words']);
   });
 
-  it('each lesson keeps the default pass: the boards marked right, then 3 right on the first try with no hint', () => {
+  it('pass: the boards marked right, then 3 right on the first try with no hint; lesson 1 needs a stated knave’s “not”, lesson 4 a puzzle whose kinds flip after the crash', () => {
+    const want: Record<string, string[]> = { 's5.l1': ['stated-knave-not'], 's5.l2': [], 's5.l3': [], 's5.l4': ['guess-flips'], 's5.l5': [] };
     for (const l of stop5.lessons) {
-      expect(l.pass, l.id).toBeUndefined();
-      const clean = { clean: true, tags: [] };
-      expect(passState(l.pass, [clean, clean]).met).toBe(false);
-      expect(passState(l.pass, [clean, { clean: false, tags: [] }, clean, clean]).met).toBe(true);
+      expect((l.pass?.include ?? []).map((g) => g.tag), l.id).toEqual(want[l.id]);
+      expect(l.pass?.firstTry ?? 3, l.id).toBe(3);
+      const clean = (tags: string[] = []) => ({ clean: true, tags });
+      const tag = want[l.id];
+      expect(passState(l.pass, [clean(tag), clean()]).met).toBe(false);
+      expect(passState(l.pass, [clean(), { clean: false, tags: [] }, clean(), clean()]).met).toBe(tag.length === 0);
+      expect(passState(l.pass, [clean(), { clean: false, tags: tag }, clean(tag), clean()]).met).toBe(true);
     }
+  });
+});
+
+// ---------- distinctions taught apart (docs/audit/hidden-distinctions.md, Stop 5) ----------
+//
+// The two ideas the stop rests on are taught apart and kept apart on every board: the kind we test for a speaker (what
+// the words must be) vs whether the words are true in the case (kind vs truth, lesson 1), and what is found inside a
+// guess vs what is known (guess vs known, lesson 3). Every truth below is re-computed from the words on the page.
+
+/** Every row board of the stop, with its lesson. */
+const ROW_BOARDS = (): [string, DrillStep][] => stop5.lessons.flatMap((l) => (l.drill ?? []).map((st) => [l.id, st] as [string, DrillStep]));
+const SORT_ID = 's5.l3-sort';
+/** A board whose rows are cases (kinds, and on lesson 1 a fact): every board but lesson 2's and the sorting board. */
+const isCaseBoard = (st: DrillStep) => st.id !== SORT_ID && !st.id.startsWith('s5.l2');
+/** "Test: Ben is a knave, and the well is full." / "Test: Ben is a knave. Fact: the well is full." */
+const isFactRow = (r: DrillRow) => /^Test: \w+ is a (knight|knave)(, and |\. Fact: )/.test(r.label) && !/ is a (knight|knave)\.?$/.test(r.label.replace(/^Test: \w+ is a (knight|knave)/, ''));
+/** A case row's speakers' kinds and the words each one must say. */
+function rowNeeds(st: DrillStep, r: DrillRow): { marks: Record<string, string>; need: Record<string, string>; breaks: boolean } {
+  if (st.scene?.kind === 'contrast') {
+    const f = factMarks(st, r, st.scene.pairs[0].says);
+    return { marks: f.marks, need: { [`${f.name}’s words`]: tfWord(f.kind === 'knight') }, breaks: !f.fits };
+  }
+  if (isFactRow(r)) {
+    const f = factMarks(st, r);
+    return { marks: f.marks, need: { [`${f.name}’s words`]: tfWord(f.kind === 'knight') }, breaks: !f.fits };
+  }
+  const c = caseMarks(st, r);
+  const need: Record<string, string> = {};
+  for (const sp of boardSpeakers(st)) if (sp.says) need[`${sp.name}’s words`] = tfWord(c.kinds[sp.id] === 'knight');
+  return { marks: c.marks, need, breaks: !c.fits };
+}
+
+describe('distinctions taught apart (hidden-distinction audit)', () => {
+  it('each lesson declares its distinctions: kind vs truth taught in lesson 1, guess vs known in lesson 3; later lessons remind, with at most 7 cards', () => {
+    const [l1, l2, l3, l4, l5] = stop5.lessons;
+    expect(l1.distinctions).toEqual([KIND_VS_TRUTH]);
+    for (const l of [l2, l5]) expect(l.distinctions).toEqual([{ ...KIND_VS_TRUTH, taughtIn: 's5.l1' }]);
+    expect(l3.distinctions).toEqual([{ ...KIND_VS_TRUTH, taughtIn: 's5.l1' }, GUESS_VS_KNOWN]);
+    expect(l4.distinctions).toEqual([{ ...KIND_VS_TRUTH, taughtIn: 's5.l1' }, { ...GUESS_VS_KNOWN, taughtIn: 's5.l3' }]);
+    for (const l of stop5.lessons) {
+      expect(l.ideas.length, l.id).toBeLessThanOrEqual(7);
+      for (const d of l.distinctions ?? []) expect(l.ideas.some((c) => c.distinction === d.id), `${l.id} has a card for ${d.id}`).toBe(true);
+    }
+    // Later lessons remind of kind vs truth on a card of their own.
+    for (const l of [l2, l3, l4, l5]) {
+      const card = l.ideas.find((c) => c.distinction === KIND_VS_TRUTH.id)!;
+      expect(card.title, l.id).toBe('Remember: two different things');
+      expect(card.body.join(' '), l.id).toMatch(/must be/);
+    }
+    // Where guess vs known is first taught, its card shows a contrast picture and a board right after it exercises it.
+    const after = l3.ideas.find((c) => c.distinction === GUESS_VS_KNOWN.id)!;
+    expect(after.title).toBe('After the crash');
+    expect(after.scene?.kind).toBe('contrast');
+    expect(l4.ideas.find((c) => c.distinction === GUESS_VS_KNOWN.id)!.title).toBe('After the crash');
+  });
+
+  it('the contrast card (lesson 1, card 4): Ben tested as a knave, the same words, the well full and not full; every truth from the words', () => {
+    const l1 = stop5.lessons[0];
+    expect(l1.ideas[3]).toBe(L1_CONTRAST);
+    expect(L1_CONTRAST.distinction).toBe(KIND_VS_TRUTH.id);
+    expect(L1_CONTRAST.scene).toBe(L1_CONTRAST_SCENE);
+    if (L1_CONTRAST_SCENE.kind !== 'contrast') throw new Error('no contrast');
+    const [p, q] = L1_CONTRAST_SCENE.pairs;
+    // The same speaker, the same words, the same tested kind: only the well differs.
+    expect([p.who, q.who]).toEqual(['Ben', 'Ben']);
+    expect([p.says, q.says]).toEqual(['The well is full.', 'The well is full.']);
+    const read = (w: string) => w.match(/^Test: Ben is a (knight|knave), and (the well is (?:not )?full)\.$/)!;
+    const [rp, rq] = [read(p.world), read(q.world)];
+    expect([rp[1], rq[1]]).toEqual(['knave', 'knave']);
+    expect(rp[2]).not.toBe(rq[2]);
+    for (const [panel, r] of [[p, rp], [q, rq]] as const) {
+      // The truth comes from the words against the well, never from the kind.
+      const v = factWordsTrue(panel.says, r[2]);
+      expect(panel.truth, panel.world).toBe(v);
+      expect(panel.because).toBe(`It says the well is full. In this case, ${r[2]}. ${v ? 'They match, so the words are true.' : 'They do not match, so the words are false.'}`);
+      // Then the kind: a knave with true words crashes; with false words, the case holds.
+      const fitsKnave = !v;
+      expect(panel.then).toBe(`A knave with ${tfWord(v)} words ${fitsKnave ? 'fits the rule. This case holds.' : 'breaks the rule. This case crashes.'}`);
+    }
+    expect(p.truth).not.toBe(q.truth);
+    expect(L1_CONTRAST_SCENE.ask!.q).toBe('Did Ben change?');
+    expect(L1_CONTRAST_SCENE.ask!.a).toContain('Ben’s kind says what the words must be, not what they are.');
+    expect(L1_CONTRAST.body.join(' ')).toContain('One: the kind we test. It says what the words must be.');
+    expect(L1_CONTRAST.body.join(' ')).toContain('That comes from what they say, checked against the case.');
+  });
+
+  it('its board (s5.l1-do1) opens right after it: Ben’s two cases on the same picture, re-solved from the panels', () => {
+    const [board] = L1_DRILL;
+    expect([board.id, board.afterCard, board.distinction, board.scaffold]).toEqual(['s5.l1-do1', 3, KIND_VS_TRUTH.id, 'full']);
+    expect(board.scene).toBe(L1_CONTRAST_SCENE);
+    expect(shownRows(board).length, 'the learner does both cases').toBe(0);
+    if (board.scene?.kind !== 'contrast') throw new Error('no contrast');
+    const read = board.rows.map((r) => factMarks(board, r, 'The well is full.'));
+    board.rows.forEach((r, i) => expect(marksOf(r), r.label).toEqual(read[i].marks));
+    expect(board.rows.map((r) => r.label)).toEqual(board.scene.pairs.map((x) => x.world));
+    expect(board.rows.map((r) => r.marks.map((m) => m.answer))).toEqual([['true', 'crashes'], ['false', 'holds']]);
+    expect(board.rows.map((r) => r.needs)).toEqual(['Ben is a knave: Ben’s words must be false.', 'Ben is a knave: Ben’s words must be false.']);
+    // The audit's sample: a knave's words marked False because a knave's words are false, then Holds.
+    const right = Object.fromEntries(marksToTap(board).map((m) => [m.id, m.answer]));
+    expect(checkDrill(board, right).done).toBe(true);
+    const merged = checkDrill(board, { ...right, 'ben-knave-yes-words': 'false', 'ben-knave-yes-case': 'holds' });
+    expect(merged.diagnosis).toBe('words-from-kind');
+    expect(merged.message).toMatch(/^You may be treating the speaker’s kind and the truth of the words as the same thing\. They are two different things\./);
+    expect(merged.message.endsWith('In this case, the well is full. Ben says, “The well is full.” So Ben’s words are true.')).toBe(true);
+  });
+
+  it('every row board keeps the comparison in view: the facts to compare under every words mark (names, never “I”), the need on its own line, the full scaffold where a case is shown', () => {
+    for (const [lesson, st] of ROW_BOARDS()) {
+      if (st.id === SORT_ID) continue;
+      const say = lesson === 's5.l2';
+      expect(st.words, st.id).toEqual(say ? SAY_WORDS : CASE_WORDS);
+      expect(st.words!.needs, `${st.id}: the need stands on its own line`).toBe('');
+      expect(st.words!.closing, st.id).not.toMatch(/sign/);
+      // A board that shows a case keeps the full scaffold, so its comparison is drawn under the shown marks.
+      if (shownRows(st).length) expect(st.scaffold, st.id).toBe('full');
+      // The method strip: one step per mark to tap, in board order, no two alike (the strip lights the mark you are on).
+      if (st.steps) {
+        expect(st.steps.length, st.id).toBe(marksToTap(st).length);
+        expect(new Set(st.steps).size, st.id).toBe(st.steps.length);
+        marksToTap(st).forEach((m, i) => expect(st.steps![i], st.id).toMatch(m.options[0].id === 'true' ? /^Case \d: (check .+ against the case|work out what the words would be)$/ : /^Case \d: compare with /));
+      }
+      if (st.scene?.kind === 'speakers') {
+        expect(st.scene.rule, st.id).toBe(PUZZLE_RULE);
+        expect(st.scene.test, `${st.id}: what is tried is the test-world banner`).toBeTruthy();
+      }
+      for (const r of st.rows) {
+        expect(r.needs, `${st.id} ${r.label}`).toBeTruthy();
+        for (const m of r.marks.filter((x) => x.options.length === 2 && x.options[0].id === 'true')) {
+          const c = m.compare!;
+          expect(c, `${st.id} ${m.id} has the facts to compare`).toBeDefined();
+          expect(c.says, 'names, never “I”').not.toMatch(/\bI\b|\bme\b/);
+          const v = m.answer === 'true';
+          if (say) {
+            // "The speaker and Ben are the same kind." in "The speaker is a knave, and Ben is a knave."
+            const tok = (x: string) => x.replace(/\b[Tt]he speaker\b/g, 'Speaker');
+            const w = tok(c.world).match(/^Speaker is a (knight|knave), and (\w+) is a (knight|knave)\.$/)!;
+            const k = { [ME]: w[1] as Kind, [lower(w[2])]: w[3] as Kind };
+            expect(readNamed(tok(c.says), (n) => (n === 'Speaker' ? ME : lower(n)), [ME, lower(w[2])])(k), `${c.says} / ${c.world}`).toBe(v);
+            expect(r.needs).toBe(`A ${w[1]}’s words must be ${tfWord(w[1] === 'knight')}.`);
+          } else if (st.scene?.kind === 'contrast' || isFactRow(r)) {
+            // Two sentences about one fact: they match exactly when the words are true.
+            expect(c.says === c.world, `${c.says} / ${c.world}`).toBe(v);
+          } else {
+            const kinds = readKinds(r.label, lower);
+            const keep = st.body[0].match(/^(\w+) is a (knight|knave) and says/);
+            if (keep) kinds[lower(keep[1])] = keep[2] as Kind;
+            checkBecause({ who: m.label, value: v, because: { ...c, match: v } }, lower, Object.keys(kinds));
+          }
+        }
+      }
+      // The need of each case row names each speaker and what that speaker's words must be.
+      if (isCaseBoard(st)) {
+        for (const r of st.rows) {
+          const n = rowNeeds(st, r).need;
+          expect(r.needs, r.label).toBe(Object.entries(n).map(([who, v]) => `${who.replace(/’s words$/, '')} is a ${v === 'true' ? 'knight' : 'knave'}: ${who} must be ${v}.`).join(' '));
+        }
+      }
+    }
+  });
+
+  it('misconceptions: the kind taken for the truth (words-from-kind) and right words with a wrong verdict (verdict-only), on every case board, never on right marks', () => {
+    let fired = 0;
+    for (const [, st] of ROW_BOARDS()) {
+      if (!isCaseBoard(st)) continue;
+      expect(st.misconceptions?.map((m) => m.id).at(-1), st.id).toBe('verdict-only');
+      const right = Object.fromEntries(marksToTap(st).map((m) => [m.id, m.answer]));
+      const ok = checkDrill(st, right);
+      expect([ok.done, ok.diagnosis], st.id).toEqual([true, undefined]);
+      for (const r of tapRows(st)) {
+        const { need, breaks } = rowNeeds(st, r);
+        const words = r.marks.filter((m) => need[m.label] !== undefined);
+        const verdict = r.marks.at(-1)!;
+        // Every words mark set to what the kind demands, on a row that breaks the rule: the belief is named first.
+        const fromKind = { ...right, ...Object.fromEntries(words.map((m) => [m.id, need[m.label]])) };
+        if (breaks) {
+          const got = checkDrill(st, { ...fromKind, [verdict.id]: verdict.options.find((o) => o.id !== verdict.answer)!.id });
+          expect(got.diagnosis, `${st.id} ${r.label}`).toBe('words-from-kind');
+          expect(got.row).toBe(r.id);
+          fired++;
+        } else {
+          // On a row that fits, the kind's demand is the right answer: nothing to diagnose.
+          expect(checkDrill(st, fromKind).done, `${st.id} ${r.label}`).toBe(true);
+        }
+        // Right words, wrong verdict: the result was not compared with the kinds.
+        const vo = checkDrill(st, { ...right, [verdict.id]: verdict.options.find((o) => o.id !== verdict.answer)!.id });
+        expect(vo.diagnosis, `${st.id} ${r.label}`).toBe('verdict-only');
+        // A words mark against the kind's demand on a row that fits is a plain slip, named by the mark alone.
+        if (!breaks) for (const m of words) expect(checkDrill(st, { ...right, [m.id]: m.answer === 'true' ? 'false' : 'true' }).diagnosis, `${st.id} ${m.id}`).toBeUndefined();
+      }
+    }
+    expect(fired).toBeGreaterThan(10);
+    // The audit's sample on the swim board: "Cal is a knight, and Cal cannot swim" marked True and Holds.
+    const swim = L1_DRILL[2];
+    const right = Object.fromEntries(marksToTap(swim).map((m) => [m.id, m.answer]));
+    expect(checkDrill(swim, { ...right, 'cal-knight-no-words': 'true', 'cal-knight-no-case': 'holds' }).diagnosis).toBe('words-from-kind');
+  });
+
+  it('lesson 2, would be vs must be: the need taken for the words (need-as-truth), Could set from the words on a knave row (could-is-true), and verdict-only', () => {
+    const [knave, knight] = L2_DRILL;
+    const right = (st: DrillStep) => Object.fromEntries(marksToTap(st).map((m) => [m.id, m.answer]));
+    // The board's knave row: Ben is a knave, the speaker a knave, so the words would be true; a knave needs false.
+    expect(sayMarks(knave, knave.rows[1]).marks).toEqual({ 'The words would be': 'true', 'Could a knave say it?': 'no' });
+    expect(checkDrill(knave, right(knave)).done).toBe(true);
+    expect(checkDrill(knave, { 'say-knave-words': 'false', 'say-knave-could': 'yes' }).diagnosis).toBe('need-as-truth');
+    expect(checkDrill(knave, { 'say-knave-words': 'false', 'say-knave-could': 'no' }).diagnosis).toBe('need-as-truth');
+    expect(checkDrill(knave, { 'say-knave-words': 'true', 'say-knave-could': 'yes' }).diagnosis).toBe('could-is-true');
+    // The twin: Ben is a knight. From a knave the words would be false, and a knave could say them.
+    expect(sayMarks(knight, knight.rows[1]).marks).toEqual({ 'The words would be': 'false', 'Could a knave say it?': 'yes' });
+    expect(checkDrill(knight, { ...right(knight), 'say-knave-could': 'no' }).diagnosis).toBe('could-is-true');
+    // For a knight, "Could" follows the words, so that pattern is right there: a wrong Could is verdict-only.
+    expect(checkDrill(knight, { ...right(knight), 'say-knight-could': 'no' }).diagnosis).toBe('verdict-only');
+    // On a row that kind can say, the words against the need are a plain slip.
+    expect(checkDrill(knight, { ...right(knight), 'say-knight-words': 'false' }).diagnosis).toBeUndefined();
+    for (const st of L2_DRILL) expect(st.misconceptions!.find((m) => m.id === 'need-as-truth')?.text ?? st.misconceptions!.find((m) => m.id === 'could-is-true')!.text).toMatch(/^You may be treating /);
+  });
+
+  it('lesson 3’s sorting board: the worked guess’s lines, inside the guess or known, worked out from the explanation; each mix-up named', () => {
+    const [sort] = L3_DRILL;
+    const l3 = stop5.lessons[2];
+    expect([sort.id, sort.afterCard, sort.distinction]).toEqual([SORT_ID, 4, GUESS_VS_KNOWN.id]);
+    expect(l3.ideas[4].title).toBe('After the crash');
+    expect(sort.scene).toBe(l3.ideas[4].scene);
+    const { ids, claims, answer } = L3_EXAMPLE;
+    const nm = (id: string) => id.charAt(0).toUpperCase() + id.slice(1);
+    const solve = explainSolve(ids, claims, answer, nm)!;
+    // Inside the guess: everything the explanation found between "Suppose" and "That guess crashes".
+    const lines = solve.lines;
+    const from = lines.findIndex((x) => x.startsWith('Suppose ')), to = lines.findIndex((x) => x.startsWith('That guess crashes'));
+    const g = lines[from].match(/^Suppose (\w+) is a (knight|knave)\.$/)!;
+    const inside: K = { [lower(g[1])]: g[2] as Kind };
+    for (const l of lines.slice(from + 1, to)) for (const m of l.matchAll(/So, inside the guess, (.+?)\./g)) Object.assign(inside, readFacts(m[1], lower));
+    const right = Object.fromEntries(marksToTap(sort).map((m) => [m.id, m.answer]));
+    expect(checkDrill(sort, right).done).toBe(true);
+    for (const r of sort.rows) {
+      const text = r.label.replace(/^Line \d+: /, '');
+      const kind = text.match(/^(\w+) is a (knight|knave)\.$/);
+      const must = text.match(/^(\w+)’s words must be (true|false)\.$/);
+      let where: string;
+      if (kind) where = inside[lower(kind[1])] === kind[2] && answer[lower(kind[1])] !== kind[2] ? 'guess' : 'known';
+      else where = (must![2] === 'true') === (inside[lower(must![1])] === 'knight') ? 'guess' : 'known';
+      if (kind && where === 'known') expect(answer[lower(kind[1])], text).toBe(kind[2]);
+      expect(r.marks[0].answer, text).toBe(where);
+      const wrong = checkDrill(sort, { ...right, [r.marks[0].id]: where === 'guess' ? 'known' : 'guess' });
+      expect(wrong.diagnosis, text).toBe(where === 'guess' ? 'guess-as-known' : 'known-as-guess');
+    }
+    expect(new Set(sort.rows.map((r) => r.marks[0].answer))).toEqual(new Set(['guess', 'known']));
+    // The contrast it sits under: Ben's words with the kinds inside the guess, then known; truths from the words.
+    if (L3_CONTRAST_SCENE.kind !== 'contrast') throw new Error('no contrast');
+    const mean = readWords('Ava and I are the same kind.', 'ben', lower, ids);
+    for (const [panel, tag] of [[L3_CONTRAST_SCENE.pairs[0], 'Inside the guess'], [L3_CONTRAST_SCENE.pairs[1], 'Known']] as const) {
+      expect(panel.world.startsWith(`${tag}: `)).toBe(true);
+      const k = readFacts(panel.world.replace(/^[^:]+: /, '').replace(/\.$/, ''), lower);
+      expect(panel.truth).toBe(mean(k));
+      expect(/crashes/.test(panel.then!)).toBe(!fits({ ben: mean }, 'ben', k));
+    }
+    expect(readFacts(L3_CONTRAST_SCENE.pairs[0].world.replace(/^[^:]+: /, '').replace(/\.$/, ''), lower)).toEqual(inside);
+    expect(readFacts(L3_CONTRAST_SCENE.pairs[1].world.replace(/^[^:]+: /, '').replace(/\.$/, ''), lower)).toEqual(answer);
+  });
+
+  it('“I’m confused”: one to three questions on every board, each with exactly one right option and a “Not sure”, never naming anyone on the board; a Stop 5 closing line', () => {
+    const qs = (st: DrillStep) => st.confused ?? [];
+    for (const [lesson, st] of ROW_BOARDS()) {
+      expect(qs(st).length, st.id).toBeGreaterThanOrEqual(1);
+      expect(qs(st).length, st.id).toBeLessThanOrEqual(3);
+      const names = st.scene?.kind === 'speakers' ? st.scene.speakers.map((x) => x.name).filter((n) => n !== 'Someone') : st.scene?.kind === 'contrast' ? st.scene.pairs.map((x) => x.who) : [];
+      for (const q of qs(st)) {
+        expect(q.options.filter((o) => o.right).length, q.q).toBe(1);
+        expect(q.options.map((o) => o.label)).toContain('Not sure');
+        for (const n of [...names, 'Ava', 'Ben', 'Cal', 'Dee', 'Eli', 'Fay', 'Ada', 'Raj', 'Vic']) expect([q.q, q.teach, ...q.options.map((o) => o.label)].join(' '), `${st.id}: ${n}`).not.toMatch(new RegExp(`\\b${n}\\b`));
+        expect(q.teach.trim().length).toBeGreaterThan(20);
+      }
+      expect(st.words?.closing, st.id).toBeTruthy();
+      // Lesson 1: kind vs truth both ways, then a fact vs a test. Lesson 2: would be vs must be.
+      if (lesson === 's5.l1') expect(qs(st).map((q) => q.options.find((o) => o.right)!.label)).toEqual(['No: what they say, checked against the case, decides', 'This case crashes: a knave never says true words', 'Max can’t be a knave']);
+      if (lesson === 's5.l2') expect(qs(st).map((q) => q.q)).toEqual(['Pretend a knave says, “I am a knave.” Would the words be true or false?', 'A knave’s words must be false. Pretend a knave says some words, and they would be true. Could a knave say them?']);
+    }
+  });
+
+  it('the reworded texts: “must be” for every need on the cards, two named steps in lesson 2, “a knight or a knave” in lesson 3, and no “given”', () => {
+    const [l1, l2, l3] = stop5.lessons;
+    const text = (l: (typeof stop5.lessons)[number], title: string) => l.ideas.find((c) => c.title === title)!.body.join(' ');
+    expect(text(l1, 'Riddle Island')).toContain('So a knight’s words must be true.');
+    expect(text(l1, 'Riddle Island')).toContain('So a knave’s words must be false.');
+    expect(text(l1, 'A knight’s words')).toContain('A knight’s words must be true. So Ada has a cat.');
+    expect(text(l1, 'A knave’s words')).toContain('A knave’s words must be false. So Ben does not have a dog.');
+    for (const c of l1.ideas) expect(c.body.join(' ')).not.toMatch(/\bgiven\b|A knight’s words are true|A knave’s words are false/);
+    // Card 5 names both unknowns behind the four cases, and its worked case checks the words before the kind.
+    expect(text(l1, 'When you can’t tell')).toContain('Two things are unknown, and each can go two ways. So there are four cases.');
+    expect(text(l2, 'Test each kind')).toContain('Step 1: pretend a knave says it. Work out if the words would be true. “I” now means that knave.');
+    expect(text(l2, 'Test each kind')).toContain('Step 2: a knave’s words must be false.');
+    expect(text(l3, 'Suppose')).toContain('Suppose that one is a knight or a knave.');
+    expect(text(l3, 'Crash!')).toContain('When a guess crashes, throw away everything you found inside it.');
+    expect(text(l3, 'Four possible answers')).toContain('A guess can also hold.');
+    expect(text(l3, 'Four possible answers')).toContain('Following a guess is a short way to list the cases.');
+    // Each follow step on the worked cards is Need, Says, So.
+    for (const l of [stop5.lessons[2], stop5.lessons[3]]) {
+      for (const title of ['Inside the guess', 'After the crash']) {
+        const steps = l.ideas.find((c) => c.title === title)!.body.filter((p) => p.startsWith('Need: '));
+        expect(steps.length, `${l.id} ${title}`).toBeGreaterThan(0);
+        for (const p of steps) expect(p, p).toMatch(/^Need: .*must be (true|false)\. Says: .+\. (So: |But )/);
+      }
+    }
+  });
+
+  it('quizzes: a stated kind is the fact banner, a guess the test-world banner; the lesson 1 Teach says “must be”; every hint and Teach case carries its reason', () => {
+    let facts = 0, tests = 0;
+    for (let seed = 1; seed <= 40; seed++) {
+      for (const it of stop5.lessons.flatMap((l) => l.practice(createRng(seed)))) {
+        if (it.scene?.kind === 'speakers') {
+          if (it.scene.fact) facts++;
+          if (it.scene.test) tests++;
+          if (it.skill === 's5.suppose') expect(it.scene.test, it.prompt).toMatch(/^\w+ is a (knight|knave)\. This is a guess\.$/);
+          if (it.skill === 's5.cant-say') expect(it.scene.test).toBe('Pretend a knight says it. Then pretend a knave says it.');
+          // Where a kind is only pretend (a guess, or each kind in turn), the rule is a need, never a fact about the case.
+          if (it.skill === 's5.suppose' || it.skill === 's5.cant-say') expect(it.scene.rule, it.prompt).toBe(PUZZLE_RULE);
+        }
+        if (it.kind === 'choose' && it.skill === 's5.words' && /^\S+(?: the \w+| \w)? is a (knight|knave)\. \S+ says/.test(it.prompt) && /says, “I/.test(it.prompt)) {
+          expect(it.teach!.remember![0]).toBe('A knight’s words must be true. A knave’s words must be false.');
+          expect(it.explain).toMatch(/ must be (true|false)\. So /);
+        }
+        // Every truth on a hint or a Teach case card comes with its comparison, in the stop's words.
+        for (const c of [it.hintCase!, ...(it.teach?.cases ?? [])]) {
+          const t = c.truths!.find((x) => x.who.endsWith('words'))!;
+          expect(t.because, `${it.id} ${c.label}`).toBeDefined();
+          expect(t.because!.match).toBe(t.value);
+          expect(c.words?.world, c.label).toMatch(/^(In this case|Pretend)$/);
+        }
+      }
+    }
+    expect(facts).toBeGreaterThan(40);
+    expect(tests).toBeGreaterThan(40);
+  });
+
+  it('lesson 1 Teach: a tried kind says what the words must be; a tried fact says what they are (Can’t tell items)', () => {
+    let fromKind = 0, fromFact = 0;
+    for (let seed = 1; seed <= 120; seed++) {
+      const type = (['fact', 'kindFromFact', 'other'] as const)[seed % 3];
+      const { item } = wordsItem(createRng(seed), { id: 'x', skin: SKIN_IDS[seed % 4], type, speaker: 'unknown', truth: 'unknown', negative: seed % 2 === 0 });
+      if (item.answer !== 'cant') continue;
+      const ifs = [...item.teach!.simpler!, ...Object.values(item.feedback!).flatMap((f) => f.detail)].filter((l) => /^(But .+\. )?If /.test(l) && /’s words /.test(l));
+      expect(ifs.length, item.prompt).toBeGreaterThan(0);
+      for (const l of ifs) {
+        // "If Uma is a knight, Uma’s words must be true." / "If the dragon is asleep, Kip’s words are true."
+        const kind = /If \S+(?: the \w+)? is a (knight|knave), \S+’s words /.test(l);
+        expect(l, l).toMatch(kind ? /’s words must be (true|false)/ : /’s words are (true|false)/);
+        if (kind) fromKind++;
+        else fromFact++;
+      }
+    }
+    expect(fromKind).toBeGreaterThan(10);
+    expect(fromFact).toBeGreaterThan(5);
+    // The card that links following a guess to listing the cases: with Ava a knight, Ben as a knight crashes on the board.
+    const four = stop5.lessons[2].ideas.find((c) => c.title === 'Four possible answers')!.body.join(' ');
+    expect(four).toContain('With Ava as a knight, “So Ben is a knave” means the case with Ben as a knight crashes.');
+    const row = L3_DRILL.find((st) => st.id === 's5.l3-do1')!.rows.find((r) => r.label === 'Test: Ava and Ben are both knights.')!;
+    expect(row.marks.at(-1)!.answer).toBe('crashes');
+  });
+
+  it('puzzles carry the guess board (Guess and Known rows, never checked) and “I’m confused”; the mastery tag marks a guess that flips two kinds', () => {
+    let tagged = 0;
+    for (let seed = 1; seed <= 120; seed++) {
+      for (const o of [{ n: 2 as const, lesson: 's5.l3', skill: 's5.two', pool: 'plain' as const }, { n: 3 as const, lesson: 's5.l4', skill: 's5.three', pool: 'basic' as const }]) {
+        const { item } = puzzleItem(createRng(seed), { id: 'x', skin: SKIN_IDS[seed % 4], ...o });
+        const { ids, names } = readScene(item);
+        const sc = item.scratch!;
+        expect(item.scratchLabel).toBe('the guess board');
+        expect(sc.rows.map((r) => [r.id, r.label])).toEqual([['guess', 'Guess (pretend)'], ['known', 'Known (for sure)']]);
+        for (const r of sc.rows) expect(r.marks.map((m) => m.label)).toEqual(ids.map((id) => names.get(id)));
+        expect(sc.rows[1].marks.map((m) => m.answer)).toEqual(ids.map((id) => item.answer[id].kind));
+        expect(sc.words?.closing).toMatch(/inside a guess/);
+        expect(item.confused!.map((q) => q.options.filter((x) => x.right).length)).toEqual([1, 1, 1]);
+        // Re-read the explanation's guess: what was supposed and found inside it, against the answer.
+        const sup = item.explain.match(/Suppose (\w+) is a (knight|knave)\./);
+        const idOf = (n: string) => [...names].find(([, v]) => v === n)![0];
+        const inside: K = sup ? { [idOf(sup[1])]: sup[2] as Kind } : {};
+        for (const m of item.explain.matchAll(/So, inside the guess, (.+?)\./g)) Object.assign(inside, readFacts(m[1], idOf));
+        expect(Object.fromEntries(sc.rows[0].marks.map((m) => [m.id.replace(/^guess-/, ''), m.answer]))).toEqual(Object.fromEntries(ids.map((id) => [id, inside[id] ?? 'open'])));
+        const flips = Object.entries(inside).filter(([id, k]) => item.answer[id].kind !== k).length;
+        expect(!!item.tags?.includes('guess-flips'), item.explain).toBe(flips >= 2);
+        if (flips >= 2) tagged++;
+      }
+    }
+    expect(tagged).toBeGreaterThan(20);
   });
 });

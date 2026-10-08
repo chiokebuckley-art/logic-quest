@@ -48,6 +48,10 @@ export interface AnswerRecord {
   answer?: Answer;
   /** Learn mode only. */
   help?: HelpUse;
+  /** The optional confidence tap before feedback (Observatory items): 0 unsure, 1 fairly sure, 2 very sure. */
+  conf?: 0 | 1 | 2;
+  /** The item's lesson phase (Observatory items). */
+  phase?: 'explain' | 'do' | 'transfer' | 'review';
 }
 
 /** 'learn': instant feedback, hint button, retry until right. 'check': no feedback, no hint, answer once. */
@@ -74,6 +78,8 @@ export interface LessonRunnerProps {
   lesson: LessonDef;
   /** Seed for lesson.practice(rng). */
   seed: number;
+  /** The learner's level on this lesson's track (an Observatory place picks its quiz by it). */
+  level?: 1 | 2 | 3 | 4;
   readAloud: boolean;
   onAnswer(record: AnswerRecord): void;
   /**

@@ -264,6 +264,16 @@ export function AssignToggles(props: AssignBodyProps) {
   return (
     <div className="play-speakers">
       {scene?.rule && <RuleBanner rule={scene.rule} />}
+      {scene?.fact && (
+        <p className="play-fact">
+          <span className="play-fact-tag">What is true</span> {scene.fact}
+        </p>
+      )}
+      {scene?.test && (
+        <p className="play-fact play-fact--test">
+          <span className="play-fact-tag">Test world</span> {scene.test}
+        </p>
+      )}
       <ul className="play-speaker-list" aria-label="Who says what">
         {item.people.map((p, i) => {
           const sp = scene?.speakers.find((s) => s.id === p.id);

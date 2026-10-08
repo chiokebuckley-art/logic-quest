@@ -434,7 +434,10 @@ export function deckTwins(deck: readonly Card[], candidates: readonly Formula[],
 // what the rule needs.
 
 export const FITS_OR_NOT: readonly { id: 'fit' | 'not'; label: string }[] = [{ id: 'fit', label: 'Fits' }, { id: 'not', label: 'Not' }];
-export const KEEP_OR_RULE_OUT: readonly { id: 'keep' | 'reject'; label: string }[] = [{ id: 'keep', label: 'Keep' }, { id: 'reject', label: 'Rule out' }];
+/** "Keep for now": a rule no card rules out is still possible, not proved (s2.l5, kept vs proved). */
+export const KEEP_OR_RULE_OUT: readonly { id: 'keep' | 'reject'; label: string }[] = [{ id: 'keep', label: 'Keep for now' }, { id: 'reject', label: 'Rule out' }];
+/** Does a card's Fits or Not agree with its machine mark? The ids read as yes and no, so a shown Match draws a check. */
+export const MATCH_OR_NOT: readonly { id: 'yes' | 'no'; label: string }[] = [{ id: 'yes', label: 'Match' }, { id: 'no', label: 'No match' }];
 
 /** Why one card fits a rule, or why it does not, in plain words. */
 export type CardWords = (rule: Formula, card: Card) => string;
@@ -450,6 +453,13 @@ export interface DeckRowOptions {
   note?: string;
   /** Draw each card with its machine mark (✓ or ✗), for a rule machine's deck. Default: the bare card. */
   withMarks?: boolean;
+  /**
+   * The two facts to compare before marking a card (DrillMark.compare), with no verdict. A full-scaffold board shows
+   * them under each card; a given card shows them as because rows.
+   */
+  compare?: (rule: Formula, card: Thing) => { says: string; world: string };
+  /** What the rule needs, over the row's marks (DrillRow.needs). */
+  needs?: string;
 }
 
 const capFirst = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -467,9 +477,19 @@ export function deckRow(rule: Formula, things: readonly Thing[], words: CardWord
       ...(o.given ? { given: true } : {}),
       thing,
       why: { [fits ? 'not' : 'fit']: words(rule, t) },
+      ...(o.compare ? { compare: o.compare(rule, t) } : {}),
     };
   });
-  return { id: o.id, label: o.label, marks, ...(o.note ? { note: o.note } : {}) };
+  return { id: o.id, label: o.label, marks, ...(o.note ? { note: o.note } : {}), ...(o.needs ? { needs: o.needs } : {}) };
+}
+
+/**
+ * Does a rule agree with a card's machine mark: a yes card it fits, or a no card it does not fit? A no card the rule
+ * does not fit is a match too: the machine said no, and the rule says no.
+ */
+export function matchesMark(rule: Formula, t: Thing): boolean {
+  if (!t.mark) throw new Error('every card needs its machine mark');
+  return evaluate(rule, t) === (t.mark === 'yes');
 }
 
 /** The first card whose machine mark the rule gets wrong (a yes card it does not fit, or a no card it fits), or null. */
@@ -492,14 +512,94 @@ export interface RuleTestWords {
  */
 export function ruleTestRow(rule: Formula, things: readonly Thing[], words: RuleTestWords, o: Omit<DeckRowOptions, 'withMarks'>): DrillRow {
   const row = deckRow(rule, things, words.card, { ...o, withMarks: true });
+  row.marks.push(decideMark(rule, things, words, o));
+  return row;
+}
+
+/** Keep for now (every card matches its mark) or Rule out (at least one does not), computed from the marks. */
+function decideMark(rule: Formula, things: readonly Thing[], words: RuleTestWords, o: { id: string; given?: boolean }): DrillMark {
   const miss = firstMismatch(rule, things);
-  row.marks.push({
+  return {
     id: `${o.id}-decide`,
     label: 'Keep or rule out?',
     options: KEEP_OR_RULE_OUT.map((x) => ({ ...x })),
     answer: miss ? 'reject' : 'keep',
     ...(o.given ? { given: true } : {}),
     why: miss ? { keep: words.ruleOut(rule, miss) } : { reject: words.keep(rule) },
+  };
+}
+
+export interface MatchWords extends RuleTestWords {
+  /** Why a card's Match or No match is what it is, said for the wrong option: the mark, the rule, and whether they agree. */
+  match(rule: Formula, card: Thing): string;
+}
+
+/**
+ * Test one rule against a rule machine's marks one step further on: for each card, does the rule's Fits or Not match
+ * the card's mark (Match or No match, from matchesMark)? Then Keep for now or Rule out. A shown row of these, with its
+ * compare facts, is the worked comparison: the mark, what the rule says, and whether they agree.
+ */
+export function matchRow(rule: Formula, things: readonly Thing[], words: MatchWords, o: Omit<DeckRowOptions, 'withMarks'>): DrillRow {
+  const marks: DrillMark[] = things.map((t) => {
+    const ok = matchesMark(rule, t);
+    return {
+      id: `${o.id}-${t.id}`,
+      label: capFirst(cardName(t)),
+      options: MATCH_OR_NOT.map((x) => ({ ...x })),
+      answer: ok ? 'yes' : 'no',
+      ...(o.given ? { given: true } : {}),
+      thing: { id: t.id, shape: t.shape, color: t.color, size: t.size, mark: t.mark },
+      why: { [ok ? 'no' : 'yes']: words.match(rule, t) },
+      ...(o.compare ? { compare: o.compare(rule, t) } : {}),
+    };
   });
-  return row;
+  marks.push(decideMark(rule, things, words, o));
+  return { id: o.id, label: o.label, marks, ...(o.note ? { note: o.note } : {}), ...(o.needs ? { needs: o.needs } : {}) };
+}
+
+/**
+ * One card and one rule, in two steps: Fits or Not (from the rule only), then whether that matches the card's mark.
+ * The card is drawn with its mark beside the first step.
+ */
+export function cardTestRow(rule: Formula, card: Thing, words: MatchWords, o: { id: string; label: string; note?: string }): DrillRow {
+  const [fits] = deckRow(rule, [card], words.card, { id: o.id, label: o.label, withMarks: true }).marks;
+  const ok = matchesMark(rule, card);
+  const match: DrillMark = {
+    id: `${o.id}-match`,
+    label: `Does that match its ${card.mark}?`,
+    options: MATCH_OR_NOT.map((x) => ({ ...x })),
+    answer: ok ? 'yes' : 'no',
+    why: { [ok ? 'no' : 'yes']: words.match(rule, card) },
+  };
+  return { id: o.id, label: o.label, marks: [{ ...fits, id: `${o.id}-fits` }, match], ...(o.note ? { note: o.note } : {}) };
+}
+
+// ---------- patterns of wrong marks (DrillStep.misconceptions, kind 'picks') ----------
+
+/**
+ * The Fits or Not marks of a rule test copied from the machine's marks: Fits on every yes card, Not on every no card.
+ * A learner who reads "it got a yes" as "it fits the rule" marks a row this way.
+ */
+export function copiedMarkPicks(row: DrillRow): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const m of row.marks) if (m.thing?.mark && m.options.some((x) => x.id === 'fit')) out[m.id] = m.thing.mark === 'yes' ? 'fit' : 'not';
+  return out;
+}
+
+/**
+ * A row's card marks set to another row's right answers on the same cards: the whole rule marked like its inside, or a
+ * rule without brackets marked like the rule with them.
+ */
+export function picksLike(row: DrillRow, model: DrillRow): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const m of row.marks) {
+    const twin = m.thing && model.marks.find((x) => x.thing?.id === m.thing!.id);
+    if (twin) out[m.id] = twin.answer;
+  }
+  return out;
+}
+
+/** A row's card marks, each set to its right answer. */
+export function rightPicks(row: DrillRow): Record<string, string> {
+  return Object.fromEntries(row.marks.filter((m) => m.thing).map((m) => [m.id, m.answer]));
 }

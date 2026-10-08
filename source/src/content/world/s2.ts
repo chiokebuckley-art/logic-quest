@@ -37,7 +37,7 @@ export const S2_WORLD: StopWorld = {
       ],
     },
     's2.l5': {
-      why: 'A guess that fits a few examples can still be wrong. Check it against every one, because a single example that does not match rules it out.',
+      why: 'One example that does not match rules a guess out for sure. A guess that matches every example is still possible, but it is not proved.',
       uses: [
         { who: 'You, in class', kind: 'life', text: 'Your teacher sorts words into two groups and asks for the rule. Before you say “words with an e,” check every word in both groups. One word that does not match means a new guess.' },
         { who: 'Scientists', kind: 'work', text: 'A scientist guesses that a kind of bird eats only seeds. She watches many of those birds. If even one eats a bug, the guess is ruled out.' },

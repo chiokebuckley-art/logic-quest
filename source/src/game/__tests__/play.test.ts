@@ -580,8 +580,10 @@ describe('See -> Do -> Quiz (skill-drill handoff)', () => {
     expect(html).not.toContain('<button type="button" class="play-stamp');
     // The count is worked out, shown big; the verdict is shown, not tappable; a ring for Keep, a cross for Reject.
     // Which case the stamps belong to comes first, above the chests; the count and the verdict come after them.
-    expect(text).toContain('Rule Exactly one sign is true. Shown Pretend the treasure is in the Silver chest. 1 Gold chest');
-    expect(text).toContain('1 sign is True. Keep or reject the Silver chest? Keep Reject');
+    expect(text).toContain('Rule Exactly one sign is true.');
+    // The test world sits over the chests, with the one assumption every stamp is checked against.
+    expect(text).toMatch(/Shown Pretend the treasure is in the Silver chest\. For this test only\. Where the treasure is does not say if a sign is true\.(.*)Gold chest/);
+    expect(text).toContain('1 sign is True. The rule needs exactly 1 true sign. Keep or reject the Silver chest? Keep Reject');
     expect(count(html, 'class="play-case-ring"')).toBe(1);
     expect(count(html, 'class="play-case-x"')).toBe(1);
     expect(count(html, 'role="radio"')).toBe(2);
@@ -656,16 +658,18 @@ describe('See -> Do -> Quiz (skill-drill handoff)', () => {
     expect(text).toContain('Big red circle');
   });
 
-  it('boards come after the last card, unless a board names the card it follows (Stop 5 lesson 1: well, swim, others)', () => {
-    expect(lessonStages(l4)).toEqual([{ kind: 'cards', from: 0, to: 5 }, { kind: 'board', j: 0 }]);
+  it('boards come after the last card, unless a board names the card it follows (Stop 5 lesson 1: two cases, well, swim, others)', () => {
+    // Treasure signs: the two-sign board sits right after its contrast card (card 2), the rule board right after the
+    // rule card (card 3); the case board after the example.
+    expect(lessonStages(l4)).toEqual([{ kind: 'cards', from: 0, to: 1 }, { kind: 'board', j: 0 }, { kind: 'cards', from: 2, to: 2 }, { kind: 'board', j: 1 }, { kind: 'cards', from: 3, to: 6 }, { kind: 'board', j: 2 }]);
     const s5l1 = STOPS.find((s) => s.n === 5)!.lessons[0];
     const stages = lessonStages(s5l1);
-    expect(stages.map((st) => st.kind)).toEqual(['cards', 'board', 'cards', 'board', 'cards', 'board']);
+    expect(stages.map((st) => st.kind)).toEqual(['cards', 'board', 'cards', 'board', 'cards', 'board', 'cards', 'board']);
     for (const st of stages) if (st.kind === 'board') expect(s5l1.ideas[(stages[stages.indexOf(st) - 1] as { to: number }).to].scene).toBe(s5l1.drill![st.j].scene);
   });
 
   it('the new pictures: a fact banner, “the break” inside its box, a line of people with each clue marked', () => {
-    const well = render(h(SceneView, { scene: STOPS.find((s) => s.n === 5)!.lessons[0].drill![0].scene! })).text;
+    const well = render(h(SceneView, { scene: STOPS.find((s) => s.n === 5)!.lessons[0].drill![1].scene! })).text;
     expect(well).toContain('What is true The well is full.');
     const four = STOPS.find((s) => s.n === 6)!.lessons[0].ideas.find((c) => c.scene?.kind === 'grid')!.scene!;
     const g = render(h(SceneView, { scene: four }));
@@ -689,7 +693,7 @@ describe('See -> Do -> Quiz (skill-drill handoff)', () => {
   it('opens on the key ideas; their last button leads to the board, not the quiz', () => {
     expect(render(h(LessonRunner, props)).text).toContain('Three chests and a rule');
     // A copy with only the last worked-example card, so its button (the last card's) shows.
-    const { text } = render(h(LessonRunner, { ...props, lesson: { ...l4, ideas: [l4.ideas[5]] } }));
+    const { text } = render(h(LessonRunner, { ...props, lesson: { ...l4, ideas: [l4.ideas[6]], drill: [l4.drill![2]] } }));
     expect(text).toContain('Example: only one chest fits');
     expect(text).toContain('Now you do it');
     expect(text).toContain('Next you do it: mark a case. Then 4 puzzles.');
@@ -697,8 +701,8 @@ describe('See -> Do -> Quiz (skill-drill handoff)', () => {
   });
 
   it('the worked example: one chest per card, and its button shows the next stamp before it moves on', () => {
-    const gold = l4.ideas[2];
-    const { html, text } = render(h(IdeaCards, { cards: [gold, l4.ideas[3]], readAloud: false, onDone: noop }));
+    const gold = l4.ideas[3];
+    const { html, text } = render(h(IdeaCards, { cards: [gold, l4.ideas[4]], readAloud: false, onDone: noop }));
     expect(text).toContain('Example: the Gold chest');
     expect(text).toContain('Pretend it’s here');
     // Nothing stamped yet: the main button stamps the first sign, it does not move on.
@@ -719,16 +723,16 @@ describe('See -> Do -> Quiz (skill-drill handoff)', () => {
     expect(count(all.html, 'class="play-case-x"')).toBe(1);
     expect(all.text).toContain('Two signs are true, so reject the Gold chest.');
     // Silver's card keeps Gold's cross and ends with Silver's ring.
-    const silver = render(h(SceneView, { scene: l4.ideas[3].scene!, revealed: 4 }));
+    const silver = render(h(SceneView, { scene: l4.ideas[4].scene!, revealed: 4 }));
     expect(count(silver.html, 'class="play-case-x"')).toBe(1);
     expect(count(silver.html, 'class="play-case-ring"')).toBe(1);
     expect(silver.text).toContain('Exactly one sign is true, so keep the Silver chest.');
     // The last card: Gold and Bronze crossed out, Silver kept.
-    const last = render(h(SceneView, { scene: l4.ideas[5].scene! }));
+    const last = render(h(SceneView, { scene: l4.ideas[6].scene! }));
     expect(count(last.html, 'class="play-case-x"')).toBe(2);
     expect(count(last.html, 'class="play-case-ring"')).toBe(1);
     // Read aloud: the signs, earlier verdicts, and the lines shown so far.
-    expect(sceneSpeech(l4.ideas[3].scene!, 1)).toEqual([
+    expect(sceneSpeech(l4.ideas[4].scene!, 1)).toEqual([
       'Exactly one sign is true.',
       'Gold chest sign: The treasure is in this chest.',
       'Silver chest sign: The treasure is not in this chest.',
@@ -740,7 +744,8 @@ describe('See -> Do -> Quiz (skill-drill handoff)', () => {
 
   it('a lesson left before its board was marked (an older save) shows the board first', () => {
     const { text } = render(h(LessonRunner, { ...props, start: { next: 2, firstTry: 1 } }));
-    expect(text).toContain('Mark a case');
+    // The lesson's first board: the two signs of the contrast card, before the case board.
+    expect(text).toContain('Stamp the two signs');
     expect(text).toContain('Check my marks');
     expect(text).not.toContain('Try 3 of 4');
   });
@@ -1636,5 +1641,27 @@ describe('lesson screen: resuming, redoing, lessons in order (skill-drill review
     expect(rightTitle('first', 0, false)).toBe('Right, first try.');
     // A wrong mark on the question's own board (or a miss saved before a reload): never “first try”.
     expect(rightTitle('first', 0, false, true)).toBe('Right.');
+  });
+});
+
+describe('I’m confused', () => {
+  const l4 = stop1.lessons[3];
+  it('a sign question offers it next to the hint in a lesson, never in a check; opening it never shows the answer', () => {
+    const door = l4.practice(createRng(5)).slice(2)[0];
+    expect(door.confused?.length).toBe(3);
+    const learn = render(h(ItemView, { item: door, mode: 'learn', readAloud: false, onDone: noop }));
+    expect(learn.text).toContain('I’m confused');
+    expect(learn.html).toContain('aria-expanded="false"');
+    const check = render(h(ItemView, { item: door, mode: 'check', readAloud: false, onDone: noop }));
+    expect(check.text).not.toContain('I’m confused');
+    // The questions never name a door: they are about the two ideas, not this puzzle's answer.
+    for (const q of door.confused!) expect(`${q.q} ${q.teach}`).not.toMatch(/Red door|Blue door|Green door/);
+  });
+  it('a case board offers it too, and a board with no questions does not', () => {
+    const board = render(h(DrillBoard, { step: L4_DRILL, readAloud: false, onDone: noop }));
+    expect(board.text).toContain('I’m confused');
+    const two = render(h(DrillBoard, { step: l4.drill![0], readAloud: false, onDone: noop }));
+    expect(two.text).toContain('Stamp the two signs');
+    expect(two.text).not.toContain('I’m confused');
   });
 });

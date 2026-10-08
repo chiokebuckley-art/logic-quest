@@ -3,14 +3,21 @@
  * with gridClueHolds), independent of the helpers the engine uses to build items.
  */
 import { describe, expect, it } from 'vitest';
-import { CARD_CLUES, CARD_GRIDS, L1_GRID, L5_LIST, stop4 } from '../../content/stop4';
-import { checkDrill, marksToTap } from '../drill';
+import { CARD_CLUES, CARD_GRIDS, L1_GRID, L2_COUNT, L2_CROSS, L2_CROSS_CARD, L2_CROSS_DO, L4_BACK_FORTH, L5_LIST, stop4 } from '../../content/stop4';
+import { WORLD } from '../../content/world';
+import { checkDrill, extraQuizItem, marksToTap } from '../drill';
 import { freshCheckSet, looks } from '../fresh';
 import { gridClueHolds } from '../grade';
 import { freshItem } from '../notebook';
 import { READING, fkGrade, longestSentence } from '../readability';
 import {
+  BACK_FORTH_CONFUSED,
+  BOX_VS_KID,
+  BOX_VS_KID_CONFUSED,
   CANT,
+  LINE_WORDS,
+  LINK_WORDS,
+  METHOD_STEPS,
   SKINS,
   SKIN_IDS,
   clueText,
@@ -751,20 +758,58 @@ describe('teaching after a wrong answer', () => {
           if (k === 'open') {
             // A way that fits every mark where the pick does not get the ✓.
             expect(ex.truths!.map((t) => t.value)).toEqual([true, false]);
-            expect(item.feedback![id].headline).toMatch(new RegExp(`^${whoName(id)} could `));
+            // The other open box has a ✗ off the line (in its kid's row, or in its thing's column): the box-vs-kid mix-up
+            // is named first. Otherwise “X could …, but so could Y”.
+            const other = (ask === 'col' ? cast.spec.people : cast.spec.cats[0].values).find((s2) => s2 !== id && (ask === 'col' ? marks[s2][val] === undefined : marks[p][s2] === undefined))!;
+            const lure = ask === 'col'
+              ? cast.spec.cats[0].values.find((y) => y !== val && marks[other][y] === 'no')
+              : cast.spec.people.find((q) => q !== p && marks[q][other] === 'no');
+            const fb = item.feedback![id];
+            if (lure) {
+              expect(fb.headline).toBe(ask === 'col'
+                ? `You may be treating any cross in ${cast.nm(other)}’s row as a cross for ${w.obj(c, val)}.`
+                : `You may be treating ${cast.nm(lure)}’s cross for ${w.obj(c, other)} as a cross in ${cast.nm(p)}’s row.`);
+              expect(fb.detail[0]).toBe('A cross means no for its own box only.');
+            } else expect(fb.headline).toMatch(new RegExp(`^${whoName(id)} could `));
+            // The “different column” (or “different row”) line, for each open box with a ✗ off the line.
+            for (const r of [id, other]) {
+              const off = ask === 'col' ? cast.spec.cats[0].values.find((y) => y !== val && marks[r][y] === 'no') : cast.spec.people.find((q) => q !== p && marks[q][r] === 'no');
+              if (!off) continue;
+              expect(fb.detail).toContain(ask === 'col'
+                ? `${cast.nm(r)}’s ✗ for ${w.obj(c, off)} is in a different column, so it does not rule ${cast.nm(r)} out for ${w.obj(c, val)}.`
+                : `${cast.nm(off)}’s ✗ for ${w.obj(c, r)} is in ${cast.nm(off)}’s row, so it does not rule ${w.obj(c, r)} out for ${cast.nm(p)}.`);
+            }
           }
           if (k === 'crossed') {
             // The pick could not; then the line's empty boxes, as in the grid's own case.
             expect(ex.truths![0].value).toBe(false);
             expect(ex.truths!.slice(1)).toEqual(item.teach!.cases![0].truths);
           }
-          if (k === 'cant') expect(ex.truths!.every((t) => t.value)).toBe(true);
+          if (k === 'cant') {
+            expect(ex.truths!.every((t) => t.value)).toBe(true);
+            // A decided grid whose answer has a ✗ off the line (in the holder's row, or another kid's ✗ under the
+            // answer): the note says that ✗ does not rule the answer out.
+            const H = item.answer;
+            const off = ask === 'col' ? cast.spec.cats[0].values.find((y) => y !== val && marks[H][y] === 'no') : cast.spec.people.find((q) => q !== p && marks[q][H] === 'no');
+            const note = !off ? undefined : ask === 'col'
+              ? `${cast.nm(H)}’s ✗ for ${w.obj(c, off)} is in a different column, so it does not rule ${cast.nm(H)} out for ${w.obj(c, val)}.`
+              : `${cast.nm(off)}’s ✗ for ${w.obj(c, H)} is in ${cast.nm(off)}’s row, so it does not rule ${w.obj(c, H)} out for ${cast.nm(p)}.`;
+            if (note) expect(item.feedback![id].detail).toContain(note);
+            else expect(item.feedback![id].detail.join(' ')).not.toMatch(/does not rule/);
+          }
         }
         headlinesByKind(item, kinds, {
           crossed: /has a ✗\.$/,
           cant: /, so you can tell\.$/,
-          open: /^\S+ could .+, but (?:so could \S+|\S+ could .+ too)\.$/,
+          open: /^(?:\S+ could .+, but (?:so could \S+|\S+ could .+ too)|You may be treating .+ as a cross (?:for|in) .+)\.$/,
         });
+        // Every can’t-tell grid is the tempting kind (a ✗ off the line in an open box's line), tagged for the pass rule.
+        if (mode === 'cant') expect(item.tags).toEqual(['cant-tell']);
+        else expect(item.tags).toBeUndefined();
+        // The Hint's case rules out one box, never the whole kid: “So Tia can’t eat apples.”
+        const [hq, hx] = ask === 'col' ? [/^In this grid, (.+?)’s box/.exec(item.hintCase!.label)![1], val] : [cast.nm(p), ''];
+        expect(item.hintCase!.note).toMatch(new RegExp(`^A ✗ means no\\. So ${esc(hq)} can’t .+\\.$`));
+        if (ask === 'col') expect(item.hintCase!.note).toBe(`A ✗ means no. So ${hq} can’t ${w.base(c, hx)}.`);
       }
     }
   });
@@ -810,7 +855,7 @@ describe('teaching after a wrong answer', () => {
         }
         headlinesByKind(item, kinds, {
           'not-holder': /^\S+ is not .+\.$/,
-          crossed: /^(?:The clue|Clue \d) crosses out \S+\.$/,
+          crossed: /^(?:The clue|Clue \d) crosses out \S+ for .+\.$/,
           cant: /^You can tell, because .+\.$/,
           open: /^\S+ could .+, but so could \S+\.$/,
         });
@@ -1064,6 +1109,8 @@ function readClue(text: string): GridClue {
   if ((m = /^(\w+) does not have the (\w+)\.$/.exec(text))) return { t: 'isnt', p: kid(m[1]), c: valueCat(m[2]), v: m[2] };
   if ((m = /^The kid with the (\w+) eats (\w+)\.$/.exec(text))) return { t: 'link', c1: 'pet', v1: m[1], c2: 'snack', v2: m[2] };
   if ((m = /^The kid with the (\w+) does not eat (\w+)\.$/.exec(text))) return { t: 'notLink', c1: 'pet', v1: m[1], c2: 'snack', v2: m[2] };
+  if ((m = /^(\w+) does not eat (\w+)\.$/.exec(text))) return { t: 'isnt', p: kid(m[1]), c: 'snack', v: m[2] };
+  if ((m = /^(\w+) eats (\w+)\.$/.exec(text))) return { t: 'is', p: kid(m[1]), c: 'snack', v: m[2] };
   throw new Error(`cannot read clue: ${text}`);
 }
 
@@ -1074,11 +1121,16 @@ function pictureFacts(scene: Scene | undefined): GridClue[] {
     Object.entries(m).map(([v, mk]): GridClue => (mk === 'yes' ? { t: 'is', p, c: valueCat(v), v } : { t: 'isnt', p, c: valueCat(v), v })));
 }
 
-/** The world a board is about, from the values its words name: the pet grid, the pet and snack grid, or the two-kid grid. */
+/**
+ * The world a board is about, from the values its words name: the pet grid, the snack grid, the pet and snack grid, or
+ * the two-kid grid.
+ */
 function boardSpec(step: DrillStep): Spec {
-  const words = JSON.stringify(step);
+  // The board's own words: its picture, instructions and rows (its “I’m confused” questions use the card's example).
+  const words = JSON.stringify([step.scene ?? null, step.body, step.columns ?? null, step.rows]);
   const names = (vs: string[]) => vs.some((v) => new RegExp(`\\b${v}\\b`).test(words));
   if (names(PAIR_SNACKS)) return { people: ['mia', 'leo'], cats: [{ id: 'lunch', values: PAIR_SNACKS }] };
+  if (names(KID_SNACKS) && !names(KID_PETS)) return { people: ['mia', 'leo', 'ava'], cats: [{ id: 'snack', values: KID_SNACKS }] };
   if (names(KID_SNACKS)) return { people: ['mia', 'leo', 'ava'], cats: [{ id: 'pet', values: KID_PETS }, { id: 'snack', values: KID_SNACKS }] };
   return { people: ['mia', 'leo', 'ava'], cats: [{ id: 'pet', values: KID_PETS }] };
 }
@@ -1093,6 +1145,12 @@ function rowClues(step: DrillStep): GridClue[][] {
     let out: GridClue[];
     if ((m = /^Only clue: (.+)$/.exec(r.label))) out = [readClue(m[1])];
     else if (/^Use only clues 1 and 2\./.test(r.label)) out = list.slice(0, 2).map(readClue);
+    // A grid of the contrast, drawn in words: its crosses, one sentence each.
+    else if ((m = /^(?:First|Second) grid: (.+)$/.exec(r.label))) out = m[1].split(/(?<=\.) /).map(readClue);
+    // Back to the card's picture, with one ✗ added.
+    else if ((m = /^Back to the card’s grid\. Add a ✗: (.+)$/.exec(r.label))) out = [...facts, readClue(m[1])];
+    // The same clues as the row before (a carry back across a link).
+    else if (/^Carry back across clue \d+\.$/.test(r.label)) out = [...prev];
     else if ((m = /^Add (?:a ✗|clue \d+): (.+)$/.exec(r.label))) out = [...prev, readClue(m[1])];
     else if ((m = /^(?:Clue \d+|A new clue on its own): (.+)$/.exec(r.label))) out = [...facts, readClue(m[1])];
     else out = [...facts];
@@ -1252,8 +1310,11 @@ describe('See -> Do -> Quiz (the skill-drill handoff)', () => {
             // The words name what the mark is about: its box, its line, its person or its thing.
             for (const name of mustName(st, m, o.id)) expect(why, `${st.id} ${m.id}:${o.id} names “${name}”`).toContain(name);
             expect(why).not.toMatch(/\bWrong\b|['"]|\b(?:that (?:row|column|box)|the opposite)\b/i);
-            // One wrong tap at a time is named: the first wrong mark in reading order.
-            expect(checkDrill(st, { ...right(st), [m.id]: o.id }).message).toBe(why);
+            // One wrong tap at a time is named: the first wrong mark in reading order. A tap that shows a mix-up
+            // (DrillStep.misconceptions) names the belief first, then the same words.
+            const res = checkDrill(st, { ...right(st), [m.id]: o.id });
+            if (res.diagnosis) expect(res.message).toBe(`${st.misconceptions!.find((mc) => mc.id === res.diagnosis)!.text} ${why}`);
+            else expect(res.message).toBe(why);
           }
         }
         const text = boardText(st).filter(Boolean).join('\n');
@@ -1274,12 +1335,25 @@ describe('See -> Do -> Quiz (the skill-drill handoff)', () => {
       'Only clue: Leo does not have the dog. | Leo – cat = cant', 'Only clue: Leo does not have the dog. | Leo – dog = no', 'Only clue: Leo does not have the dog. | Leo – fish = cant',
       'Only clue: Mia has the cat or the fish. | Mia – cat = cant', 'Only clue: Mia has the cat or the fish. | Mia – dog = no', 'Only clue: Mia has the cat or the fish. | Mia – fish = cant',
     ]);
-    // Lesson 2: a ✗ added, then the last box in a row tapped ✓; two empty boxes in a column left empty (can’t tell);
-    // a ✗ added, then the last box in a column tapped ✓.
+    // Lesson 2, box-vs-kid: the grapes column in the contrast's two grids. Mia’s cross under apples leaves two boxes
+    // (can’t tell); under grapes, Ava – grapes is the last box.
     expect(tapLabels(l2.drill![0])).toEqual([
+      'First grid: Mia does not eat apples. Leo does not eat grapes. | Empty boxes in the grapes column = 2',
+      'First grid: Mia does not eat apples. Leo does not eat grapes. | Mia – grapes = cant',
+      'First grid: Mia does not eat apples. Leo does not eat grapes. | Ava – grapes = cant',
+      'Second grid: Mia does not eat grapes. Leo does not eat grapes. | Empty boxes in the grapes column = 1',
+      'Second grid: Mia does not eat grapes. Leo does not eat grapes. | Mia – grapes = no',
+      'Second grid: Mia does not eat grapes. Leo does not eat grapes. | Ava – grapes = yes',
+    ]);
+    // Then counting: a ✗ added, then the last box in a row tapped ✓; two empty boxes in a column left empty (can’t
+    // tell); a ✗ added, then the last box in a column tapped ✓; a ✗ off the line (under the dog) that leaves the cat
+    // column at two; and a row question with Leo’s ✗ in another row (three empty).
+    expect(tapLabels(l2.drill![1])).toEqual([
       'Add a ✗: Leo does not have the fish. | Leo – fish = no', 'Add a ✗: Leo does not have the fish. | Empty boxes in Leo’s row = 1', 'Add a ✗: Leo does not have the fish. | Leo – dog = yes',
       'Back to the card’s grid. Look at the cat column. | Empty boxes in the cat column = 2', 'Back to the card’s grid. Look at the cat column. | Mia – cat = cant', 'Back to the card’s grid. Look at the cat column. | Ava – cat = cant',
       'Add a ✗: Ava does not have the cat. | Ava – cat = no', 'Add a ✗: Ava does not have the cat. | Empty boxes in the cat column = 1', 'Add a ✗: Ava does not have the cat. | Mia – cat = yes',
+      'Back to the card’s grid. Add a ✗: Mia does not have the dog. | Empty boxes in the cat column = 2', 'Back to the card’s grid. Add a ✗: Mia does not have the dog. | Mia – cat = cant',
+      'Back to the card’s grid. Look across Mia’s row. | Empty boxes in Mia’s row = 3',
     ]);
     // Lesson 3: a column spread with two boxes left empty, then a whole grid finished (last box, spread, last box).
     expect(tapLabels(l3.drill![0])).toEqual(['The cat column | Leo – cat = no', 'The cat column | Ava – cat = no', 'Outside Mia’s row and the cat column | Leo – dog = cant', 'Outside Mia’s row and the cat column | Ava – fish = cant']);
@@ -1294,6 +1368,13 @@ describe('See -> Do -> Quiz (the skill-drill handoff)', () => {
     ]);
     expect(l4.drill![2].columns).toEqual(['cat', 'dog', 'fish']);
     expect(l4.drill![2].scene).toBe(CARD_GRIDS.snacksKnown);
+    // Back and forth: neither part known. Shown: an “or” clue’s cross on Mia – fish, carried across clue 2 to Mia –
+    // popcorn. The learner: clue 3’s cross, the last box in the popcorn column, and the check mark carried back.
+    expect(l4.drill![3].scene).toBe(CARD_CLUES.backForth);
+    expect(l4.drill![3].rows.filter((r) => r.marks.every((m) => m.given)).flatMap((r) => r.marks.map((m) => `${m.label} = ${m.answer}`))).toEqual(['Mia – fish = no', 'Mia – popcorn = no']);
+    expect(tapLabels(l4.drill![3])).toEqual([
+      'Add clue 3: Leo does not eat popcorn. | Leo – popcorn = no', 'Add clue 3: Leo does not eat popcorn. | Ava – popcorn = yes', 'Carry back across clue 2. | Ava – fish = yes',
+    ]);
     // Lesson 5: one clue alone proves Leo – dog ✗ (another kid’s ✓, Leo’s own ✓, an “or” that leaves it out) or not
     // (a clue about Leo and another pet, an “or” about Leo that names the dog, an “or” about Ava, another kid’s ✓).
     expect(l5.drill![0].rows.map((r) => `${r.label} ${r.marks[0].answer}`)).toEqual([
@@ -1320,8 +1401,10 @@ describe('See -> Do -> Quiz (the skill-drill handoff)', () => {
           const sees = (cell: string) => {
             const [p, v] = cell.split(' – ');
             if (st.columns) return st.rows.some((rr) => rr.label === p && rr.marks.some((m) => m.given && m.label === v));
-            const added = /^Add a ✗: (\w+) does not have the (\w+)\.$/.exec(r.label);
-            return pic?.marks[kid(p)]?.[v] !== undefined || (!!added && added[1] === p && added[2] === v);
+            const added = /Add a ✗: (\w+) does not have the (\w+)\.$/.exec(r.label);
+            // A grid of the contrast, drawn in words in its row's label: “First grid: Mia does not eat apples. …”
+            const said = /^(?:First|Second) grid: /.test(r.label) && r.label.includes(`${p} does not eat ${v}.`);
+            return pic?.marks[kid(p)]?.[v] !== undefined || (!!added && added[1] === p && added[2] === v) || said;
           };
           for (const m of r.marks) {
             for (const why of Object.values(m.why)) {
@@ -1387,8 +1470,9 @@ describe('See -> Do -> Quiz (the skill-drill handoff)', () => {
         for (const r of st.rows) for (const m of r.marks) if (/^Only clue/.test(r.label) && m.answer === 'no' && /^\w+ – \w+$/.test(m.label) && r.note && !/rest of/.test(r.note)) expect(r.note).toContain(m.label);
       }
     }
-    // Lesson 2 (four rows), lesson 4’s “not” links (three) and lesson 5’s clues 1 and 2 (two).
-    expect(n).toBe(9);
+    // Lesson 2 (two grids of the contrast, four count rows), lesson 4’s “not” links (three) and back and forth (one), and
+    // lesson 5’s clues 1 and 2 (two).
+    expect(n).toBe(12);
   });
 
   it('new and changed idea cards say what their pictures and clues really prove', () => {
@@ -1443,8 +1527,15 @@ describe('See -> Do -> Quiz (the skill-drill handoff)', () => {
     }
     // Lesson 1's first quiz is a “has” clue (a ✓), never “isn’t” or “or”: the handoff keeps those for later tries.
     for (let seed = 1; seed <= 60; seed++) expect(stop4.lessons[0].practice(createRng(seed))[0].prompt).toMatch(/gets a ✓ from this clue\?$/);
-    // The default pass rule (3 right on the first try, no hint) after the boards: the handoff gives no other.
-    for (const l of stop4.lessons) expect(l.pass).toBeUndefined();
+    // The default pass rule (3 right on the first try, no hint) after the boards, except where a lesson's trap must be
+    // passed too: lesson 2 needs a right “Can’t tell yet” grid, lesson 4 a right two-part grid (LessonPass.include).
+    expect(stop4.lessons.map((l) => l.pass ?? null)).toEqual([
+      null,
+      { firstTry: 3, include: [{ tag: 'cant-tell', label: 'a “Can’t tell yet” grid' }] },
+      null,
+      { firstTry: 3, include: [{ tag: 'grid-two', label: 'a two-part grid' }] },
+      null,
+    ]);
   });
 
   it('every hint shows one marked case with computed truths, and never the answer’s own case', () => {
@@ -1513,3 +1604,418 @@ describe('See -> Do -> Quiz (the skill-drill handoff)', () => {
     expect(n).toBe(60 * 7);
   });
 });
+
+// ---------- distinctions: box-vs-kid (lesson 2) and back and forth (lesson 4) ----------
+//
+// The audit (docs/audit/hidden-distinctions.md): s4-l2-cross-in-line-vs-cross-in-row and s4-l4-two-part-back-and-forth.
+// Every truth on the new cards and boards is worked out again here by this file's own brute force.
+
+const SNACKS: Spec = { people: ['mia', 'leo', 'ava'], cats: [{ id: 'snack', values: KID_SNACKS }] };
+const TWO: Spec = { people: ['mia', 'leo', 'ava'], cats: [{ id: 'pet', values: KID_PETS }, { id: 'snack', values: KID_SNACKS }] };
+const sentencesOf = (t: string) => t.split(/(?<=[.?!])\s+/).filter(Boolean);
+const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+
+/** The shape of a mix-up text: the belief named, the two ideas apart, at most four short sentences, kid-safe words. */
+function mixupText(text: string) {
+  expect(text).toMatch(/^You may be treating .+ as .+\./);
+  expect(text).toContain('They are two different things: ');
+  expect(sentencesOf(text).length, text).toBeLessThanOrEqual(5);
+  expect(text).not.toMatch(/['"]|[=≠✓→&]|\bWrong\b/);
+}
+
+/** Every "I’m confused" question: one right option, a “Not sure” option, and teaching words. */
+function confusedShape(qs: readonly { q: string; options: { label: string; right?: boolean }[]; teach: string }[]) {
+  expect(qs.length).toBeGreaterThanOrEqual(1);
+  expect(qs.length).toBeLessThanOrEqual(3);
+  for (const q of qs) {
+    expect(q.options.filter((o) => o.right).length, q.q).toBe(1);
+    expect(q.options.some((o) => o.label === 'Not sure' && !o.right), q.q).toBe(true);
+    expect(q.teach.length).toBeGreaterThan(20);
+    expect([q.q, q.teach, ...q.options.map((o) => o.label)].join(' ')).not.toMatch(/['"]|[=≠✓→&]|\bWrong\b/);
+  }
+}
+
+describe('distinctions: a cross in this line vs a cross elsewhere (lesson 2), back and forth across links (lesson 4)', () => {
+  const l2 = lessonOf('s4.l2');
+  const l4 = lessonOf('s4.l4');
+
+  it('lesson 2 declares box-vs-kid and teaches it with a contrast card and its board, before the count board', () => {
+    expect(l2.distinctions).toEqual([BOX_VS_KID]);
+    expect(BOX_VS_KID.id).toBe('box-vs-kid');
+    const k = l2.ideas.indexOf(L2_CROSS_CARD);
+    expect(k).toBe(4);
+    expect(L2_CROSS_CARD.distinction).toBe('box-vs-kid');
+    expect(L2_CROSS_CARD.scene).toBe(L2_CROSS.scene);
+    // The grid card before it shows the first grid of the contrast, captioned in words.
+    expect(l2.ideas[3].title).toBe('A cross is about one box');
+    expect(l2.ideas[3].scene).toBe(CARD_GRIDS.crossFor);
+    expect(CARD_GRIDS.crossFor.caption).toBe('Mia’s cross is for apples, not grapes.');
+    // The board right after the card, then the count board.
+    expect(l2.drill).toEqual([L2_CROSS_DO, L2_COUNT]);
+    expect(L2_CROSS_DO.afterCard).toBe(k);
+    expect(L2_CROSS_DO.distinction).toBe('box-vs-kid');
+    expect(L2_CROSS_DO.scene).toBe(L2_CROSS_CARD.scene);
+    expect(l2.ideas.length).toBeLessThanOrEqual(7);
+  });
+
+  it('the contrast: each panel’s truth, reason and last line match the grid its board row draws, by brute force', () => {
+    const scene = L2_CROSS.scene;
+    expect(scene.words).toEqual({ worldTag: 'Line', saysWord: 'has:', truth: 'Counts for grapes', untruth: 'Not for grapes' });
+    expect(scene.ask!.q).toBe('Did Mia get a cross both times?');
+    scene.pairs.forEach((panel, k) => {
+      // The grid of this panel, read from the board row that draws it in words.
+      const facts = rowClues(L2_CROSS_DO)[k];
+      expect(L2_CROSS_DO.rows[k].label.startsWith(k === 0 ? 'First grid: ' : 'Second grid: ')).toBe(true);
+      const mias = facts.filter((f) => f.t === 'isnt' && f.p === 'mia');
+      expect(mias).toHaveLength(1);
+      const under = mias[0].t === 'isnt' ? mias[0].v : '';
+      // The line, and Leo’s cross in it that both grids share (so the last line follows from what the panel shows).
+      expect(panel.world).toBe('The grapes column. Leo has a cross in it.');
+      expect(facts.some((f) => f.t === 'isnt' && f.p === 'leo' && f.v === 'grapes')).toBe(true);
+      expect(panel.who).toBe('Mia’s row');
+      expect(panel.says).toBe(`a cross under ${under}`);
+      const sols = fit(SNACKS, facts);
+      // True means: this cross rules Mia out for grapes. Only a cross in the grapes column does.
+      expect(panel.truth).toBe(status(sols, 'mia', 'snack', 'grapes') === 'no');
+      expect(panel.truth).toBe(under === 'grapes');
+      expect(panel.because).toContain(`The cross is in the ${under} column.`);
+      const left = whoCan(sols, 'snack', 'grapes', SNACKS.people);
+      expect(panel.then).toBe(left.length === 1 ? `Only ${cap(left[0])} is left, so ${cap(left[0])} must eat grapes.` : `${left.map(cap).join(' and ')} could each eat grapes. You can’t tell yet.`);
+    });
+    expect(scene.pairs.map((p) => p.truth)).toEqual([false, true]);
+    // The grid card: Leo out for grapes, Mia’s cross under apples, so Mia and Ava could each eat grapes.
+    const card = pictureFacts(CARD_GRIDS.crossFor).map((f) => ({ ...f, c: 'snack' }) as GridClue);
+    expect(card).toEqual(rowClues(L2_CROSS_DO)[0].map((f) => f));
+    expect(whoCan(fit(SNACKS, card), 'snack', 'grapes', SNACKS.people)).toEqual(['mia', 'ava']);
+    expect(l2.ideas[3].body.join(' ')).toContain('So Mia and Ava could each eat grapes. You can’t tell yet.');
+  });
+
+  it('the box-vs-kid boards: a full scaffold in the line’s words, the line over the shown row, the line under each count', () => {
+    for (const st of [L2_CROSS_DO, L2_COUNT]) {
+      expect(st.scaffold).toBe('full');
+      expect(st.words).toBe(LINE_WORDS);
+      expect(st.confused).toBe(BOX_VS_KID_CONFUSED);
+      const rows = rowClues(st);
+      st.rows.forEach((r, i) => {
+        for (const m of r.marks) {
+          const at = /^Empty boxes in (?:(\w+)’s row|the (\w+) column)$/.exec(m.label);
+          if (!at) continue;
+          // The line and the crosses in it, recounted from the row's words: no count is given away.
+          const p = at[1] ? kid(at[1]) : null;
+          const v = at[2] ?? null;
+          const crossed = rows[i].filter((f) => f.t === 'isnt' && (p ? f.p === p : f.v === v)).map((f) => (f.t === 'isnt' ? (p ? `the ${f.v}`.replace(/^the (apples|popcorn|grapes)$/, '$1') : cap(f.p)) : ''));
+          const said = crossed.length ? joinNames(crossed) : 'nothing yet';
+          if (m.given) {
+            expect(m.compare).toBeUndefined();
+            expect(r.needs).toBe(`Line: ${p ? `${cap(p)}’s row` : `the ${v} column`}. Crossed in it: ${said}. Empty: ${joinNames((p ? KID_PETS : ['mia', 'leo', 'ava']).filter((x) => !rows[i].some((f) => f.t === 'isnt' && (p ? f.p === p && f.v === x : f.v === v && f.p === x))).map((x) => (p ? `the ${x}` : cap(x))))}.`);
+          } else expect(m.compare).toEqual({ says: p ? `${cap(p)}’s row` : `The ${v} column`, world: cap(said) });
+        }
+      });
+    }
+    // The shown row of the count board: “Line: Leo’s row. Crossed in it: the cat. Empty: the dog and the fish.”
+    expect(L2_COUNT.rows[0].needs).toBe('Line: Leo’s row. Crossed in it: the cat. Empty: the dog and the fish.');
+    // A cross off the line on the count board: Mia’s ✗ under the dog leaves the cat column at two; Leo’s ✗ under the cat
+    // is in Leo’s row, so Mia’s row has three empty boxes.
+    expect(L2_COUNT.rows.slice(-2).map((r) => r.marks.map((m) => `${m.label} = ${m.answer}`).join(', '))).toEqual([
+      `Empty boxes in the cat column = 2, Mia – cat = ${CANT}`,
+      'Empty boxes in Mia’s row = 3',
+    ]);
+  });
+
+  it('the box-vs-kid mix-up is named on the wrong taps the audit describes, and never on right marks', () => {
+    const fires = (st: DrillStep, id: string, opt: string) => checkDrill(st, { ...right(st), [id]: opt }).diagnosis;
+    // Contrast board, first grid: Mia out for grapes, Ava the last box, or a count of 1 all count Mia’s apples cross.
+    expect(fires(L2_CROSS_DO, 'first-mia-grapes', 'no')).toBe('cross-elsewhere');
+    expect(fires(L2_CROSS_DO, 'first-ava-grapes', 'yes')).toBe('kid-crossed-out');
+    expect(fires(L2_CROSS_DO, 'first-count', '1')).toBe('count-elsewhere');
+    // Count board: the cat column after Mia’s ✗ under the dog, and Mia’s row with Leo’s ✗ under the cat.
+    expect(fires(L2_COUNT, 'cat-mia-dog-count', '1')).toBe('cross-elsewhere');
+    expect(fires(L2_COUNT, 'cat-mia-dog-mia-cat', 'no')).toBe('kid-crossed-out');
+    expect(fires(L2_COUNT, 'mia-row-count', '2')).toBe('cross-other-row');
+    // Other slips are named by their own mark only, and right marks never diagnose.
+    expect(fires(L2_CROSS_DO, 'second-ava-grapes', CANT)).toBeUndefined();
+    expect(fires(L2_COUNT, 'leo-fish-leo-dog', 'no')).toBeUndefined();
+    expect(fires(L2_COUNT, 'mia-row-count', '1')).toBeUndefined();
+    for (const st of [L2_CROSS_DO, L2_COUNT]) {
+      const ok = checkDrill(st, right(st));
+      expect(ok.done && ok.diagnosis === undefined).toBe(true);
+      for (const mc of st.misconceptions!) mixupText(mc.text);
+    }
+    expect(L2_CROSS_DO.misconceptions![0].text).toBe('You may be treating Mia’s cross under apples as a cross for grapes. They are two different things: a cross is about its own box only. Mia’s cross says Mia does not eat apples. For grapes, look only down the grapes column.');
+    expect(L2_COUNT.misconceptions!.find((mc) => mc.id === 'cross-other-row')!.text).toBe('You may be treating Leo’s cross under the cat as a cross in Mia’s row. They are two different things: a cross is about its own box only. Leo’s cross says Leo does not have the cat. For Mia, look only across Mia’s row.');
+  });
+
+  it('the first column quiz is marked on its own board: the answer’s cross in another column, then the count and the last box', () => {
+    for (let seed = 1; seed <= 80; seed++) {
+      const r = onlyOnePuzzle(createRng(seed), { id: 'l2-1', skin: skinAt(seed), mode: 'col', n: 3, work: true });
+      const { item, cast, marks, val } = r;
+      const c = cast.cats[0].cat.id;
+      const ppl = cast.spec.people;
+      const sols = fitMarks(cast.spec, c, marks);
+      const H = item.kind === 'choose' ? item.answer : '';
+      expect(whoCan(sols, c, val, ppl)).toEqual([H]);
+      // The grid always has a ✗ in another column of the answer's own row: the cross the board asks about.
+      const off = Object.entries(marks[H]).find(([x, mk]) => x !== val && mk === 'no');
+      expect(off, `seed ${seed}`).toBeDefined();
+      const wf = item.workFirst!;
+      expect(wf.id).toBe('l2-1-work');
+      expect(wf.scene).toBe(item.scene);
+      expect(wf.scaffold).toBe('full');
+      expect(wf.words).toBe(LINE_WORDS);
+      expect(wf.words!.closing).toMatch(/^Those two ideas are apart now\. Back to the grid/);
+      expect(item.confused).toBe(BOX_VS_KID_CONFUSED);
+      expect(wf.confused).toBe(BOX_VS_KID_CONFUSED);
+      // One step of the strip per mark, in board order: could the answer still have it, the count, the last box.
+      const tap = marksToTap(wf);
+      expect(wf.steps!.length).toBe(tap.length);
+      const w = wordsFor(cast);
+      expect(tap.map((m) => `${m.label} = ${m.answer}`)).toEqual([
+        `Could ${cast.nm(H)} ${w.base(c, val)}? = yes`,
+        `Empty boxes in the ${w.val(c, val).label} column = ${ppl.filter((q) => marks[q][val] === undefined).length}`,
+        `${w.cell(H, val, c)} = yes`,
+      ]);
+      expect(status(sols, H, c, val)).toBe('yes');
+      // The board names one of the answer's crosses in another column.
+      const named = cast.cats[0].vals.find((y) => wf.rows[0].label === `${cast.nm(H)}’s row has a cross under ${w.obj(c, y.id)}.`)!;
+      expect(named, wf.rows[0].label).toBeDefined();
+      expect(named.id !== val && marks[H][named.id] === 'no').toBe(true);
+      // The mix-up behind “No”: the answer's cross in another column taken as a cross for this thing.
+      const res = checkDrill(wf, { ...right(wf), [tap[0].id]: 'no' });
+      expect(res.diagnosis).toBe('cross-elsewhere');
+      expect(res.message.startsWith(`You may be treating ${cast.nm(H)}’s cross under ${w.obj(c, named.id)} as a cross for ${w.obj(c, val)}.`)).toBe(true);
+      expect(checkDrill(wf, { ...right(wf), [tap[1].id]: '0' }).diagnosis).toBe('kid-crossed-out');
+      expect(checkDrill(wf, right(wf)).done).toBe(true);
+      const text = drillWords(wf).join('\n');
+      expect(fkGrade(text), `seed ${seed}`).toBeLessThanOrEqual(READING.maxGrade);
+      expect(longestSentence(text).words).toBeLessThanOrEqual(READING.maxSentenceWords);
+      expect(text).not.toMatch(/['"]|\bWrong\b/);
+    }
+    // Only Try 1 has the board; later tries are light (no board).
+    for (let seed = 1; seed <= 20; seed++) {
+      const items = l2.practice(createRng(seed));
+      expect(items.map((it) => !!it.workFirst)).toEqual([true, false, false, false]);
+    }
+  });
+
+  it('the two-part grid’s first quiz is marked on its own board, one box per step of the loop, and its carry starts from a box worked out on it', () => {
+    let n = 0;
+    for (let seed = 1; seed <= 80; seed++) {
+      const g = gridPuzzle(createRng(seed), { id: 'l4-4', skin: skinAt(seed), ncat: 2, work: true });
+      const { item, cast, clues } = g;
+      const wf = item.workFirst!;
+      expect(wf.scene).toBe(item.scene);
+      expect(wf.scaffold).toBe('full');
+      expect(wf.words).toBe(LINK_WORDS);
+      expect(wf.steps).toEqual(METHOD_STEPS);
+      expect(METHOD_STEPS).toEqual(['Clue marks', 'Spread', 'Only one left', 'Carry across links', 'Again']);
+      expect(item.confused).toBe(BACK_FORTH_CONFUSED);
+      // One box per row, one row per step, so the lit step is always the box being marked.
+      expect(wf.rows.map((r) => r.marks.length)).toEqual([1, 1, 1, 1, 1]);
+      expect(marksToTap(wf)).toHaveLength(5);
+      // Every box is decided by all the clues, and its mark is what this file's brute force gives.
+      const sols = fit(cast.spec, clues);
+      expect(sols).toHaveLength(1);
+      const w = wordsFor(cast);
+      const cellOf = (label: string) => {
+        const [pn, vl] = label.split(' – ');
+        const p = cast.people.find((x) => x.label === pn)!.id;
+        const cat = cast.cats.find((x) => x.vals.some((y) => y.label === vl))!;
+        return { p, c: cat.cat.id, v: cat.vals.find((y) => y.label === vl)!.id };
+      };
+      const boxes = wf.rows.map((r) => cellOf(r.marks[0].label));
+      wf.rows.forEach((r, i) => expect(r.marks[0].answer, `${seed} ${r.label}`).toBe(status(sols, boxes[i].p, boxes[i].c, boxes[i].v)));
+      expect(new Set(boxes.map((b) => `${b.p}|${b.c}|${b.v}`)).size).toBe(5);
+      // Step 1 names a clue that gives its box by itself.
+      const k1 = Number(/^Clue marks\. Clue (\d+): /.exec(wf.rows[0].label)![1]) - 1;
+      expect(status(fit(cast.spec, [clues[k1]]), boxes[0].p, boxes[0].c, boxes[0].v)).not.toBe('open');
+      // Step 2 spreads a clue's own check mark: the box is in its row or its column.
+      const sp = /^Spread\. Clue (\d+) gives (.+) a check mark\.$/.exec(wf.rows[1].label)!;
+      const from = cellOf(sp[2]);
+      expect(clues[Number(sp[1]) - 1]).toEqual({ t: 'is', ...from });
+      expect(boxes[1].c).toBe(from.c);
+      expect(boxes[1].p === from.p || boxes[1].v === from.v).toBe(true);
+      // Step 4 carries across a link from a box marked in step 2 or 3, the same kid at the link's other end.
+      const k4 = Number(/^Carry across links\. Clue (\d+): /.exec(wf.rows[3].label)![1]) - 1;
+      const link = clues[k4];
+      expect(link.t === 'link' || link.t === 'notLink').toBe(true);
+      if (link.t !== 'link' && link.t !== 'notLink') continue;
+      const b4 = boxes[3];
+      const end = link.c1 === b4.c && link.v1 === b4.v ? { c: link.c2, v: link.v2 } : { c: link.c1, v: link.v1 };
+      expect([boxes[1], boxes[2]].some((b) => b.p === b4.p && b.c === end.c && b.v === end.v), `${seed}: the carry starts on the board`).toBe(true);
+      const fromMark = status(sols, b4.p, end.c, end.v);
+      expect(wf.rows[3].marks[0].answer).toBe(link.t === 'link' ? fromMark : 'no');
+      if (link.t === 'notLink') expect(fromMark).toBe('yes');
+      // Under the carry: the clue and the box at its other end, never that box's mark (it is a box the learner marks in
+      // step 2 or 3 of this board).
+      expect(wf.rows[3].marks[0].compare).toEqual({ says: clueText(cast, link), world: `${w.cell(b4.p, end.v, end.c)}, at the other end of the clue.` });
+      // Step 3's line was emptied by clue marks and spreads of a clue’s own ✓ (each other box is crossed by one clue
+      // alone), so it never needs a carry the board has not reached.
+      const b3 = boxes[2];
+      const lineAt = /^Only one left\. Look at (?:(\S+)’s row of .+|the (.+) column)\.$/.exec(wf.rows[2].label)!;
+      expect(lineAt, wf.rows[2].label).toBeTruthy();
+      const others = lineAt[1] !== undefined
+        ? cast.spec.cats.find((x) => x.id === b3.c)!.values.filter((v) => v !== b3.v).map((v) => ({ p: b3.p, v }))
+        : cast.spec.people.filter((q) => q !== b3.p).map((q) => ({ p: q, v: b3.v }));
+      for (const f of others) expect(clues.some((cl) => status(fit(cast.spec, [cl]), f.p, b3.c, f.v) === 'no'), `${seed}: ${f.p} – ${f.v}`).toBe(true);
+      // Step 5 uses the carried mark: in the same row or the same column as it.
+      expect(boxes[4].p === b4.p || boxes[4].v === b4.v).toBe(true);
+      // Leaving the carry or the next mark empty names the belief: a link used up, or a carry as the end.
+      const tap = marksToTap(wf);
+      expect(checkDrill(wf, { ...right(wf), [tap[3].id]: CANT }).diagnosis).toBe('link-used-up');
+      expect(checkDrill(wf, { ...right(wf), [tap[4].id]: CANT }).diagnosis).toBe('carry-is-the-end');
+      expect(checkDrill(wf, { ...right(wf), [tap[0].id]: CANT }).diagnosis).toBeUndefined();
+      for (const mc of wf.misconceptions!) mixupText(mc.text);
+      const text = drillWords(wf).join('\n');
+      expect(fkGrade(text), `seed ${seed}`).toBeLessThanOrEqual(READING.maxGrade);
+      expect(longestSentence(text).words).toBeLessThanOrEqual(READING.maxSentenceWords);
+      n++;
+    }
+    expect(n).toBe(80);
+    // In the lesson: Try 4 has the board, Try 5 is a two-part grid with none. Both are tagged for the pass rule.
+    for (let seed = 1; seed <= 20; seed++) {
+      const items = l4.practice(createRng(seed));
+      expect(items.map((it) => `${it.id} ${it.skill} ${!!it.workFirst} ${it.tags?.join() ?? ''}`)).toEqual([
+        expect.stringMatching(/^l4-1 s4\.(?:not-)?link false $/),
+        expect.stringMatching(/^l4-2 s4\.(?:not-)?link false $/),
+        expect.stringMatching(/^l4-3 s4\.(?:not-)?link false $/),
+        'l4-4 s4.grid-two true grid-two',
+        'l4-5 s4.grid-two false grid-two',
+      ]);
+    }
+  });
+
+  it('back and forth on a lesson 4 board: a worked-out cross carried across, the last box, and the check mark carried back', () => {
+    expect(l4.ideas.map((c) => c.title)).toEqual(['Two parts to the grid', 'A linking clue', 'Use what you know', 'A “not” link', 'Links work both ways', 'Back and forth']);
+    expect(l4.ideas[5].scene).toBe(CARD_CLUES.backForth);
+    expect(l4.drill![3]).toBe(L4_BACK_FORTH);
+    const clues = (CARD_CLUES.backForth.kind === 'clues' ? CARD_CLUES.backForth.clues : []).map(readClue);
+    // Neither part is known: clue 1 (an “or” clue) crosses out Mia – fish; clue 2 carries it to Mia – popcorn; with clue
+    // 3, Ava – popcorn is the last box; clue 2 carries her check mark back to Ava – fish.
+    expect(status(fit(TWO, clues.slice(0, 1)), 'mia', 'pet', 'fish')).toBe('no');
+    expect(status(fit(TWO, clues.slice(0, 2)), 'mia', 'snack', 'popcorn')).toBe('no');
+    expect(status(fit(TWO, clues), 'ava', 'snack', 'popcorn')).toBe('yes');
+    expect(status(fit(TWO, clues), 'ava', 'pet', 'fish')).toBe('yes');
+    expect(l4.ideas[5].body.join(' ')).toContain('Here clue 1 leaves out the fish, so Mia – fish gets a cross. Mia is not the kid with the fish. So clue 2 gives Mia – popcorn a cross.');
+    // The carries name their link and the mark they carry, worked out from the clues.
+    const carries = L4_BACK_FORTH.rows.flatMap((r) => r.marks.filter((m) => m.compare).map((m) => [r.id, m.label, m.compare!.world]));
+    // The shown carry says its other box's mark; the one to tap names the box only (Ava – popcorn is marked in the row
+    // above, so its mark is never given away).
+    expect(carries).toEqual([['bf-2', 'Mia – popcorn', 'Mia – fish. Mia does not have the fish.'], ['bf-4', 'Ava – fish', 'Ava – popcorn, at the other end of the clue.']]);
+    expect(L4_BACK_FORTH.rows[3].marks[0].why[CANT]).toBe('You can tell. Clue 2 says the kid with the fish eats popcorn. Ava eats popcorn. So Ava – fish gets a ✓.');
+    expect(L4_BACK_FORTH.scaffold).toBe('full');
+    expect(L4_BACK_FORTH.words).toBe(LINK_WORDS);
+    expect(L4_BACK_FORTH.steps!.length).toBe(marksToTap(L4_BACK_FORTH).length);
+    expect(L4_BACK_FORTH.confused).toBe(BACK_FORTH_CONFUSED);
+    // The mix-ups: a carried cross not counted, and a link read once and dropped.
+    const fires = (id: string, opt: string) => checkDrill(L4_BACK_FORTH, { ...right(L4_BACK_FORTH), [id]: opt }).diagnosis;
+    expect(fires('bf-3-ava-popcorn', CANT)).toBe('carried-not-counted');
+    // With clue 3’s cross missed too, the empty Ava – popcorn box is not about the carried cross: no diagnosis.
+    expect(checkDrill(L4_BACK_FORTH, { ...right(L4_BACK_FORTH), 'bf-3-leo-popcorn': CANT, 'bf-3-ava-popcorn': CANT }).diagnosis).toBeUndefined();
+    expect(fires('bf-4-ava-fish', CANT)).toBe('link-used-up');
+    expect(fires('bf-3-leo-popcorn', 'yes')).toBeUndefined();
+    expect(fires('bf-4-ava-fish', 'no')).toBeUndefined();
+    for (const mc of L4_BACK_FORTH.misconceptions!) mixupText(mc.text);
+  });
+
+  it('the “I’m confused” questions: one right option each, and what they claim holds on the card’s own example', () => {
+    confusedShape(BOX_VS_KID_CONFUSED);
+    confusedShape(BACK_FORTH_CONFUSED);
+    expect(BOX_VS_KID_CONFUSED).toHaveLength(2);
+    expect(BACK_FORTH_CONFUSED).toHaveLength(2);
+    // Box-vs-kid: for “Who must eat grapes?” look down the grapes column; Mia’s cross under apples leaves grapes open.
+    expect(BOX_VS_KID_CONFUSED[0].options.find((o) => o.right)!.label).toBe('Down the grapes column');
+    expect(BOX_VS_KID_CONFUSED[1].options.find((o) => o.right)!.label).toBe('Yes: that cross is only about apples');
+    expect(status(fit(SNACKS, [readClue('Mia does not eat apples.')]), 'mia', 'snack', 'grapes')).toBe('open');
+    expect(status(fit(SNACKS, pictureFacts(CARD_GRIDS.crossFor).map((f) => ({ ...f, c: 'snack' }) as GridClue)), 'mia', 'snack', 'grapes')).toBe('open');
+    // Back and forth: Mia does not have the fish and “The kid with the fish eats popcorn”: Mia – popcorn gets a cross.
+    expect(BACK_FORTH_CONFUSED[0].options.find((o) => o.right)!.label).toBe('Mia – popcorn gets a cross');
+    expect(status(fit(TWO, [readClue('Mia does not have the fish.'), readClue('The kid with the fish eats popcorn.')]), 'mia', 'snack', 'popcorn')).toBe('no');
+    expect(BACK_FORTH_CONFUSED[1].options.find((o) => o.right)!.label).toBe('Yes: it may carry the new mark across');
+    // The panel's last line is set by the board each one sits on (the item takes it from its own board).
+    expect(LINE_WORDS.closing).toBeTruthy();
+    expect(LINK_WORDS.closing).toBeTruthy();
+  });
+
+  it('mastery: lesson 2 needs a right tempting “Can’t tell yet” grid, lesson 4 a right two-part grid, and an extra quiz item can always serve each', () => {
+    expect(l2.pass).toEqual({ firstTry: 3, include: [{ tag: 'cant-tell', label: 'a “Can’t tell yet” grid' }] });
+    expect(l4.pass).toEqual({ firstTry: 3, include: [{ tag: 'grid-two', label: 'a two-part grid' }] });
+    for (let seed = 1; seed <= 30; seed++) {
+      // Every can’t-tell grid is tagged, and has a ✗ off the asked line in the line of an open box (the trap).
+      for (const it of l2.practice(createRng(seed))) {
+        expect(!!it.tags?.includes('cant-tell'), it.id).toBe(it.skill === 's4.not-decided');
+        expect(!!it.workFirst && !!it.tags).toBe(false);
+      }
+      const x2 = extraQuizItem(l2, seed, [], ['cant-tell'], 0)!;
+      expect(x2.tags).toEqual(['cant-tell']);
+      expect(x2.workFirst).toBeUndefined();
+      const x4 = extraQuizItem(l4, seed, [], ['grid-two'], 0)!;
+      expect(x4.tags).toEqual(['grid-two']);
+      expect(x4.workFirst).toBeUndefined();
+    }
+    // A row question's can’t-tell grid always has another kid's ✗ under one of the two open things.
+    for (let seed = 1; seed <= SEEDS; seed++) {
+      const { marks, cast, p } = onlyOnePuzzle(createRng(seed), { id: 'x', skin: skinAt(seed), mode: 'cant', ask: 'row', n: 3 });
+      const open = cast.spec.cats[0].values.filter((v) => marks[p][v] === undefined);
+      expect(open.some((v) => cast.spec.people.some((q) => q !== p && marks[q][v] === 'no')), `seed ${seed}`).toBe(true);
+    }
+  });
+
+  it('lessons 4 and 5 rely on box-vs-kid: they say it was taught in lesson 2, and a card reminds', () => {
+    const l5 = lessonOf('s4.l5');
+    for (const l of [l4, l5]) {
+      expect(l.distinctions).toEqual([{ ...BOX_VS_KID, taughtIn: 's4.l2' }]);
+      expect(l.ideas.filter((cd) => cd.distinction === BOX_VS_KID.id)).toHaveLength(1);
+      expect(l.ideas.length).toBeLessThanOrEqual(7);
+    }
+    // Lesson 4, “A ‘not’ link”: if Leo has the dog, the clue crosses Leo out for popcorn only; apples and grapes stay open.
+    const notCard = l4.ideas.find((cd) => cd.distinction === BOX_VS_KID.id)!;
+    expect(notCard.title).toBe('A “not” link');
+    expect(notCard.body.join(' ')).toContain('That ✗ is for popcorn only: Leo could still eat apples or grapes.');
+    const ways = fit(TWO, [readClue('Leo has the dog.'), readClue('The kid with the dog does not eat popcorn.')]);
+    expect(['apples', 'popcorn', 'grapes'].map((v) => status(ways, 'leo', 'snack', v))).toEqual(['open', 'no', 'open']);
+    // Lesson 5, “Use only the clues you are told”: each clue crosses a kid out for the fish, and only Ava is left.
+    const listCard = l5.ideas.find((cd) => cd.distinction === BOX_VS_KID.id)!;
+    expect(listCard.title).toBe('Use only the clues you are told');
+    expect(listCard.body.join(' ')).toMatch(/crosses out Mia for the fish\./);
+  });
+
+  it('the reworded texts are in place', () => {
+    // Lesson 2: the “Count the empty boxes” card starts by finding the line.
+    expect(l2.ideas[5].body[0]).toBe('First find the line the question is about. Who has the fish? Look down the fish column. Which pet does Leo have? Look across Leo’s row.');
+    // Lesson 4: the two-part grid's Remember carries each new mark across the links; a one-part grid's does not.
+    for (let seed = 1; seed <= 10; seed++) {
+      expect(gridPuzzle(createRng(seed), { id: 'x', skin: skinAt(seed), ncat: 2 }).item.teach!.remember![0]).toBe('Put in the clue marks. Spread every ✓. Then look for only one left. Carry each new check mark or cross across the linking clues, then read them again.');
+      expect(gridPuzzle(createRng(seed), { id: 'x', skin: skinAt(seed), ncat: 1 }).item.teach!.remember![0]).toBe('Put in the clue marks. Spread every ✓. Then look for only one left.');
+      // A clue crosses a kid out for one thing: the person notes name it.
+      const lk = linkPuzzle(createRng(seed), { id: 'x', skin: skinAt(seed), mode: 'notLink2' });
+      for (const cs of lk.item.teach!.cases!) if (/crosses? out/.test(cs.note!)) expect(cs.note, cs.note).toMatch(/ for .+\.$/);
+      // Every “crosses out <kid>” in a “not” link item's words says what for: explanation, feedback, meaning, Simpler.
+      for (const mode of ['notLink2', 'notLink'] as const) {
+        const r = linkPuzzle(createRng(seed), { id: 'x', skin: skinAt(seed), mode });
+        const nl = r.item;
+        const thing = wordsFor(r.cast).obj(r.c2, r.val);
+        const said = [nl.explain, nl.teach!.meaning!, ...nl.teach!.simpler!, ...Object.values(nl.feedback!).flatMap((f) => [f.headline, ...f.detail])].join(' ');
+        const hits = [...said.matchAll(/cross(?:es)? out (?:only )?([A-Z]\w*)([^.]*)\./g)];
+        expect(hits.length, said).toBeGreaterThan(2);
+        for (const hit of hits) expect(hit[2], hit[0]).toMatch(new RegExp(`^ for ${esc(thing)}\\b`));
+      }
+    }
+    // The linking-clue line moved from lesson 5's “Stuck? Read again” into lesson 4's “Back and forth”.
+    const stuck = lessonOf('s4.l5').ideas.find((c) => c.title === 'Stuck? Read again')!;
+    expect(stuck.body.join(' ')).not.toMatch(/linking/);
+    expect(l4.ideas[5].body).toContain('Stuck? Read the linking clues again. A linking clue may give you a new cross.');
+    // Lesson 4's real-life line no longer says to save a link for later.
+    expect(WORLD.s4.lessons['s4.l4'].why).not.toMatch(/later/);
+    expect(WORLD.s4.lessons['s4.l4'].why).toMatch(/Read it again each time/);
+  });
+});
+
+/** Every word a board shows: its text, rows, marks, compare lines, mix-ups and “I’m confused” questions. */
+function drillWords(st: DrillStep): string[] {
+  return [
+    st.title, ...st.body, st.done, ...(st.steps ?? []),
+    ...st.rows.flatMap((r) => [r.label, r.note ?? '', r.needs ?? '', ...r.marks.flatMap((m) => [m.label, ...Object.values(m.why), m.compare?.says ?? '', m.compare?.world ?? ''])]),
+    ...(st.misconceptions ?? []).map((m) => m.text),
+    ...(st.confused ?? []).flatMap((q) => [q.q, q.teach, ...q.options.map((o) => o.label)]),
+  ].filter(Boolean);
+}

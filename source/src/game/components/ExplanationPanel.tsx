@@ -15,6 +15,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import type { Color, TeachCase } from '../../engine/types';
 import { explanationSpeech, type ExplanationModel } from '../explanation';
 import { ReadAloudButton } from './ReadAloud';
+import { BecauseRows } from './Distinction';
 import { PlayIcon, ThingCard } from './ThingCard';
 
 const DOT: Record<Color, string> = { red: '#ff4d6d', blue: '#3b82f6', yellow: '#facc15' };
@@ -50,11 +51,14 @@ export function CaseCard({ c, mark }: { c: TeachCase; mark?: boolean }) {
       {c.truths && c.truths.length > 0 && (
         <ul className="play-truths">
           {c.truths.map((t, i) => (
-            <li key={i} className={t.value ? 'is-true' : 'is-false'}>
-              <PlayIcon name={t.value ? 'check' : 'cross'} size={16} />
-              <span>
-                {t.who}: <strong>{t.value ? 'true' : 'false'}</strong>
+            <li key={i} className={`${t.value ? 'is-true' : 'is-false'}${t.because ? ' has-because' : ''}`}>
+              <span className="play-truths-line">
+                <PlayIcon name={t.value ? 'check' : 'cross'} size={16} />
+                <span>
+                  {t.who}: <strong>{t.value ? c.words?.truth ?? 'true' : c.words?.untruth ?? 'false'}</strong>
+                </span>
               </span>
+              {t.because && <BecauseRows compact because={t.because} words={c.words} />}
             </li>
           ))}
         </ul>

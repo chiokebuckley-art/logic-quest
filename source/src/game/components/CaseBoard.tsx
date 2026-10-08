@@ -12,7 +12,23 @@ import { useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { caseCount, caseMarks, caseVerdict, nextStamp, type DrillPicks } from '../../engine/drill';
 import type { DrillRow, DrillStep, Scene, SignBox } from '../../engine/types';
 import { boxTint, RuleBanner } from './boxes';
+import { BecauseRows, CompareRows, MethodSteps, wordsOf } from './Distinction';
 import { PlayIcon } from './ThingCard';
+
+/** The method, step by step, shown while it is new (DrillStep.scaffold 'full'). */
+export const CASE_STEPS = ['Pretend the treasure is in one box', 'Stamp each sign: do its words fit the test?', 'Count the True stamps', 'Compare the count with the rule', 'Keep or reject the box'] as const;
+
+/** The test-world line over a case board: the one assumption every stamp is checked against, kept on screen. */
+function TestWorld({ label, given, item, tag = 'Test world', note }: { label: string; given?: boolean; item: string; tag?: string; note?: string }) {
+  return (
+    <p className={`play-case-now play-case-world${given ? ' is-given' : ''}`}>
+      <span className={`play-drill-tag${given ? '' : ' play-drill-tag--you'}`}>{given ? 'Shown' : tag}</span>
+      <PlayIcon name="gem" size={16} />
+      <strong>{label}</strong>
+      <span className="play-case-world-note">{note ?? `For this test only. Where the ${item} is does not say if a sign is true.`}</span>
+    </p>
+  );
+}
 
 type CasesScene = Extract<Scene, { kind: 'cases' }>;
 
@@ -51,6 +67,8 @@ interface CaseCardProps {
   flagged?: boolean;
   /** The stamp on this box's sign, for the picked case. */
   stamp: ReactNode;
+  /** Under the sign: the comparison behind the stamp, or the two facts to compare (Distinction.tsx). */
+  under?: ReactNode;
   /** Interactive: tap the box to pick its case. */
   onPick?(): void;
   /** Interactive: the box has no case on this board. */
@@ -58,11 +76,12 @@ interface CaseCardProps {
 }
 
 /** One box: its marker (with a ring or a cross), name, count and verdict, then its sign with the stamp on it. */
-function CaseCard({ box, i, picked, count, verdict, changed, flagged, stamp, onPick, off }: CaseCardProps) {
+function CaseCard({ box, i, picked, count, verdict, changed, flagged, stamp, under, onPick, off }: CaseCardProps) {
   const head = (
     <>
-      <span className="play-case-chest" style={{ background: boxTint(box.name) }} aria-hidden="true">
-        <span className="play-case-n">{i + 1}</span>
+      <span className={`play-case-chest${picked ? ' has-gem' : ''}`} style={{ background: boxTint(box.name) }} aria-hidden="true">
+        {/* The treasure is drawn in the picked box: this test's world, not a fact about the box. */}
+        {picked ? <span className="play-case-gem"><PlayIcon name="gem" size={22} /></span> : <span className="play-case-n">{i + 1}</span>}
         {verdict === 'keep' && <Ring />}
         {verdict === 'reject' && (
           <span className="play-case-x">
@@ -109,6 +128,7 @@ function CaseCard({ box, i, picked, count, verdict, changed, flagged, stamp, onP
         </span>
         {stamp}
       </div>
+      {under}
     </li>
   );
 }
@@ -129,9 +149,12 @@ export function CaseScene({ scene, revealed, labelId }: CaseSceneProps) {
   const shown = Math.min(revealed ?? steps.length, steps.length);
   const own = steps.length > 0 && shown < steps.length ? scene.pretend : undefined;
   const say = steps.length ? (shown > 0 ? steps[shown - 1].say : '') : '';
+  const because = steps.length && shown > 0 ? steps[shown - 1].because : undefined;
+  const item = /treasure|prize|egg/.exec(scene.boxes[0]?.sign ?? '')?.[0] ?? 'treasure';
   return (
     <div className="play-scene play-cases" id={labelId}>
       <RuleBanner rule={scene.rule} />
+      {scene.pretend !== undefined && <TestWorld label={`Pretend the ${item === 'egg' ? 'dragon egg' : item} is in ${scene.boxes[scene.pretend].name.startsWith('Box') ? '' : 'the '}${scene.boxes[scene.pretend].name}.`} item={item === 'egg' ? 'egg' : item} />}
       <ol className="play-case-list" aria-label="Boxes and their signs">
         {scene.boxes.map((b, i) => {
           const value = scene.pretend !== undefined && scene.stamps && (!steps.length || i < shown) ? (scene.stamps[i] ? 'true' : 'false') : undefined;
@@ -167,6 +190,11 @@ export function CaseScene({ scene, revealed, labelId }: CaseSceneProps) {
         <p className="play-case-say" aria-hidden="true">
           {say}
         </p>
+      )}
+      {because && (
+        <div aria-hidden="true">
+          <BecauseRows because={because} />
+        </div>
       )}
       {/* Always in the page, so each new line is announced (a region that appears with its text may be missed). */}
       {steps.length > 0 && (
@@ -206,6 +234,20 @@ export function CaseBoard({ step, picks, wrong, locked, picked, onPickCase, onPi
   const { stamps, verdict } = row ? caseMarks(row) : { stamps: [], verdict: undefined };
   const count = row ? caseCount(row, picks) : null;
   const flagged = (b: number) => !!rowFor(b)?.marks.some((m) => wrong.includes(m.id));
+  /** Full scaffold: the compare facts under every sign, the rule's need by the count, the method's steps. */
+  const full = step.scaffold === 'full';
+  const item = /treasure|prize|egg/.exec(scene.boxes[0]?.sign ?? '')?.[0] ?? 'treasure';
+  const words = step.words;
+  const w = wordsOf(words);
+  const steps = step.steps ?? CASE_STEPS;
+  /** What sits under sign i for the picked case: the worked comparison (a shown case) or the two facts to compare. */
+  const underFor = (i: number): ReactNode => {
+    if (!row) return null;
+    const m = stamps.find((s) => s.on === i);
+    if (!m?.compare) return null;
+    if (m.given) return full ? <BecauseRows compact because={{ ...m.compare, match: m.answer === 'true' }} words={words} /> : null;
+    return full || flagged(picked!) ? <CompareRows says={m.compare.says} world={m.compare.world} words={words} /> : null;
+  };
 
   const pickCase = (b: number) => {
     onPickCase(b);
@@ -264,20 +306,19 @@ export function CaseBoard({ step, picks, wrong, locked, picked, onPickCase, onPi
   const v = row ? caseVerdict(row, picks) : undefined;
   const verdictMiss = !!verdict && wrong.includes(verdict.id);
   const focusAt = Math.max(0, verdict?.options.findIndex((o) => o.id === v) ?? 0);
+  /** Where the learner is in the method, for the steps strip. */
+  const at = !row ? 0 : count === null ? 1 : v === undefined ? 3 : locked ? 5 : 4;
 
   return (
     <div className="play-scene play-cases play-cases--board" ref={rootRef}>
-      <RuleBanner rule={scene.rule} />
-      <p className={`play-case-now${given ? ' is-given' : ''}`}>
-        {!row ? (
-          'Nothing picked yet. Tap one below to start.'
-        ) : (
-          <>
-            {given ? <span className="play-drill-tag">Shown</span> : <span className="play-drill-tag play-drill-tag--you">Your turn</span>}
-            <strong>{row.label}</strong>
-          </>
-        )}
-      </p>
+      {/* While the stamps are blank the rule is tagged as the last step: it is checked after the stamps, never used to set them. */}
+      <RuleBanner rule={scene.rule} note={row && !given && !locked && count === null ? 'Check this after the stamps' : undefined} />
+      {full && <MethodSteps steps={steps} at={at} label={step.stepsLabel} />}
+      {!row ? (
+        <p className="play-case-now">Nothing picked yet. Tap one below to start.</p>
+      ) : (
+        <TestWorld label={row.label} given={given} item={item === 'egg' ? 'egg' : item} tag={words?.worldTag} note={words?.worldNote} />
+      )}
       <ol className="play-case-list" aria-label="Boxes and their signs">
         {scene.boxes.map((b, i) => {
           const r = rowFor(i);
@@ -292,6 +333,7 @@ export function CaseBoard({ step, picks, wrong, locked, picked, onPickCase, onPi
               changed={step.changed === i}
               flagged={flagged(i)}
               stamp={stampFor(i)}
+              under={picked === null ? null : underFor(i)}
               off={!r}
               onPick={() => pickCase(i)}
             />
@@ -307,6 +349,7 @@ export function CaseBoard({ step, picks, wrong, locked, picked, onPickCase, onPi
               ) : (
                 <>
                   <span className="play-case-big">{count}</span> {count === 1 ? 'sign is' : 'signs are'} True.
+                  {row.needs && <span className="play-case-needs">{w.needs === undefined ? `The rule needs ${row.needs}.` : w.needs ? `${w.needs} ${row.needs}` : row.needs}</span>}
                 </>
               )}
             </p>

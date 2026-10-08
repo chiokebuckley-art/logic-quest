@@ -74,6 +74,17 @@ export function explanationFor(item: Item, given: Answer | null): ExplanationMod
     }
     return { ...base, title: NEUTRAL_TITLE, specific: false, gap: `${item.skill}:${pick ?? 'none'}`, detail: [], simpler: t?.simpler ?? [] };
   }
+  if (item.kind === 'number') {
+    const value = given?.kind === 'number' ? given.value : null;
+    const fb = value !== null ? item.feedback?.[String(value)] : undefined;
+    if (fb) return { ...base, title: fb.headline, specific: true, detail: fb.detail, example: fb.example, simpler: fb.simpler ?? t?.simpler ?? [] };
+    if (value !== null) {
+      const diff = value - item.answer;
+      const near = Math.abs(diff) === 1 ? ` That is off by one: check where the counting starts.` : '';
+      return { ...base, title: `Your answer was ${value}. The rule gives ${item.answer}.`, specific: true, detail: [`Work it from the stated rule, not from the look of the first few.${near}`], simpler: t?.simpler ?? [] };
+    }
+    return { ...base, title: NEUTRAL_TITLE, specific: false, detail: [], simpler: t?.simpler ?? [] };
+  }
   // Other kinds: grade() names what is wrong (cards left out, a broken clue, two people with one value, …).
   // Its first line is the headline; each further line is one place the answer fails.
   const g = given ? grade(item, given) : null;

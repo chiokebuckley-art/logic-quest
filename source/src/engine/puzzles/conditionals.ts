@@ -16,7 +16,7 @@
  */
 import { YES_NO as BOX_MARKS } from '../drill';
 import { syncWhyWrong } from '../teach';
-import type { Choice, ChoiceFeedback, ChooseItem, DrillMark, DrillOption, DrillRow, DrillStep, MultiItem, Rng, Scene, Teach, TeachCase, Truth } from '../types';
+import type { Choice, ChoiceFeedback, ChooseItem, ConfusedQuestion, ContrastPanel, Distinction, DrillMark, DrillOption, DrillRow, DrillStep, Misconception, MultiItem, Rng, Scene, Teach, TeachCase, Truth } from '../types';
 
 // ---------- logic ----------
 
@@ -142,7 +142,10 @@ export interface Skin {
   setting: string;
   /** Extra line under the rule (the vowels, for letter cards). */
   note?: string;
-  /** Line that says the rule is always kept (lessons 2 and 3). */
+  /**
+   * The line that says the rule is always true here (lessons 2 and 3): “Always true here: nobody breaks this rule.” It
+   * names who could break it in this story, so the frame stays on screen next to the rule.
+   */
   kept: string;
   /** Rule parts. `if` follows the word "If"; `then` follows the word "then" (defaults to `if`). */
   parts: Record<Lit, { if: string; then?: string }>;
@@ -173,6 +176,8 @@ export interface Skin {
   cards?: {
     intro: string;
     ask: string;
+    /** The frame line on the rule card in lesson 5: here a break may be there. “Here a kid may have broken the rule. Find out.” */
+    check: string;
     face(l: Lit, sym: Symbols): string;
     /** What a hidden side could be: 'a vowel', '“Dessert”'. */
     back(l: Lit, sym: Symbols): string;
@@ -180,6 +185,8 @@ export interface Skin {
 }
 
 export const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+/** The key line on every P and Q rule card: what the letters stand for, and what “P is true” means. */
+export const PQ_KEY = 'P is the IF part. Q is the THEN part. “P is true” means the IF part happened.';
 /** A fact inside a sentence: "It rained" -> "it rained". Names stay as they are. */
 export const mid = (s: string) => s.replace(/^(It|The|This) /, (m) => m.toLowerCase());
 
@@ -203,8 +210,8 @@ function someone(subj: (n: string) => string, pred: Record<Lit, string>) {
 }
 
 /** Rule-checker cards whose faces are words; a hidden side is named by its face in quotes. */
-function wordCards(intro: string, ask: string, faces: Record<Lit, string>): NonNullable<Skin['cards']> {
-  return { intro, ask, face: (l) => faces[l], back: (l) => `“${faces[l]}”` };
+function wordCards(intro: string, ask: string, faces: Record<Lit, string>, who = 'a kid'): NonNullable<Skin['cards']> {
+  return { intro, ask, check: `Here ${who} may have broken the rule. Find out.`, face: (l) => faces[l], back: (l) => `“${faces[l]}”` };
 }
 
 const dessert = someone((n) => n, { P: 'got dessert', notP: 'did not get dessert', Q: 'ate all the veggies', notQ: 'left some veggies' });
@@ -230,7 +237,7 @@ export const SKINS: Record<SkinId, Skin> = {
     group: 'everyday',
     names: KIDS,
     setting: 'The lunchroom has a rule.',
-    kept: 'Every kid follows this rule.',
+    kept: 'Always true here: nobody breaks this rule.',
     parts: {
       P: same('you get dessert'),
       notP: same('you do not get dessert'),
@@ -261,7 +268,7 @@ export const SKINS: Record<SkinId, Skin> = {
     group: 'everyday',
     names: KIDS,
     setting: 'The school library has a rule.',
-    kept: 'Every kid follows this rule.',
+    kept: 'Always true here: nobody breaks this rule.',
     parts: {
       P: same('you take a book home'),
       notP: same('you do not take a book home'),
@@ -292,7 +299,7 @@ export const SKINS: Record<SkinId, Skin> = {
     group: 'everyday',
     names: KIDS,
     setting: 'Dad has a rule for packing lunches.',
-    kept: 'Dad always follows this rule.',
+    kept: 'Always true here: Dad never breaks this rule.',
     parts: {
       P: { if: 'a lunchbox has a cookie', then: 'it has a cookie' },
       notP: { if: 'a lunchbox has no cookie', then: 'it has no cookie' },
@@ -316,6 +323,7 @@ export const SKINS: Record<SkinId, Skin> = {
       'Each card is one lunchbox. One side shows if it has a cookie inside. The other side shows if the lid has a star sticker.',
       'Which cards must you turn over to check that Dad followed the rule?',
       { P: 'Cookie', notP: 'No cookie', Q: 'Star sticker', notQ: 'No star sticker' },
+      'Dad',
     ),
   },
   umbrella: {
@@ -323,7 +331,7 @@ export const SKINS: Record<SkinId, Skin> = {
     group: 'everyday',
     names: KIDS,
     setting: 'Here is a rule for walking to school.',
-    kept: 'Every kid follows this rule.',
+    kept: 'Always true here: nobody breaks this rule.',
     parts: {
       P: same('you walk in the rain'),
       notP: same('you do not walk in the rain'),
@@ -358,7 +366,7 @@ export const SKINS: Record<SkinId, Skin> = {
     group: 'everyday',
     names: DAYS,
     setting: 'Here is a rule about the grass at the park.',
-    kept: 'This is always true.',
+    kept: 'Always true here: no day breaks this rule.',
     parts: {
       P: same('it rains'),
       notP: same('it does not rain'),
@@ -383,7 +391,7 @@ export const SKINS: Record<SkinId, Skin> = {
     group: 'everyday',
     names: PETS,
     setting: 'Here is a rule about animals.',
-    kept: 'In this story, the rule is always true.',
+    kept: 'Always true here: no animal breaks this rule.',
     parts: {
       P: same('it is a dog'),
       notP: same('it is not a dog'),
@@ -403,7 +411,7 @@ export const SKINS: Record<SkinId, Skin> = {
     group: 'fantasy',
     names: DRAGONS,
     setting: 'Dragon Town has a rule.',
-    kept: 'Every dragon follows this rule.',
+    kept: 'Always true here: no dragon breaks this rule.',
     parts: {
       P: { if: 'a dragon lands in town', then: 'it lands in town' },
       notP: { if: 'a dragon does not land in town', then: 'it does not land in town' },
@@ -427,6 +435,7 @@ export const SKINS: Record<SkinId, Skin> = {
       'Each card is one dragon. One side shows if it landed in town. The other side shows if it paid a gold coin.',
       'Which cards must you turn over to check that no dragon broke the rule?',
       { P: 'Landed in town', notP: 'Did not land', Q: 'Paid a coin', notQ: 'Did not pay' },
+      'a dragon',
     ),
   },
   wizards: {
@@ -434,7 +443,7 @@ export const SKINS: Record<SkinId, Skin> = {
     group: 'fantasy',
     names: WIZARDS,
     setting: 'Wizard school has a rule.',
-    kept: 'Every wizard follows this rule.',
+    kept: 'Always true here: no wizard breaks this rule.',
     parts: {
       P: same('you ride a broom'),
       notP: same('you do not ride a broom'),
@@ -458,6 +467,7 @@ export const SKINS: Record<SkinId, Skin> = {
       'Each card is one wizard. One side shows if the wizard rode a broom. The other side shows if the wizard wore a helmet.',
       'Which cards must you turn over to check that no wizard broke the rule?',
       { P: 'Rode a broom', notP: 'No broom', Q: 'Helmet', notQ: 'No helmet' },
+      'a wizard',
     ),
   },
   potions: {
@@ -465,7 +475,7 @@ export const SKINS: Record<SkinId, Skin> = {
     group: 'fantasy',
     names: WIZARDS,
     setting: 'The magic shop sells green potions.',
-    kept: 'This is always true.',
+    kept: 'Always true here: nobody breaks this rule.',
     parts: {
       P: same('you drink a green potion'),
       notP: same('you do not drink a green potion'),
@@ -491,7 +501,7 @@ export const SKINS: Record<SkinId, Skin> = {
     names: ['this card'],
     setting: 'Every card has a letter on one side and a number on the other.',
     note: 'The vowels are A, E, I, O and U. An odd number is a number that is not even.',
-    kept: 'Every card follows this rule.',
+    kept: 'Always true here: no card breaks this rule.',
     parts: {
       P: { if: 'a card has a vowel', then: 'it has a vowel' },
       notP: { if: 'a card does not have a vowel', then: 'it does not have a vowel' },
@@ -521,6 +531,7 @@ export const SKINS: Record<SkinId, Skin> = {
     cards: {
       intro: 'You can see one side of each card.',
       ask: 'Which cards must you turn over to check that no card breaks the rule?',
+      check: 'Here a card may break the rule. Find out.',
       face: (l, s) => ({ P: s.vowel, notP: s.consonant, Q: s.even, notQ: s.odd })[l],
       back: (l) => ({ P: 'a vowel', notP: 'a letter that is not a vowel', Q: 'an even number', notQ: 'an odd number' })[l],
     },
@@ -530,7 +541,9 @@ export const SKINS: Record<SkinId, Skin> = {
     group: 'abstract',
     names: [''],
     setting: 'P and Q stand for any two sentences.',
-    kept: 'The rule is always true.',
+    // The key line: a letter stands for a part, and “P is true” is that part's truth in a case.
+    note: PQ_KEY,
+    kept: 'Always true here: no case breaks this rule.',
     parts: { P: same('P'), notP: same('not P'), Q: same('Q'), notQ: same('not Q') },
     fact: (l) => ({ P: 'P is true', notP: 'P is false', Q: 'Q is true', notQ: 'Q is false' })[l],
     says: (_n, r) => `P is ${r.p ? 'true' : 'false'} and Q is ${r.q ? 'true' : 'false'}`,
@@ -567,14 +580,38 @@ export function condText(skin: SkinId, c: Cond): string {
 }
 export const ruleText = (skin: SkinId) => condText(skin, RULE);
 
-/** The rule card. kept: add the line that says everyone follows the rule. */
-export function ruleScene(skin: SkinId, kept = false): Scene {
+/**
+ * What a lesson assumes about its rule, said on the rule card so it never has to be held in mind:
+ *  - 'free' (lesson 1): kids can break the rule; no frame line (a break is a real kid);
+ *  - 'kept' (lessons 2 and 3): the rule is always true here, so the case that would break it can't happen;
+ *  - 'compare' (lesson 4): no sentence is taken as true; every case is tested against each sentence;
+ *  - 'check' (lesson 5): a break may be there, and the checker finds out.
+ */
+export type Frame = 'free' | 'kept' | 'compare' | 'check';
+
+/** The lesson 4 frame line. */
+export const COMPARE_LINE = 'Here we only compare sentences. Any case can be tested.';
+
+/** The rule card: the setting, the rule, a note, then the lesson's frame line (true means 'kept'). */
+export function ruleScene(skin: SkinId, frame: Frame | boolean = false): Scene {
+  const f: Frame = frame === true ? 'kept' : frame === false ? 'free' : frame;
   const s = SKINS[skin];
   const lines = [s.setting, ruleText(skin)];
   if (s.note) lines.push(s.note);
-  if (kept) lines.push(s.kept);
+  if (f === 'kept') lines.push(s.kept);
+  if (f === 'compare') lines.push(COMPARE_LINE);
+  if (f === 'check') {
+    if (!s.cards) throw new Error(`ruleScene: ${skin} has no rule checker`);
+    lines.push(s.cards.check);
+  }
   return { kind: 'text', lines };
 }
+
+/**
+ * Can this case happen in the story? Where kids can break the rule (alwaysTrue false), every case can happen, the break
+ * too: it is a real kid. Where the rule is always true, the case that would break it can't happen.
+ */
+export const canHappen = (r: Row, alwaysTrue: boolean) => !alwaysTrue || ruleHolds(r);
 
 /** All four cases of a rule as a grid: ✓ keeps the rule, ✗ breaks it (lesson 1 worked example). */
 export function ruleGrid(skin: SkinId): Scene {
@@ -658,17 +695,21 @@ export const YOURS_WHO = 'Your sentence';
 export const CONTRA_WHO = 'The flip and NOT sentence';
 export const TURN_WHO = 'You must turn it over';
 
-/** Is the IF part true, is the THEN part true, is the rule true (kept) in this case? */
-export const partTruths = (r: Row): Truth[] => [
-  { who: IF_WHO, value: litHolds('P', r) },
-  { who: THEN_WHO, value: litHolds('Q', r) },
+/** On a P and Q case card the parts carry their letters: “The IF part (P): true”. */
+export const IF_WHO_PQ = 'The IF part (P)';
+export const THEN_WHO_PQ = 'The THEN part (Q)';
+
+/** Is the IF part true, is the THEN part true, is the rule true (kept) in this case? P and Q cards name the letters too. */
+export const partTruths = (r: Row, skin?: SkinId): Truth[] => [
+  { who: skin === 'pq' ? IF_WHO_PQ : IF_WHO, value: litHolds('P', r) },
+  { who: skin === 'pq' ? THEN_WHO_PQ : THEN_WHO, value: litHolds('Q', r) },
   { who: RULE_WHO, value: ruleHolds(r) },
 ];
 
 /** A case read back from its IF and THEN lines, or null when it has none. */
 export function rowOfCase(c: TeachCase | undefined): Row | null {
-  const p = c?.truths?.find((t) => t.who === IF_WHO)?.value;
-  const q = c?.truths?.find((t) => t.who === THEN_WHO)?.value;
+  const p = c?.truths?.find((t) => t.who === IF_WHO || t.who === IF_WHO_PQ)?.value;
+  const q = c?.truths?.find((t) => t.who === THEN_WHO || t.who === THEN_WHO_PQ)?.value;
   return p === undefined || q === undefined ? null : { p, q };
 }
 
@@ -684,6 +725,9 @@ const FLIP_TERM = { word: 'To flip a sentence', meaning: 'to swap its IF part an
 const NOT_BOTH_TERM = { word: 'To put NOT in both parts', meaning: 'to add “not” to the IF part and to the THEN part.' };
 const BREAKS_SENTENCE_TERM = { word: 'A case breaks a sentence', meaning: 'in that case, the sentence’s IF part happens, but its THEN part does not.' };
 const NEVER_BROKEN = 'Here, the rule is never broken.';
+/** Lessons 2 and 3: a wrong answer that keeps the case that would break the rule hears the always-true line. */
+const CANT_HAPPEN_HERE = 'Here the rule is always true, so that case can’t happen.';
+const crossedOut = (skin: Skin) => `${cap(skin.kase.TF)} would break the rule. ${CANT_HAPPEN_HERE}`;
 const ONLY_WAY = 'Only the IF part without the THEN part breaks the rule.';
 const ASK_L1 = 'Ask: “Did the IF part happen? If it did, did the THEN part happen?”';
 const ASK_CARD = 'Ask: “What could be on the back? Could it break the rule?”';
@@ -757,6 +801,11 @@ export interface CondMade {
 }
 
 const pickName = (rng: Rng, skin: SkinId) => rng.pick(SKINS[skin].names);
+/** Tags a question carries for a lesson's pass rule (LessonPass.include): 'pq' on a P and Q question. */
+const skinTags = (skin: SkinId): string[] => (skin === 'pq' ? ['pq'] : []);
+/** A P and Q question in lesson 1 or 4: “I’m confused” about the letters, and its board to think on (never checked). */
+const pqHelp = (skin: SkinId, scratch: () => DrillStep, label: string) =>
+  skin === 'pq' ? { confused: pqConfused(), scratch: scratch(), scratchLabel: label } : {};
 const sentence = (s: string) => `${s}.`;
 
 const YES_NO: Choice[] = [
@@ -810,7 +859,7 @@ function l1Teach(skin: Skin, skinId: SkinId, cases: { says: string; row: Row; as
     casesTitle: 'When is the rule kept, and when is it broken?',
     cases: [...cases]
       .sort((a, b) => ROWS.findIndex((r) => rowKey(r) === rowKey(a.row)) - ROWS.findIndex((r) => rowKey(r) === rowKey(b.row)))
-      .map((c) => ({ label: sentence(c.says), truths: partTruths(c.row), note: `${rowNote(c.row)}${c.asked ? ' This is the case in the question.' : ''}` })),
+      .map((c) => ({ label: sentence(c.says), truths: partTruths(c.row, skinId), note: `${rowNote(c.row)}${c.asked ? ' This is the case in the question.' : ''}` })),
     remember: ['Only IF without THEN breaks the rule.', ASK_L1],
     simpler: rowSteps(skin, tf.says, tf.row),
   };
@@ -835,7 +884,7 @@ export function whoBrokeItem(rng: Rng, opts: { skin: SkinId }): CondMade {
     feedback[rowId(c.row)] = {
       headline: KEPT_HEAD.who[k],
       detail: [KEPT_WHY[k](skin), ONLY_WAY],
-      example: { label: sentence(l1.says(c)), truths: partTruths(c.row), note: rowNote(c.row) },
+      example: { label: sentence(l1.says(c)), truths: partTruths(c.row, opts.skin), note: rowNote(c.row) },
       simpler: rowSteps(skin, l1.says(c), c.row),
     };
   }
@@ -850,8 +899,10 @@ export function whoBrokeItem(rng: Rng, opts: { skin: SkinId }): CondMade {
     explain: `${sentence(l1.says(broken[0]))} ${IF_ONLY_WAY}`,
     feedback,
     hint: 'Here is one case, checked for you. Check the others the same way.',
-    hintCase: { label: sentence(l1.says(shown)), truths: partTruths(shown.row), note: rowNote(shown.row) },
+    hintCase: { label: sentence(l1.says(shown)), truths: partTruths(shown.row, opts.skin), note: rowNote(shown.row) },
     teach: l1Teach(skin, opts.skin, cases.map((c) => ({ says: l1.says(c), row: c.row }))),
+    tags: skinTags(opts.skin),
+    ...pqHelp(opts.skin, pqBoxScratch, 'the four boxes'),
   };
   syncWhyWrong(item);
   return { tag: 'who-broke', item, meta: { skin: opts.skin, name: '', cases: Object.fromEntries(cases.map((c, i) => [choices[i].id, c.row])), sym } };
@@ -868,7 +919,7 @@ export function didBreakItem(rng: Rng, opts: { skin: SkinId; row?: Row }): CondM
   const c: Case = { name, row, sym };
   const broke = !ruleHolds(row);
   const says = l1.says(c);
-  const example: TeachCase = { label: sentence(says), truths: partTruths(row), note: rowNote(row) };
+  const example: TeachCase = { label: sentence(says), truths: partTruths(row, opts.skin), note: rowNote(row) };
   const fb: ChoiceFeedback = broke
     ? { headline: MISSED_BREAK_HEAD, detail: [sentence(says), 'The IF part happened, so the rule says the THEN part must happen too. It did not.', 'That is the one way to break the rule.'], example }
     : { headline: KEPT_HEAD.did[rowKey(row) as KeptKey], detail: [sentence(says), KEPT_WHY[rowKey(row) as KeptKey](skin), ONLY_WAY], example };
@@ -893,8 +944,10 @@ export function didBreakItem(rng: Rng, opts: { skin: SkinId; row?: Row }): CondM
     explain: caseReason(skin, row),
     feedback: { [broke ? 'no' : 'yes']: fb },
     hint: 'Here is a case like this one, checked for you. Check this one the same way.',
-    hintCase: { label: sentence(near.says), truths: partTruths(near.row), note: rowNote(near.row) },
+    hintCase: { label: sentence(near.says), truths: partTruths(near.row, opts.skin), note: rowNote(near.row) },
     teach: l1Teach(skin, opts.skin, cases),
+    tags: skinTags(opts.skin),
+    ...pqHelp(opts.skin, pqBoxScratch, 'the four boxes'),
   };
   syncWhyWrong(item);
   if (!row.p && !row.q) item.conflict = true;
@@ -942,7 +995,7 @@ export function turnItem(rng: Rng, opts: { skin: SkinId; fact: 'P' | 'Q'; target
   // A case where the fact is true, with the sentence's truth beside the rule's.
   const kase = (r: Row): TeachCase => ({
     label: sentence(skin.says(name, r)),
-    truths: [...partTruths(r), { who: SENTENCE_WHO, value: litHolds(target, r) }],
+    truths: [...partTruths(r, opts.skin), { who: SENTENCE_WHO, value: litHolds(target, r) }],
     note: possibleNote(r, fact === 'Q' && !r.p ? other : ''),
   });
   const said = (ch: 'must' | 'never') => `Your answer says ${quoted(target)} is ${ch === 'must' ? 'true' : 'false'} for sure.`;
@@ -968,7 +1021,7 @@ export function turnItem(rng: Rng, opts: { skin: SkinId; fact: 'P' | 'Q'; target
     explain = `${factLine.replace(' of the rule.', ',')} so the THEN part must be true too. ${sentence(f(got))}${status === 'never' ? ` So ${sure}.` : ''}`;
     feedback.maybe = {
       headline: '“Can’t tell” misses that the IF part happened.',
-      detail: [factLine, `The rule says the THEN part must happen too. So ${mid(f(got))}.`, target === got ? 'That is just what the sentence says. So it is true for sure.' : `So ${sure}.`],
+      detail: [factLine, crossedOut(skin), `The rule says the THEN part must happen too. So ${mid(f(got))}.`, target === got ? 'That is just what the sentence says. So it is true for sure.' : `So ${sure}.`],
       example: kase(tf),
     };
     const wrong = status === 'must' ? 'never' : 'must';
@@ -1001,6 +1054,10 @@ export function turnItem(rng: Rng, opts: { skin: SkinId; fact: 'P' | 'Q'; target
           ? [sentence(f('P')), 'That is the IF part. The rule says the THEN part must happen too.', `So ${mid(f('Q'))}.`]
           : [`${sentence(f('Q'))} That is the THEN part.`, `${cap(skin.mayP(name))}.`, `But ${other}.`, 'The rule allows each of these. So you can’t tell.'],
     },
+    tags: skinTags(opts.skin),
+    confused: keptConfused(opts.skin, opts.skin === 'pq'),
+    scratch: factScratch(opts.skin, name, fact, [target]),
+    scratchLabel: 'the case board',
   };
   syncWhyWrong(item);
   if (fact === 'Q') item.conflict = true;
@@ -1064,7 +1121,7 @@ export function moveItem(rng: Rng, opts: { skin: SkinId; move: Move }): CondMade
   }
   const kase = (r: Row, pick?: Lit): TeachCase => ({
     label: sentence(skin.says(name, r)),
-    truths: [...partTruths(r), ...(pick ? [{ who: ANSWER_WHO, value: litHolds(pick, r) }] : [])],
+    truths: [...partTruths(r, opts.skin), ...(pick ? [{ who: ANSWER_WHO, value: litHolds(pick, r) }] : [])],
     note: possibleNote(r, why(r)),
   });
   const feedback: Record<string, ChoiceFeedback> = {};
@@ -1074,8 +1131,8 @@ export function moveItem(rng: Rng, opts: { skin: SkinId; move: Move }): CondMade
       // Something follows: the one other case that fits the fact breaks the rule.
       feedback[NOTHING] =
         fact === 'P'
-          ? { headline: '“Nothing follows for sure” misses that the IF part happened.', detail: [factLine, 'When the IF part happens, the THEN part must happen too.', `So ${mid(f(got!))}. That follows for sure.`], example: kase(tf) }
-          : { headline: '“Nothing follows for sure” misses that the IF part can’t have happened.', detail: [factLine, `Imagine ${mid(f('P'))}. That would be ${skin.kase.TF}, and that breaks the rule.`, `So ${mid(f(got!))}. That follows for sure.`], example: kase(tf) };
+          ? { headline: '“Nothing follows for sure” misses that the IF part happened.', detail: [factLine, crossedOut(skin), 'When the IF part happens, the THEN part must happen too.', `So ${mid(f(got!))}. That follows for sure.`], example: kase(tf) }
+          : { headline: '“Nothing follows for sure” misses that the IF part can’t have happened.', detail: [factLine, `Imagine ${mid(f('P'))}. That would be ${skin.kase.TF}, and that breaks the rule.`, CANT_HAPPEN_HERE, `So ${mid(f(got!))}. That follows for sure.`], example: kase(tf) };
       continue;
     }
     const lit = lits[c.id];
@@ -1123,6 +1180,10 @@ export function moveItem(rng: Rng, opts: { skin: SkinId; move: Move }): CondMade
       remember: [MOVE_REMEMBER[opts.move], 'Ask: “Which cases fit the fact and keep the rule?”'],
       simpler,
     },
+    tags: skinTags(opts.skin),
+    confused: keptConfused(opts.skin, opts.skin === 'pq'),
+    scratch: factScratch(opts.skin, name, fact, [pos]),
+    scratchLabel: 'the case board',
   };
   syncWhyWrong(item);
   if (!got) item.conflict = true;
@@ -1265,7 +1326,7 @@ export function samePickItem(rng: Rng, opts: { skin: SkinId; extra?: boolean }):
   const item: ChooseCore = {
     kind: 'choose',
     prompt: 'Which sentence means the same as the rule? Two sentences mean the same when the same cases break them.',
-    scene: ruleScene(opts.skin),
+    scene: ruleScene(opts.skin, 'compare'),
     choices,
     answer: condId(right[0]),
     explain: matches(skin, right[0]).replace(/^It /, 'The right one '),
@@ -1278,6 +1339,8 @@ export function samePickItem(rng: Rng, opts: { skin: SkinId; extra?: boolean }):
     },
     // The cases show the rule and flip and NOT side by side; the simpler example is the flip-only trap.
     teach: sameTeach(opts.skin, CONTRA, CONTRA_WHO, 'the flip and NOT sentence', 'Which cases break the rule? Which break the flip and NOT sentence?', CONVERSE, true),
+    tags: skinTags(opts.skin),
+    ...pqHelp(opts.skin, () => pqMeaningScratch(['contra', 'converse', 'inverse']), 'the case grid'),
   };
   syncWhyWrong(item);
   return { tag: 'same-pick', item, meta: { skin: opts.skin, name: '', conds: Object.fromEntries(order.map((c) => [condId(c), c])) } };
@@ -1321,7 +1384,7 @@ export function sameYesNoItem(rng: Rng, opts: { skin: SkinId; rewrite?: Rewrite 
   const item: ChooseCore = {
     kind: 'choose',
     prompt: `Two sentences mean the same when the same cases break them. Does this sentence mean the same as the rule? “${condText(opts.skin, c)}”`,
-    scene: ruleScene(opts.skin),
+    scene: ruleScene(opts.skin, 'compare'),
     choices: YES_NO,
     answer: isSame ? 'yes' : 'no',
     explain,
@@ -1334,6 +1397,8 @@ export function sameYesNoItem(rng: Rng, opts: { skin: SkinId; rewrite?: Rewrite 
       note: 'This case keeps the rule and this sentence. Now check the other three cases.',
     },
     teach: sameTeach(opts.skin, c, THIS_WHO, 'this sentence', 'Which cases break the rule? Which break this sentence?', c),
+    tags: skinTags(opts.skin),
+    ...pqHelp(opts.skin, () => pqMeaningScratch([key]), 'the case grid'),
   };
   syncWhyWrong(item);
   if (!isSame) item.conflict = true;
@@ -1450,7 +1515,7 @@ export function checkerItem(rng: Rng, opts: { skin: SkinId }): CondMade {
   const item: CondCore = {
     kind: 'multi',
     prompt: `${cards.intro} ${cards.ask} Choose only the cards you need.`,
-    scene: ruleScene(opts.skin),
+    scene: ruleScene(opts.skin, 'check'),
     choices,
     answer: turn.map((l) => CARD_IDS[l]),
     explain: `Only the cards that show ${q(a)} and ${q(b)} could hide a broken rule. The card that shows ${q(trap)} is the trap. Even with ${cards.back('P', sym)} on the back, the rule is kept.`,
@@ -1509,7 +1574,7 @@ export function cardItem(rng: Rng, opts: { skin: SkinId; face?: Lit }): CondMade
   const item: ChooseCore = {
     kind: 'choose',
     prompt: `${cards.intro} One card shows ${endQuote(shown)} Must you turn it over to check the rule?`,
-    scene: ruleScene(opts.skin),
+    scene: ruleScene(opts.skin, 'check'),
     choices: YES_NO,
     answer: turn ? 'yes' : 'no',
     explain,
@@ -1592,10 +1657,11 @@ export const HAT_BOXES: BoxWords = {
 /**
  * The pet rule's four boxes (lesson 2: marked by hand before the rule is turned around). The pet skin has no
  * rule-checker cards, so its row and column names are written here. The rule card, the cases and every box's mark
- * come from the skin and fourBoxDrill, as for the other boards.
+ * come from the skin and fourBoxDrill, as for the other boards. Lesson 2's rules are always true, so its rule card
+ * says so (“Always true here: …”), on this board and on the card it belongs to.
  */
 export const PET_BOXES: BoxWords = (() => {
-  const scene = ruleScene('pets');
+  const scene = ruleScene('pets', 'kept');
   return {
     lines: scene.kind === 'text' ? [...scene.lines] : [],
     face: { P: 'Dog', notP: 'Not a dog', Q: 'Four legs', notQ: 'Not four legs' },
@@ -1646,6 +1712,104 @@ export function fourBoxDrill(w: BoxWords, t: BoardText): DrillStep {
   };
 }
 
+/**
+ * The four boxes with letters for the parts (lesson 1, after “Letters for the parts”): rows “P is true” and “P is false”,
+ * columns “Q is true” and “Q is false”. The rule card carries the key line (PQ_KEY).
+ */
+export const PQ_BOXES: BoxWords = (() => {
+  const scene = ruleScene('pq');
+  const s = SKINS.pq;
+  return {
+    lines: scene.kind === 'text' ? [...scene.lines] : [],
+    face: { P: s.fact('P', ''), notP: s.fact('notP', ''), Q: s.fact('Q', ''), notQ: s.fact('notQ', '') },
+    kase: s.kase,
+    onlyAbout: s.onlyAbout,
+  };
+})();
+
+/** A P and Q item's thinking board: the four boxes with letters, to mark if it helps (never checked). */
+export function pqBoxScratch(): DrillStep {
+  const board = fourBoxDrill(PQ_BOXES, {
+    id: 'scratch',
+    title: 'Your four boxes',
+    body: [`The rule: “${ruleText('pq')}” ${PQ_KEY}`, 'Mark the boxes if it helps. Nothing here is checked.'],
+  });
+  return { ...board, done: '', words: { closing: LETTERS_CLOSING } };
+}
+
+/** Can this box's case happen, when the rule is always true? Said when the learner marks it the other way. */
+function canBoxWhy(w: BoxWords, r: Row): string {
+  const is = `This box is for ${w.kase[rowKey(r)]}.`;
+  const tail = canHappen(r, true) ? 'It gets a check, not a cross.' : 'It gets a cross, not a check.';
+  if (!ruleHolds(r)) return `${is} That case would break the rule. Here the rule is always true, so it can’t happen. ${tail}`;
+  if (r.p) return `${is} The IF part and the THEN part both happened. That keeps the rule, so it can happen. ${tail}`;
+  return `${is} The IF part did not happen. ${w.onlyAbout} So this case keeps the rule, and it can happen. ${tail}`;
+}
+
+/**
+ * Lesson 2, right after the contrast card: the same four boxes, now marked can happen (a check) or can’t happen (a
+ * cross), with the rule always true here. Only the box that would break the rule can’t happen. Every mark comes from
+ * canHappen(), and the board names the distinction it exercises (BROKEN_VS_CANT).
+ */
+export function canBoxDrill(skin: SkinId, w: BoxWords, t: BoardText): DrillStep {
+  const cols: Lit[] = ['Q', 'notQ'];
+  const cell = (rl: Lit, cl: Lit) => ROWS.find((x) => litHolds(rl, x) && litHolds(cl, x))!;
+  const rows: DrillRow[] = (['P', 'notP'] as const).map((rl) => ({
+    id: rl,
+    label: w.face[rl],
+    marks: cols.map((cl): DrillMark => {
+      const r = cell(rl, cl);
+      const can = canHappen(r, true);
+      return { id: `${rl}-${cl}`, label: w.face[cl], options: yesNo(), answer: ynId(can), why: { [ynId(!can)]: canBoxWhy(w, r) } };
+    }),
+  }));
+  const cant = ROWS.filter((r) => !canHappen(r, true));
+  if (cant.length !== 1) throw new Error('canBoxDrill: exactly one case can’t happen');
+  const mixes = (['P', 'notP'] as const).flatMap((rl) => cols.map((cl) => {
+    const r = cell(rl, cl);
+    return canMix(w.onlyAbout, `${rl}-${cl}`, r, `Think of ${w.kase[rowKey(r)]}.`);
+  }));
+  return {
+    id: t.id,
+    title: t.title,
+    body: t.body,
+    scene: boxScene(w),
+    ...twinOf(t),
+    rows,
+    columns: cols.map((c) => w.face[c]),
+    caption: 'A check: this case can happen here. A cross: it can’t happen here.',
+    done: `Right. Only ${w.kase[rowKey(cant[0])]} can’t happen here. It would break the rule, and here the rule is always true. The other three cases can happen.`,
+    distinction: BROKEN_VS_CANT.id,
+    misconceptions: breakFirst(mixes),
+    confused: keptConfused(skin),
+    words: { closing: KEPT_CLOSING },
+  };
+}
+
+/**
+ * Lesson 2's four boxes have the always-true line on their rule card. Two mix-ups that line can bring: the break box
+ * marked as kept (“nobody breaks it, so every box keeps it”), and the cat's box marked as a break (the rule read turned
+ * around).
+ */
+export function boxMixes(w: BoxWords): Misconception[] {
+  const tf = rowAt(true, false);
+  const ft = rowAt(false, true);
+  return [
+    {
+      id: 'break-box-kept',
+      when: 'picks',
+      picks: { 'P-notQ': ynId(!ruleHolds(tf)) },
+      text: `You may be treating “this box would break the rule” and “someone here broke the rule” as the same thing. They are two different things: here that case never happens, but the box still breaks the rule. ${cap(w.kase[rowKey(tf)])} would have the IF part without the THEN part. Mark each box from its two parts.`,
+    },
+    {
+      id: 'turned-around',
+      when: 'picks',
+      picks: { 'notP-Q': ynId(!ruleHolds(ft)) },
+      text: `You may be treating the rule and the rule turned around as the same thing. They are two different things: ${lowerFirst(w.onlyAbout)} Think of ${w.kase[rowKey(ft)]}. It keeps the rule, even though it breaks the rule turned around.`,
+    },
+  ];
+}
+
 // ----- lessons 2 and 3: the cases that fit a fact -----
 
 /** One fact and the cases that fit it, on a lesson 2 or lesson 3 board. */
@@ -1681,6 +1845,12 @@ function sayWhy(skin: Skin, name: string, t: Lit, r: Row): string {
   return `In this case, ${mid(skin.fact(there, name))}. So “${skin.fact(t, name)}” is ${v ? 'true' : 'false'} here, not ${v ? 'false' : 'true'}.`;
 }
 
+/** The mark that asks whether a case can happen, in a story where the rule is always true. */
+export const CAN_LABEL = 'Can this case happen here?';
+
+/** The need over each case on a lesson 2 or 3 board: the always-true line, and what it means for a case. */
+export const keptNeeds = (skin: SkinId) => `${SKINS[skin].kept} So a case that would break it can’t happen.`;
+
 /** One case that fits the fact, as a row: can it happen (does it keep the rule), then each sentence true or false. */
 function factCaseRow(skinId: SkinId, f: FactCases, r: Row, given: boolean): DrillRow {
   const skin = SKINS[skinId];
@@ -1689,13 +1859,13 @@ function factCaseRow(skinId: SkinId, f: FactCases, r: Row, given: boolean): Dril
   const g = given ? { given: true } : {};
   const kept = ruleHolds(r);
   const marks: DrillMark[] = [
-    { id: `${id}-can`, label: 'Can this case happen?', options: yesNo(), answer: ynId(kept), ...g, why: { [ynId(!kept)]: canWhy(skin, f.name, r) } },
+    { id: `${id}-can`, label: CAN_LABEL, options: yesNo(), answer: ynId(kept), ...g, why: { [ynId(!kept)]: canWhy(skin, f.name, r) } },
     ...f.say.map((t): DrillMark => {
       const v = litHolds(t, r);
       return { id: `${id}-${t}`, label: `“${sentence(skin.fact(t, f.name))}”`, options: TRUE_FALSE, answer: tfId(v), ...g, why: { [tfId(!v)]: sayWhy(skin, f.name, t, r) } };
     }),
   ];
-  return { id, label: sentence(skin.says(f.name, r)), marks, note: possibleNote(r, wayOf(skin, f.name, r)) };
+  return { id, label: sentence(skin.says(f.name, r)), marks, note: possibleNote(r, wayOf(skin, f.name, r)), needs: keptNeeds(skinId) };
 }
 
 /** What the cases settle: each sentence for sure or not (lesson 2), or what follows for sure (lesson 3). */
@@ -1720,22 +1890,65 @@ function factConclusion(skin: Skin, f: FactCases, how: 'status' | 'follows'): st
 
 /**
  * Lessons 2 and 3: a rule that is always true, a fact, and the two cases that fit it. Each case is marked: can it
- * happen, and is each sentence true in it. One case is shown (the worked case); the learner marks the other one.
- * No final answer on the board: the quiz asks it, and the board's last words say what the marks settle.
+ * happen here, and is each sentence true in it. One case is shown (the worked case); the learner marks the other one.
+ * No final answer on the board: the quiz asks it, and the board's last words say what the marks settle. The
+ * always-true line sits over each case (DrillRow.needs, on its own), the mix-ups a wrong “can it happen?” mark shows
+ * are named (canMix), and “I’m confused” asks the two broken-vs-can't-happen questions.
  */
-export function factCasesDrill(skinId: SkinId, t: BoardText, blocks: FactCases[], conclude: 'status' | 'follows'): DrillStep {
+export function factCasesDrill(skinId: SkinId, t: BoardText, blocks: FactCases[], conclude: 'status' | 'follows', o: { scaffold?: 'full' | 'light' } = {}): DrillStep {
   const skin = SKINS[skinId];
   for (const f of blocks) for (const s of f.say) if (partOf(s) === partOf(f.fact)) throw new Error('factCasesDrill: a sentence must be about the other part');
   const rows = blocks.flatMap((f) => [...f.shown.map((r) => factCaseRow(skinId, f, r, true)), ...f.mark.map((r) => factCaseRow(skinId, f, r, false))]);
+  const mixes = breakFirst(blocks.flatMap((f) => f.mark.map((r) => canMix(skin.onlyAbout, `${f.name}-${rowKey(r)}-can`, r, sentence(skin.says(f.name, r))))));
   return {
     id: t.id,
     title: t.title,
     body: t.body,
-    scene: ruleScene(skinId, true),
+    scene: ruleScene(skinId, 'kept'),
     ...twinOf(t),
     rows,
     done: `Right. ${blocks.map((f) => factConclusion(skin, f, conclude)).join(' ')}`,
+    ...(o.scaffold ? { scaffold: o.scaffold } : {}),
+    distinction: BROKEN_VS_CANT.id,
+    misconceptions: mixes,
+    confused: keptConfused(skinId, skinId === 'pq'),
+    words: { needs: '', closing: KEPT_CLOSING },
   };
+}
+
+/** The cases that fit a fact, in table order. */
+const casesOf = (fact: Lit) => ROWS.filter((r) => litHolds(fact, r));
+
+/**
+ * Lessons 2 and 3, the first quiz (Item.workFirst): the question's own two cases, both the learner's, on the board the
+ * lesson taught, with the full scaffold. Its last words never give the answer: the question asks it next.
+ */
+export function factWork(m: CondMade, id: string): DrillStep {
+  const { skin, name, fact } = m.meta;
+  if (!fact) throw new Error('factWork: a lesson 2 or 3 item');
+  const s = SKINS[skin];
+  const say = m.meta.target ? [m.meta.target] : [otherPart(fact)[0]];
+  const board = factCasesDrill(
+    skin,
+    { id, title: 'Mark the cases first', body: [`${sentence(s.fact(fact, name))} ${FACT_LINE[fact]} Two cases fit it.`, 'Mark each case. Can it happen here? Is the sentence true in it?'] },
+    [{ name, fact, say, shown: [], mark: casesOf(fact) }],
+    m.meta.target ? 'status' : 'follows',
+    { scaffold: 'full' },
+  );
+  return { ...board, done: 'Every case is marked. Now answer the question.' };
+}
+
+/** A lesson 2 or 3 question's thinking board: its two cases, to mark if it helps (never checked). */
+function factScratch(skin: SkinId, name: string, fact: Lit, say: Lit[]): DrillStep {
+  const s = SKINS[skin];
+  const board = factCasesDrill(
+    skin,
+    { id: 'scratch', title: 'Your case board', body: [`The rule: “${ruleText(skin)}” ${s.kept}`, ...(skin === 'pq' ? [PQ_KEY] : []), `${sentence(s.fact(fact, name))} Mark the cases that fit it, if it helps. Nothing here is checked.`] },
+    [{ name, fact, say, shown: [], mark: casesOf(fact) }],
+    'status',
+    { scaffold: 'full' },
+  );
+  return { ...board, done: '' };
 }
 
 // ----- lesson 4: the same cases break them -----
@@ -1803,7 +2016,7 @@ export function meaningDrill(skinId: SkinId, t: BoardText, rewrites: Rewrite[]):
     id: t.id,
     title: t.title,
     body: t.body,
-    scene: ruleScene(skinId),
+    scene: ruleScene(skinId, 'compare'),
     ...twinOf(t),
     rows,
     columns: [label('rule'), ...rewrites.map(label)],
@@ -1863,9 +2076,184 @@ export function cardDrill(skinId: SkinId, t: BoardText, shown: Lit[], mark: Lit[
     id: t.id,
     title: t.title,
     body: t.body,
-    scene: ruleScene(skinId),
+    scene: ruleScene(skinId, 'check'),
     ...twinOf(t),
     rows: [...shown.map((l) => row(l, true)), ...mark.map((l) => row(l, false))],
     done: done.join(' '),
   };
+}
+
+// ---------- the distinctions Stop 6 rests on ----------
+//
+// Lesson 1's rules can be broken: a kid who got dessert and left some veggies is a real case, and broke the rule.
+// Lessons 2 and 3 use rules that are always true here: the case that would break the rule can't happen, so it is
+// crossed out. Those are two frames for one if–then rule (BROKEN_VS_CANT), and the rule card says which one holds.
+// P and Q are letters for the two parts, and “P is true” means the IF part happened (LETTER_VS_TRUTH). Every truth
+// below comes from litHolds(), ruleHolds() and canHappen(), never written by hand.
+
+/** A rule kids can break vs a rule that is always true here. Taught in lesson 2 (brokenContrast, canBoxDrill). */
+export const BROKEN_VS_CANT: Distinction = {
+  id: 'broken-vs-cant-happen',
+  a: 'A rule kids can break: a case can break it, and that kid broke the rule (Lesson 1).',
+  b: 'A rule that is always true here: the case that would break it can’t happen.',
+};
+
+/** A letter that stands for a part vs whether that part is true in a case. Taught in lesson 1 (lettersContrast, PQ_BOXES). */
+export const LETTER_VS_TRUTH: Distinction = {
+  id: 'letter-vs-truth',
+  a: 'A letter that stands for a part of the rule: P is the IF part, Q is the THEN part.',
+  b: 'Whether that part is true in a case: “P is true” means the IF part happened.',
+};
+
+/** The last line of “I’m confused” on a lesson 2 or 3 board or question. */
+export const KEPT_CLOSING = 'Those two ideas are apart now. Read the “Always true here” line. Cross out the case that would break the rule, and use the cases left.';
+/** The last line of “I’m confused” on a P and Q board or question. */
+export const LETTERS_CLOSING = 'Those two ideas are apart now. P stands for the IF part, and Q stands for the THEN part. “P is true” means the IF part happened.';
+
+const lowerFirst = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
+/** An option of an “I’m confused” question, marked right only when it is. */
+const opt = (label: string, right = false) => (right ? { label, right: true } : { label });
+
+/**
+ * The mix-up a wrong “can it happen here?” mark shows, for one case (a 'picks' pattern on that mark). `says` names the
+ * case in the board's words. The case that would break the rule marked as able to happen: the lesson 1 frame carried
+ * into a rule that is always true. A case without the IF part marked as unable to happen: “no IF part” read as “can't
+ * happen”. The case with the IF part and the THEN part marked so: one case taken as the only one.
+ */
+export function canMix(onlyAbout: string, mark: string, r: Row, says: string): Misconception {
+  if (!ruleHolds(r)) {
+    return {
+      id: `${mark}-break-as-real`,
+      when: 'picks',
+      picks: { [mark]: ynId(!canHappen(r, true)) },
+      text: `You may be treating “this case breaks the rule” and “this case can happen” as the same thing. They are two different things: in Lesson 1 a break was a real case, but here the rule is always true. ${says} That case would break the rule, so it can’t happen: cross it out.`,
+    };
+  }
+  if (!r.p) {
+    return {
+      id: `${mark}-no-if`,
+      when: 'picks',
+      picks: { [mark]: ynId(!canHappen(r, true)) },
+      text: `You may be treating “the IF part did not happen” and “this case can’t happen” as the same thing. They are two different things: ${lowerFirst(onlyAbout)} ${says} That keeps the rule, so it can happen here.`,
+    };
+  }
+  return {
+    id: `${mark}-only-one`,
+    when: 'picks',
+    picks: { [mark]: ynId(!canHappen(r, true)) },
+    text: `You may be treating “one case can happen” and “only that case can happen” as the same thing. They are two different things: every case that keeps the rule can happen here. ${says} The IF part and the THEN part both happened, so it can happen too.`,
+  };
+}
+
+/** The break taken as a real case is checked first: it is the mix-up these boards exist for. The rest keep board order. */
+export const breakFirst = (ms: Misconception[]) => [...ms.filter((m) => m.id.endsWith('-break-as-real')), ...ms.filter((m) => !m.id.endsWith('-break-as-real'))];
+
+/**
+ * “I’m confused” on a lesson 2 or 3 board or question: can the case that would break an always-true rule happen (asked
+ * in another story, so it never gives this board's mark), and was Ben a real case in lesson 1. With letters, one more
+ * question: does “P is true” mean the IF part happened.
+ */
+export function keptConfused(skin: SkinId, letters = false): ConfusedQuestion[] {
+  const other: SkinId = skin === 'dessert' ? 'pets' : 'dessert';
+  const tf = rowAt(true, false);
+  const here = canHappen(tf, true);
+  const there = canHappen(tf, false);
+  const qs: ConfusedQuestion[] = [
+    {
+      q: `Say this rule is always true: “${ruleText(other)}” Can there be ${SKINS[other].kase.TF}?`,
+      options: [opt('Yes, that case can happen', here), opt('No, it can’t happen', !here), opt('Not sure')],
+      teach: 'No. That case would break the rule. When a rule is always true, no case breaks it. So that case can’t happen: cross it out.',
+    },
+    {
+      q: `In Lesson 1, ${SKINS.dessert.says('Ben', tf)}. Was Ben a real case there?`,
+      options: [opt('Yes', there), opt('No', !there), opt('Not sure')],
+      teach: 'Yes. Kids could break the lunchroom rule, and Ben broke it. Here the rule card says “Always true here.” Then the case that would break the rule can’t happen.',
+    },
+  ];
+  return letters ? [...qs, pqConfused()[1]] : qs;
+}
+
+/** “I’m confused” on a P and Q board or question: which letter is the IF part, and what “P is true” means. */
+export function pqConfused(): ConfusedQuestion[] {
+  const s = SKINS.pq;
+  const ifPart = s.parts.P.if;
+  const thenPart = s.parts.Q.then ?? s.parts.Q.if;
+  const happened = rowAt(true, true).p;
+  return [
+    {
+      q: `In “${condText('pq', RULE).replace(/\.$/, '')},” which is the IF part?`,
+      options: [opt(ifPart, true), opt(thenPart), opt('Not sure')],
+      teach: `${ifPart} comes right after “if,” so ${ifPart} is the IF part. ${thenPart} comes right after “then,” so ${thenPart} is the THEN part.`,
+    },
+    {
+      q: `${s.fact('P', '')}. Did the IF part happen?`,
+      options: [opt('Yes', happened), opt('No', !happened), opt('Not sure')],
+      teach: 'Yes. P stands for a whole sentence: the IF part. “P is true” means that sentence is true here. So the IF part happened.',
+    },
+  ];
+}
+
+const happenedWord = (v: boolean) => (v ? 'happened' : 'did not happen');
+
+/**
+ * Letters for the parts (lesson 1): the same case told twice, in the lunchroom's words and with P and Q. In each, the
+ * IF part happened and the THEN part did not, so the rule is broken. The truth did not change; only the words did.
+ */
+export function lettersContrast(): Extract<Scene, { kind: 'contrast' }> {
+  const r = rowAt(true, false);
+  const d = SKINS.dessert;
+  const q = SKINS.pq;
+  const p = litHolds('P', r);
+  const t = litHolds('Q', r);
+  const verdict = ruleHolds(r) ? 'This case keeps the rule.' : 'This case breaks the rule.';
+  const panel = (s: Skin, name: string, says: string): ContrastPanel => ({
+    world: `${s.says(name, r)}.`,
+    who: 'The IF part',
+    says,
+    truth: p,
+    because: `${s.fact(p ? 'P' : 'notP', name)}. So the IF part ${happenedWord(p)}.`,
+    then: `${s.fact(t ? 'Q' : 'notQ', name)}, so the THEN part ${happenedWord(t)}. ${verdict}`,
+  });
+  return {
+    kind: 'contrast',
+    pairs: [panel(d, 'Ben', `${cap(d.parts.P.if)}.`), panel(q, '', q.parts.P.if)],
+    ask: { q: 'Did the truth change?', a: 'No. Only the words did. P is the IF part, and “P is true” means the IF part happened.' },
+    words: { worldTag: 'The case', saysWord: 'is:', truth: 'It happened', untruth: 'It did not happen' },
+  };
+}
+
+/**
+ * Broken, or can't happen? (lesson 2): the same case, Ben got dessert and left some veggies, under the lunchroom rule
+ * twice. Where kids can break the rule, Ben is a real case and he broke it. Where the rule is always true, that case
+ * can't happen. Ben did not change; only the rule's frame did.
+ */
+export function brokenContrast(): Extract<Scene, { kind: 'contrast' }> {
+  const r = rowAt(true, false);
+  if (ruleHolds(r)) throw new Error('brokenContrast: the case must break the rule');
+  const d = SKINS.dessert;
+  const name = 'Ben';
+  const panel = (alwaysTrue: boolean): ContrastPanel => {
+    const can = canHappen(r, alwaysTrue);
+    return {
+      world: alwaysTrue ? d.kept : 'Kids can break this rule.',
+      who: 'The case',
+      says: `${d.says(name, r)}.`,
+      truth: can,
+      because: `The IF part happened, but the THEN part did not. That ${alwaysTrue ? 'would break' : 'breaks'} the rule.`,
+      then: can ? `So ${name} is a real case. ${name} broke the rule.` : 'Nobody breaks the rule here, so this case can’t happen. It crashes: cross it out.',
+    };
+  };
+  return {
+    kind: 'contrast',
+    pairs: [panel(false), panel(true)],
+    ask: { q: `Did ${name} change?`, a: 'No, and the rule’s words did not change either. What changed is whether the rule is always true. Here it is, so the case that would break it can’t happen.' },
+    words: { worldTag: 'This story', saysWord: 'is:', truth: 'Can happen', untruth: 'Can’t happen' },
+  };
+}
+
+/** The lesson 4 board with letters, as a P and Q question's thinking board: the rule's boxes shown, the asked sentences to mark. */
+export function pqMeaningScratch(rewrites: Rewrite[]): DrillStep {
+  const lines = rewrites.map((w) => `${SENTENCE_COLUMNS.find(([k]) => k === w)![1]}: “${condText('pq', REWRITES[w])}”`);
+  const board = meaningDrill('pq', { id: 'scratch', title: 'Your case grid', body: [`The rule: “${ruleText('pq')}” ${PQ_KEY}`, ...lines, 'Mark the boxes if it helps. Nothing here is checked.'] }, rewrites);
+  return { ...board, done: '', words: { closing: LETTERS_CLOSING } };
 }

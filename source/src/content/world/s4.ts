@@ -29,7 +29,7 @@ export const S4_WORLD: StopWorld = {
       ],
     },
     's4.l4': {
-      why: 'A linking clue joins two things without naming anyone. Save it for later: once you learn who has one, you know who has the other too.',
+      why: 'A linking clue joins two things without naming anyone. Read it again each time you learn more: a yes or a no for one thing carries to the other.',
       uses: [
         { who: 'Restaurant servers', kind: 'work', text: 'Servers often write orders by seat number, like “Seat 2: soup.” That links a seat and a dish without a name. Whoever sits in seat 2 gets the soup, and no one has to ask.' },
         { who: 'You, at a school play', kind: 'life', text: 'At a school play, you know the king wears the gold crown. The list of actors says Leo plays the king. So the kid in the gold crown must be Leo.' },
@@ -84,6 +84,7 @@ export const S4_WORLD: StopWorld = {
     ],
     's4.grid-two': [
       'At a science fair, each student gets one table and one topic. “The volcano is at table 3” links the two parts. If Ana has table 3, the volcano is hers.',
+      'Your class pairs each reader with one book and one day. “The dragon book is read on Monday” links them. If Kim does not read on Monday, she does not read the dragon book.',
     ],
     // s4.l5 No guessing
     's4.proof-clue': [

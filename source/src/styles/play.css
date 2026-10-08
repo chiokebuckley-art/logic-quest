@@ -2394,3 +2394,317 @@ button.play-stamp[aria-disabled='true'] {
 .play-real-list strong {
   color: var(--text, #f1f3ff);
 }
+
+/* ---------- distinctions: test world, because rows, contrast, steps, I’m confused ---------- */
+.play-case-world {
+  align-items: center;
+}
+.play-case-world .play-icon {
+  color: var(--gold, #ffc93c);
+  flex-shrink: 0;
+}
+.play-case-world-note {
+  flex-basis: 100%;
+  font-size: 13px;
+  color: var(--text-2, #c9cff0);
+}
+.play-case-chest.has-gem .play-case-gem {
+  display: flex;
+  color: #0a0d2a;
+}
+.play-because {
+  margin: 0;
+  /* One grid for the whole list, so a long label ("In this case", "Crossed in it") gets the width it needs
+     in every row and never runs into the text beside it. */
+  display: grid;
+  grid-template-columns: fit-content(104px) minmax(0, 1fr);
+  gap: 4px 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(154, 163, 209, 0.1);
+  border: 1px solid var(--line-soft, rgba(154, 163, 209, 0.16));
+  font-size: 14px;
+  line-height: 1.4;
+}
+.play-because--compact {
+  font-size: 13px;
+}
+.play-because-row {
+  display: contents;
+}
+.play-because-row dt {
+  font-family: var(--font-display, 'Orbitron', 'Segoe UI', sans-serif);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted, #9aa3d1);
+  padding-top: 3px;
+}
+.play-because-row dd {
+  margin: 0;
+  color: var(--text-2, #c9cff0);
+  overflow-wrap: anywhere;
+}
+.play-because-verdict dd {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+}
+.play-because-verdict.is-true dd {
+  color: var(--teal-soft, #7dffbf);
+}
+.play-because-verdict.is-false dd {
+  color: #ff8fa3;
+}
+.play-because-ask dd {
+  font-weight: 700;
+  color: var(--gold, #ffc93c);
+}
+.play-case-needs {
+  flex-basis: 100%;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--gold, #ffc93c);
+}
+.play-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--muted, #9aa3d1);
+}
+.play-steps li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+}
+.play-steps li.is-now {
+  color: var(--gold, #ffc93c);
+  font-weight: 700;
+}
+.play-steps li.is-done {
+  color: var(--teal-soft, #7dffbf);
+}
+.play-steps-n {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  font-size: 11px;
+  font-weight: 700;
+}
+.play-contrast {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.play-contrast-pairs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+@media (min-width: 560px) {
+  .play-contrast-pairs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.play-contrast-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  min-width: 0;
+  background: var(--panel, rgba(20, 26, 63, 0.86));
+  border: 1px solid var(--line-soft, rgba(154, 163, 209, 0.16));
+  border-radius: 12px;
+}
+.play-contrast-panel.is-true {
+  border-color: rgba(60, 255, 157, 0.5);
+}
+.play-contrast-panel.is-false {
+  border-color: rgba(255, 77, 109, 0.5);
+}
+.play-contrast-panel p {
+  margin: 0;
+}
+.play-contrast-world {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  color: var(--gold, #ffc93c);
+}
+.play-contrast-sign {
+  padding: 8px 10px;
+  background: #f1f3ff;
+  color: #0a0d2a;
+  border-radius: 4px 12px 12px 12px;
+  font-weight: 600;
+}
+.play-contrast-sign q {
+  quotes: '“' '”';
+}
+.play-contrast-who {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  color: #3b4480;
+}
+.play-contrast-truth {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 800;
+  font-size: 16px;
+}
+.play-contrast-truth.is-true {
+  color: var(--teal-soft, #7dffbf);
+}
+.play-contrast-truth.is-false {
+  color: #ff8fa3;
+}
+.play-contrast-because {
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--text-2, #c9cff0);
+}
+.play-contrast-ask {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border-left: 3px solid var(--gold, #ffc93c);
+  background: rgba(255, 201, 60, 0.08);
+  font-size: 14.5px;
+  line-height: 1.45;
+  color: #c9cff0;
+}
+.play-contrast-ask strong {
+  color: var(--text, #f1f3ff);
+}
+.play-drill-status.is-diagnosis {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: rgba(157, 107, 255, 0.12);
+  border-color: rgba(157, 107, 255, 0.55);
+  color: #d9c6ff;
+}
+.play-drill-status.is-diagnosis .play-drill-tag {
+  align-self: flex-start;
+  background: rgba(157, 107, 255, 0.25);
+  color: #d9c6ff;
+}
+.play-confused-btn {
+  gap: 6px;
+}
+.play-confused {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 12px;
+  background: var(--bg-3, #1e2656);
+  border: 1px solid rgba(157, 107, 255, 0.55);
+}
+.play-confused-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.play-confused-option {
+  justify-content: flex-start;
+  text-align: left;
+  min-height: 48px;
+  padding: 8px 12px;
+}
+.play-confused-option.is-right {
+  border-color: var(--teal, #3cff9d);
+  box-shadow: inset 0 0 0 2px var(--teal, #3cff9d);
+}
+.play-confused-option.is-miss {
+  border-color: var(--amber, #ff7a1a);
+  box-shadow: inset 0 0 0 2px var(--amber, #ff7a1a);
+}
+.play-confused-teach {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(157, 107, 255, 0.12);
+  border: 1px solid rgba(157, 107, 255, 0.45);
+  font-size: 14.5px;
+  line-height: 1.45;
+  color: #e4daff;
+}
+.play-confused-teach.is-right {
+  background: rgba(60, 255, 157, 0.1);
+  border-color: rgba(60, 255, 157, 0.45);
+  color: #c9cff0;
+}
+.play-confused-teach .play-icon {
+  vertical-align: -3px;
+  margin-right: 4px;
+  color: var(--teal-soft, #7dffbf);
+}
+
+/* ---------- distinctions on every board: the need over a row, the rule's tag, pictures on a contrast, reasons on a case card ---------- */
+.play-drill-needs {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--gold, #ffc93c);
+}
+.play-rule-note {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(157, 107, 255, 0.22);
+  color: #d9c6ff;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+.play-contrast-things {
+  margin: 0 0 6px;
+}
+.play-contrast-then {
+  font-weight: 700;
+  color: var(--gold, #ffc93c);
+}
+.play-truths li.has-because {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+.play-truths-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.play-fact--test {
+  background: rgba(255, 201, 60, 0.08);
+  border-color: rgba(255, 201, 60, 0.45);
+}
+.play-fact--test .play-fact-tag {
+  background: rgba(255, 201, 60, 0.2);
+  color: var(--gold, #ffc93c);
+}
+.play-drill-needs-list {
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}

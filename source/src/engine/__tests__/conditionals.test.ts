@@ -9,13 +9,18 @@
 import { describe, expect, it } from 'vitest';
 import {
   L1_DRILL,
+  L1_LETTERS,
+  L1_PQ,
   L1_SEE,
   L1_TWIN,
   L2_BACK,
   L2_BOXES,
+  L2_BROKEN,
+  L2_CAN,
   L2_FWD,
   L3_HAPPENED,
   L3_NOT,
+  L4_PQ,
   L4_SAME,
   L4_TRAPS,
   L5_CARDS,
@@ -23,10 +28,17 @@ import {
   PETS_KEPT,
   stop6,
 } from '../../content/stop6';
-import { checkDrill, marksToTap } from '../drill';
+import { checkDrill, extraQuizItem, marksToTap } from '../drill';
 import {
+  BROKEN_VS_CANT,
+  CAN_LABEL,
   CARD_SKINS,
+  COMPARE_LINE,
   CONTRA,
+  KEPT_CLOSING,
+  LETTERS_CLOSING,
+  LETTER_VS_TRUTH,
+  PQ_KEY,
   CONVERSE,
   INVERSE,
   L1_SKINS,
@@ -46,6 +58,7 @@ import {
   condText,
   didBreakItem,
   follows,
+  keptNeeds,
   meaningGrid,
   moveItem,
   mustTurn,
@@ -73,7 +86,7 @@ import { grade } from '../grade';
 import { READING, fkGrade, longestSentence, sentences, words } from '../readability';
 import { createRng } from '../rng';
 import { teachStrings } from '../teach';
-import type { ChooseItem, DrillStep, Item, MultiItem, Scene, TeachCase } from '../types';
+import type { ChooseItem, ConfusedQuestion, DrillStep, Item, MultiItem, Scene, TeachCase } from '../types';
 
 // ---------- a separate brute force ----------
 
@@ -600,6 +613,9 @@ function checkTruths(x: Made, c: TeachCase, pick?: string) {
       const map: Record<string, () => boolean> = {
         'The IF part': () => p,
         'The THEN part': () => q,
+        // A P and Q case card names the letter of each part: “The IF part (P): true”.
+        'The IF part (P)': () => p,
+        'The THEN part (Q)': () => q,
         'The rule': () => ruleOk(p, q),
         'The sentence': () => value(ctx.target!, p, q),
         'Your answer': () => value(ctx.answerLit!, p, q),
@@ -1097,15 +1113,25 @@ describe('stop 6 review fixes', () => {
 
 describe('stop 6: See -> Do -> Quiz (skill-drill handoff)', () => {
   const BOARDS: Record<string, DrillStep[]> = {
-    's6.l1': [L1_DRILL, L1_TWIN],
-    's6.l2': [L2_BOXES, L2_BACK, L2_FWD],
+    's6.l1': [L1_DRILL, L1_TWIN, L1_PQ],
+    's6.l2': [L2_BOXES, L2_CAN, L2_BACK, L2_FWD],
     's6.l3': [L3_HAPPENED, L3_NOT],
-    's6.l4': [L4_SAME, L4_TRAPS],
+    's6.l4': [L4_SAME, L4_TRAPS, L4_PQ],
     's6.l5': [L5_CARDS, L5_LETTERS],
   };
   const ALL_BOARDS = Object.values(BOARDS).flat();
-  /** The four-box boards: lesson 1's two, and lesson 2's pet rule (marked by hand before it is turned around). */
+  /** The four-box boards read by their names: lesson 1's two, and lesson 2's pet rule (marked before it is turned around). */
   const FOUR_BOXES = [L1_DRILL, L1_TWIN, L2_BOXES];
+  /** Boards whose wrong taps start “This box is for …”: the four-box boards, the letters twin and the can-happen twin. */
+  const BOX_BOARDS = [...FOUR_BOXES, L1_PQ, L2_CAN];
+  /** The twins: a board that changes one piece of a card's board, and says what changed. */
+  const TWINS = new Map<DrillStep, string>([
+    [L1_TWIN, 'The same four boxes, with a new rule: a red card and a hat.'],
+    [L1_PQ, 'The same four boxes, with letters for the parts.'],
+    [L2_CAN, 'The same four boxes. Now mark if each case can happen here.'],
+    [L4_PQ, 'The same four cases, with letters for the parts.'],
+  ]);
+  const CAN = 'Can this case happen here?';
   const asGrid = (s: Scene | undefined): Extract<Scene, { kind: 'grid' }> => {
     if (s?.kind !== 'grid') throw new Error('grid');
     return s;
@@ -1143,8 +1169,10 @@ describe('stop 6: See -> Do -> Quiz (skill-drill handoff)', () => {
     for (const l of stop6.lessons) {
       expect(l.drill, l.id).toEqual(BOARDS[l.id]);
       l.drill!.forEach((st, k) => expect(st, `${l.id} board ${k + 1}`).toBe(BOARDS[l.id][k]));
-      // The default pass rule: the boards, then 3 right on the first try with no hint.
-      expect(l.pass, l.id).toBeUndefined();
+      // Lessons 1 and 5: the default pass rule (the boards, then 3 right on the first try with no hint). Lessons 2 to
+      // 4 ask for a P and Q question among them: the letters are taught in lesson 1.
+      if (l.id === 's6.l1' || l.id === 's6.l5') expect(l.pass, l.id).toBeUndefined();
+      else expect(l.pass, l.id).toEqual({ firstTry: 3, include: [{ tag: 'pq', label: 'a question with P and Q' }] });
     }
     for (const st of ALL_BOARDS) {
       const tap = marksToTap(st);
@@ -1168,9 +1196,9 @@ describe('stop 6: See -> Do -> Quiz (skill-drill handoff)', () => {
     for (const l of stop6.lessons) {
       const scenes = l.ideas.filter((c) => c.scene).map((c) => JSON.stringify(c.scene));
       for (const st of l.drill!) {
-        if (st === L1_TWIN) {
-          expect(scenes).not.toContain(JSON.stringify(st.scene));
-          expect(st.twin).toBe('The same four boxes, with a new rule: a red card and a hat.');
+        if (TWINS.has(st)) {
+          if (st === L1_TWIN) expect(scenes).not.toContain(JSON.stringify(st.scene));
+          expect(st.twin).toBe(TWINS.get(st));
           continue;
         }
         expect(scenes, `${st.id}: the same board as a key-idea card`).toContain(JSON.stringify(st.scene));
@@ -1192,9 +1220,9 @@ describe('stop 6: See -> Do -> Quiz (skill-drill handoff)', () => {
     expect(L1_DRILL.rows.flatMap((r) => r.marks.map((m) => m.answer))).toEqual(seeMarks);
     expect(L1_DRILL.rows.flatMap((r) => r.marks).some((m) => m.given)).toBe(false);
     // Lesson 2: Rex as a cat, marked in words on the pet board (always true here); it is the board's shown case.
-    expect(l2.ideas[2].scene).toBe(PETS_KEPT);
+    expect(l2.ideas[3].scene).toBe(PETS_KEPT);
     expect(PETS_KEPT).toEqual(ruleScene('pets', true));
-    expect(l2.ideas[2].body.join(' ')).toMatch(/Rex could be a cat with four legs\. That case keeps the rule, so it can happen\. In it, “Rex is a dog” is false\./);
+    expect(l2.ideas[3].body.join(' ')).toMatch(/Rex could be a cat with four legs\. That case keeps the rule, so it can happen\. In it, “Rex is a dog” is false\./);
     const shownRex = L2_BACK.rows.find((r) => r.marks.every((m) => m.given))!;
     expect(readPetCase(shownRex.label).row).toEqual({ p: false, q: true });
     // Lesson 3: Rex as a dog, both cases marked in words on the same board.
@@ -1211,7 +1239,7 @@ describe('stop 6: See -> Do -> Quiz (skill-drill handoff)', () => {
       }
     }
     // Lesson 5: the “Dessert” card marked back by back on the lunchroom board, then the turn.
-    expect(l5.ideas[1].scene).toEqual(ruleScene('dessert'));
+    expect(l5.ideas[1].scene).toEqual(ruleScene('dessert', 'check'));
     expect(l5.ideas[1].body.join(' ')).toMatch(/With “Ate all veggies,” the rule is kept\. With “Left some veggies,” that kid broke the rule\..*must turn this card over/);
   });
 
@@ -1288,7 +1316,7 @@ describe('stop 6: See -> Do -> Quiz (skill-drill handoff)', () => {
         expect(given || r.marks.every((m) => !m.given), `${st.id} ${r.id}: a row is all shown or all to tap`).toBe(true);
         (byName[name] ??= []).push({ row, given });
         for (const m of r.marks) {
-          if (m.label === 'Can this case happen?') {
+          if (m.label === CAN) {
             expect(m.answer, `${r.label} can happen`).toBe(ruleOk(row.p, row.q) ? 'yes' : 'no');
             continue;
           }
@@ -1308,7 +1336,7 @@ describe('stop 6: See -> Do -> Quiz (skill-drill handoff)', () => {
       for (const [name, fact] of Object.entries(facts)) {
         if (st === L2_BACK || st === L2_FWD) {
           for (const r of st.rows.filter((x) => readPetCase(x.label).name === name).slice(0, 1)) {
-            for (const m of r.marks.filter((x) => x.label !== 'Can this case happen?')) {
+            for (const m of r.marks.filter((x) => x.label !== CAN)) {
               const t = readFact(SKINS.pets, unquote(m.label)).lit;
               const q = `“${SKINS.pets.fact(t, name)}”`;
               const s = bruteStatus(fact, t);
@@ -1324,14 +1352,14 @@ describe('stop 6: See -> Do -> Quiz (skill-drill handoff)', () => {
     // Lesson 2 marks going backward (Rex has four legs) and forward (Max is a dog), every sentence the quiz can ask.
     expect(factsOf(L2_BACK)).toEqual({ Rex: 'Q' });
     expect(factsOf(L2_FWD)).toEqual({ Max: 'P' });
-    const said = (st: DrillStep) => [...new Set(st.rows.flatMap((r) => r.marks.filter((m) => m.label !== 'Can this case happen?').map((m) => readFact(SKINS.pets, unquote(m.label)).lit)))].sort();
+    const said = (st: DrillStep) => [...new Set(st.rows.flatMap((r) => r.marks.filter((m) => m.label !== CAN).map((m) => readFact(SKINS.pets, unquote(m.label)).lit)))].sort();
     expect(said(L2_BACK)).toEqual(['P', 'notP']);
     expect(said(L2_FWD)).toEqual(['Q', 'notQ']);
     // Lesson 3 marks all four moves: one fact of each kind.
     expect(Object.values({ ...factsOf(L3_HAPPENED), ...factsOf(L3_NOT) }).sort()).toEqual([...LITS].sort());
     // In each lesson the learner marks a case that can't happen and one that can: tapping "Yes" everywhere fails.
     for (const pair of [[L2_BACK, L2_FWD], [L3_HAPPENED, L3_NOT]]) {
-      const can = pair.flatMap((st) => marksToTap(st).filter((m) => m.label === 'Can this case happen?').map((m) => m.answer));
+      const can = pair.flatMap((st) => marksToTap(st).filter((m) => m.label === CAN).map((m) => m.answer));
       expect(new Set(can)).toEqual(new Set(['yes', 'no']));
     }
   });
@@ -1409,16 +1437,18 @@ describe('stop 6: See -> Do -> Quiz (skill-drill handoff)', () => {
             const why = m.why[o.id];
             expect(why, `${st.id} ${m.id}: words for a wrong “${o.label}”`).toBeTruthy();
             // It names what it is about: the case or card on this row, or the sentence on this mark.
-            if (FOUR_BOXES.includes(st)) expect(why).toMatch(/^This box is for /);
+            if (BOX_BOARDS.includes(st)) expect(why).toMatch(/^This box is for /);
             else if (st.columns) expect(why.startsWith(`${r.label}:`), why).toBe(true);
-            else if (m.label === 'Can this case happen?') expect(why.startsWith(r.label), why).toBe(true);
+            else if (m.label === CAN) expect(why.startsWith(r.label), why).toBe(true);
             else if (m.label === 'Turn it over?') expect(why).toMatch(/on the back, the rule is (broken|kept)\./);
             else if (/on the back$/.test(m.label)) expect(why.startsWith(`With ${m.label.charAt(0) === '“' ? m.label.replace(/ on the back$/, '') : m.label.charAt(0).toLowerCase() + m.label.slice(1).replace(/ on the back$/, '')} on the back`), why).toBe(true);
             else expect(why).toContain(unquote(m.label).replace(/\.$/, ''));
             // And it says the right mark, not the one tapped.
+            // The can-happen twin speaks in words: a check for a case that can happen, a cross for one that can't.
+            const can = st === L2_CAN;
             const says: Record<string, RegExp> = {
-              yes: m.label === 'Can this case happen?' ? /so this case can happen|This case can happen/ : m.label === 'Turn it over?' ? /you must turn this card over/ : /gets a ✓, not a ✗/,
-              no: m.label === 'Can this case happen?' ? /can’t happen/ : m.label === 'Turn it over?' ? /you do not need to turn this card over/ : /gets (a|the) ✗, not a ✓/,
+              yes: m.label === CAN ? /so this case can happen|This case can happen/ : m.label === 'Turn it over?' ? /you must turn this card over/ : can ? /can happen\. It gets a check, not a cross\.$/ : /gets a ✓, not a ✗/,
+              no: m.label === CAN ? /can’t happen/ : m.label === 'Turn it over?' ? /you do not need to turn this card over/ : can ? /can’t happen\. It gets a cross, not a check\.$/ : /gets (a|the) ✗, not a ✓/,
               true: /is true here, not false/,
               false: /is false here, not true/,
               holds: /That keeps the rule\./,
@@ -1434,7 +1464,8 @@ describe('stop 6: See -> Do -> Quiz (skill-drill handoff)', () => {
       const long = longestSentence(text.join('\n'));
       expect(long.words, `${st.id}: ${long.sentence}`).toBeLessThanOrEqual(READING.maxSentenceWords);
       expect(text.join(' '), st.id).not.toMatch(/\bWrong\b|that row|the opposite/);
-      for (const b of text.join('\n').matchAll(/[^.\n]*\bboth\b[^.\n]*/g)) expect(b[0], b[0]).toMatch(/the IF part and the THEN part both/i);
+      // “Both” always says what it refers to (the P and Q boards name their case “the case where P and Q are both true”).
+      for (const b of text.join('\n').matchAll(/[^.\n]*\bboth\b[^.\n]*/g)) expect(b[0], b[0]).toMatch(/the IF part and the THEN part both|P and Q are both/i);
     }
   });
 
@@ -1503,7 +1534,8 @@ describe('stop 6: See -> Do -> Quiz (skill-drill handoff)', () => {
       if (s === 'letters') return { p: /has a vowel/.test(text), q: /an even number/.test(text) };
       return readCase(SKINS[s], text, SYM, true);
     };
-    const truth = (c: TeachCase, who: string) => c.truths!.find((t) => t.who === who)?.value;
+    // A P and Q case card names the letters: “The IF part (P)”, “The THEN part (Q)”.
+    const truth = (c: TeachCase, who: string) => c.truths!.find((t) => t.who === who || t.who === `${who} (P)` || t.who === `${who} (Q)`)?.value;
     for (let seed = 1; seed <= 30; seed++) {
       for (const l of stop6.lessons) {
         for (const it of l.practice(createRng(seed))) {
@@ -1624,3 +1656,515 @@ describe('stop 6 review: the skill-drill build', () => {
     for (let seed = 1; seed <= 40; seed++) expect(l2.practice(createRng(seed)).some((it) => it.skill === 's6.backward'), `seed ${seed}`).toBe(true);
   });
 });
+
+// ---------- distinctions taught apart (docs/audit/hidden-distinctions.md, Stop 6) ----------
+//
+// X-text     the always-true line on the “One way only” card, on s6.l2-do-boxes and on every lesson 2 and 3 board and
+//            question; matching frame lines in lessons 4 and 5; the mark “Can this case happen here?”; “crashes” only in
+//            lessons 2 and 3.
+// X-broken   s6-l2-breakable-vs-always-kept: the contrast card (the same kid, a rule kids can break vs a rule that is
+//            always true) and its twin four-box board, can happen or can't happen; every truth by the brute force.
+// X-letters  s6-pq-letters-untaught: the card “Letters for the parts”, the key line, the four boxes with letters, the
+//            lesson 4 board with letters, and P and Q case cards that name the letters.
+// X-work     the first lesson 2 and 3 question is marked on its own cases first, with the full scaffold.
+// X-mix      each new misconception fires on the wrong picks the audit names, and never on right marks.
+// X-confused the “I’m confused” questions: one right option, a “Not sure”, never the board's own mark, a Stop 6 closing.
+// X-pq       P and Q is back in the draws, tagged, and asked for by the pass rule of lessons 2 to 4.
+// X-read     the new words read at the game's level, with curly quotes and no symbols.
+
+describe('stop 6: distinctions taught apart', () => {
+  const [l1, l2, l3, l4, l5] = stop6.lessons;
+  const TF = { p: true, q: false };
+  const right = (st: DrillStep) => Object.fromEntries(marksToTap(st).map((m) => [m.id, m.answer]));
+  const lines = (s: Scene | undefined) => (s?.kind === 'text' ? s.lines : []);
+  const SEEDS40 = SEEDS.slice(0, 40);
+  /** Every lesson 2 and 3 board: the drill, and each question's own board and thinking board. */
+  const keptBoards = (seeds = SEEDS.slice(0, 12)) => [
+    ...l2.drill!,
+    ...l3.drill!,
+    ...seeds.flatMap((s) => [l2, l3].flatMap((l) => l.practice(createRng(s)).flatMap((it) => [it.workFirst, it.scratch].filter((b): b is DrillStep => !!b)))),
+  ];
+  /** A board's words a learner can read: instructions, rows, marks and options, wrong-tap words, needs, mix-ups, questions. */
+  const boardWords = (st: DrillStep): string[] => [
+    st.title,
+    ...st.body,
+    st.done,
+    st.twin ?? '',
+    st.caption ?? '',
+    ...st.rows.flatMap((r) => [r.label, r.note ?? '', r.needs ?? '', ...r.marks.flatMap((m) => [m.label, ...m.options.map((o) => o.label), ...Object.values(m.why)])]),
+    ...(st.misconceptions ?? []).map((m) => m.text),
+    ...(st.confused ?? []).flatMap((q) => [q.q, q.teach, ...q.options.map((o) => o.label)]),
+    st.words?.closing ?? '',
+  ].filter(Boolean);
+  const cardWords = (l: (typeof stop6.lessons)[number]) =>
+    l.ideas.flatMap((c) => [c.title, ...c.body, ...lines(c.scene), ...(c.scene?.kind === 'contrast' ? [...c.scene.pairs.flatMap((p) => [p.world, p.who, p.says, p.because, p.then ?? '']), c.scene.ask?.q ?? '', c.scene.ask?.a ?? ''] : [])]);
+  const itemWords = (it: Item) => [
+    ...texts(it),
+    ...(it.confused ?? []).flatMap((q) => [q.q, q.teach, ...q.options.map((o) => o.label)]),
+    ...[it.workFirst, it.scratch].filter((b): b is DrillStep => !!b).flatMap(boardWords),
+  ];
+  /** Which case a P and Q case sentence names: “P is true and Q is false.” */
+  const readPQ = (text: string): Row => {
+    const m = strip(text).match(/^P is (true|false) and Q is (true|false)$/);
+    if (!m) throw new Error(`cannot read P and Q case: ${text}`);
+    return { p: m[1] === 'true', q: m[2] === 'true' };
+  };
+
+  it('X-text: the always-true line on the “One way only” card, the four boxes and every lesson 2 and 3 board and question', () => {
+    // Every story's always-true line is one frame, said the same way.
+    for (const s of SKIN_IDS) expect(SKINS[s].kept, s).toMatch(/^Always true here: .+ breaks this rule\.$/);
+    // The card and its board, the four boxes, right after it.
+    expect(l2.ideas[0].title).toBe('One way only');
+    expect(lines(l2.ideas[0].scene)).toContain(SKINS.pets.kept);
+    expect(l2.ideas[0].body[0]).toBe(`Here is a rule that is always true in this story: “${ruleText('pets')}”`);
+    expect(L2_BOXES.scene).toEqual(l2.ideas[0].scene);
+    expect(L2_BOXES.afterCard).toBe(0);
+    expect(lines(L2_BOXES.scene)).toContain(SKINS.pets.kept);
+    expect(L2_BOXES.body.join(' ')).toContain('would break it');
+    // Every case on every lesson 2 and 3 board: the rule card says it, and the need over the case says it on its own.
+    for (const st of keptBoards()) {
+      const skin = skinOfScene({ scene: st.scene } as Item);
+      expect(lines(st.scene), st.id).toContain(SKINS[skin].kept);
+      if (st.columns) continue;
+      expect(st.words?.needs, st.id).toBe('');
+      for (const r of st.rows) expect(r.needs, `${st.id} ${r.id}`).toBe(keptNeeds(skin));
+      for (const m of st.rows.flatMap((r) => r.marks).filter((x) => x.id.endsWith('-can'))) expect(m.label).toBe(CAN_LABEL);
+    }
+    expect(CAN_LABEL).toBe('Can this case happen here?');
+    // Every lesson 2 and 3 question, in practice, the check and new examples: the rule card has the line.
+    for (const seed of SEEDS40) {
+      for (const it of [...l2.practice(createRng(seed)), ...l3.practice(createRng(seed)), ...stop6.check!(createRng(seed)).filter((x) => x.lesson === 's6.l2' || x.lesson === 's6.l3')]) {
+        expect(lines(it.scene), it.id).toContain(SKINS[skinOfScene(it)].kept);
+      }
+      // Lesson 1 has no frame line (a break is a real kid); lesson 4 compares sentences; lesson 5 checks for a break.
+      for (const it of l1.practice(createRng(seed))) expect(lines(it.scene).some((x) => /^Always true here|Find out\.$/.test(x) || x === COMPARE_LINE), it.id).toBe(false);
+      for (const it of l4.practice(createRng(seed))) expect(lines(it.scene), it.id).toContain(COMPARE_LINE);
+      for (const it of l5.practice(createRng(seed))) expect(lines(it.scene).at(-1), it.id).toMatch(/^Here (a kid|Dad|a dragon|a wizard|a card) may (have broken|break) the rule\. Find out\.$/);
+    }
+    for (const st of l4.drill!) expect(lines(st.scene), st.id).toContain(COMPARE_LINE);
+    for (const st of l5.drill!) expect(lines(st.scene).at(-1), st.id).toMatch(/Find out\.$/);
+    expect(lines(l4.ideas[0].scene)).toContain(COMPARE_LINE);
+    for (const c of l5.ideas.filter((x) => x.scene)) expect(lines(c.scene).at(-1), c.title).toMatch(/Find out\.$/);
+    // “Crashes” (Stop 5's word for a case that can't happen) only in lessons 2 and 3, never where a break is a real kid.
+    const crash = /crash/i;
+    expect(cardWords(l2).join(' ')).toMatch(crash);
+    expect(cardWords(l3).join(' ')).toMatch(crash);
+    for (const l of [l1, l4, l5]) {
+      const all = [...cardWords(l), ...l.drill!.flatMap(boardWords), ...SEEDS.slice(0, 10).flatMap((s) => l.practice(createRng(s)).flatMap(itemWords))];
+      expect(all.filter((x) => crash.test(x)), l.id).toEqual([]);
+    }
+  });
+
+  it('X-broken: the contrast card (the same kid, a rule kids can break vs one always true here), then its twin board', () => {
+    // Lesson 2 also relies on lesson 1's letters (its pass rule asks for a P and Q question): taught there, reminded here.
+    expect(l2.distinctions).toEqual([BROKEN_VS_CANT, { ...LETTER_VS_TRUTH, taughtIn: 's6.l1' }]);
+    expect(l2.ideas.length).toBeLessThanOrEqual(7);
+    const k = l2.ideas.indexOf(L2_BROKEN);
+    expect(k).toBe(2);
+    expect(l2.ideas[k + 1].title).toBe('Could it happen another way?');
+    expect(L2_BROKEN.distinction).toBe(BROKEN_VS_CANT.id);
+    expect(L2_BROKEN.title).toBe('Broken, or can’t happen?');
+    const sc = L2_BROKEN.scene;
+    if (sc?.kind !== 'contrast') throw new Error('contrast');
+    expect(sc.words).toEqual({ worldTag: 'This story', saysWord: 'is:', truth: 'Can happen', untruth: 'Can’t happen' });
+    const [a, b] = sc.pairs;
+    // The same case in both panels: one kid, read back from the words.
+    expect(a.says).toBe(b.says);
+    const row = readCase(SKINS.dessert, a.says, { vowel: 'E', consonant: 'K', even: '4', odd: '7' }, true);
+    expect(row).toEqual(TF);
+    expect(ruleOk(row.p, row.q)).toBe(false);
+    // A rule kids can break: every case can happen, the break too. Always true here: only a case that keeps the rule.
+    expect(a.world).toBe('Kids can break this rule.');
+    expect(b.world).toBe(SKINS.dessert.kept);
+    expect([a.truth, b.truth]).toEqual([true, ruleOk(row.p, row.q)]);
+    expect(a.then).toMatch(/broke the rule\.$/);
+    expect(b.then).toMatch(/can’t happen\. It crashes: cross it out\.$/);
+    expect(sc.ask?.q).toBe('Did Ben change?');
+    // Ben is the same, and so are the rule's words: only whether the rule is always true changed.
+    expect(sc.ask?.a).toMatch(/^No, and the rule’s words did not change either\. What changed is whether the rule is always true\./);
+    // The card names the rule the left panel is about.
+    expect(L2_BROKEN.body.join(' ')).toContain(`the lunchroom rule: “${ruleText('dessert')}”`);
+    // The twin board, right after the card: the same four boxes and names as s6.l2-do-boxes, can happen or can't.
+    expect(l2.drill).toEqual([L2_BOXES, L2_CAN, L2_BACK, L2_FWD]);
+    expect(L2_CAN.afterCard).toBe(k);
+    expect(L2_CAN.distinction).toBe(BROKEN_VS_CANT.id);
+    expect(L2_CAN.scene).toEqual(L2_BOXES.scene);
+    expect(L2_CAN.columns).toEqual(L2_BOXES.columns);
+    expect(L2_CAN.rows.map((r) => r.label)).toEqual(L2_BOXES.rows.map((r) => r.label));
+    const name = (n: string) => ({ Dog: true, 'Not a dog': false, 'Four legs': true, 'Not four legs': false })[n]!;
+    const cant: string[] = [];
+    for (const r of L2_CAN.rows) {
+      r.marks.forEach((m, j) => {
+        const p = name(r.label), q = name(L2_CAN.columns![j]);
+        // Always true here: a case can happen only when it keeps the rule.
+        expect(m.answer, `${r.label} – ${L2_CAN.columns![j]}`).toBe(ruleOk(p, q) ? 'yes' : 'no');
+        if (m.answer === 'no') cant.push(`${r.label} – ${L2_CAN.columns![j]}`);
+      });
+    }
+    expect(cant).toEqual(['Dog – Not four legs']);
+    expect(L2_CAN.done).toContain('Only a dog without four legs can’t happen here.');
+    expect(L2_CAN.caption).toBe('A check: this case can happen here. A cross: it can’t happen here.');
+    // Lesson 3 relies on it: taught in lesson 2, and a card reminds.
+    expect(l3.distinctions).toEqual([{ ...BROKEN_VS_CANT, taughtIn: 's6.l2' }, { ...LETTER_VS_TRUTH, taughtIn: 's6.l1' }]);
+    const reminder = l3.ideas.find((c) => c.distinction === BROKEN_VS_CANT.id)!;
+    expect(reminder.title).toBe('The IF part happened');
+    expect(reminder.body.join(' ')).toContain('It crashes: cross it out.');
+    expect(reminder.body.join(' ')).toContain('Look for the “Always true here” line.');
+    // Every lesson 2 and 3 board names the distinction it exercises.
+    for (const st of [L2_CAN, L2_BACK, L2_FWD, L3_HAPPENED, L3_NOT]) expect(st.distinction, st.id).toBe(BROKEN_VS_CANT.id);
+  });
+
+  it('X-letters: “Letters for the parts”, the key line, the four boxes with letters and the lesson 4 board with letters', () => {
+    expect(PQ_KEY).toBe('P is the IF part. Q is the THEN part. “P is true” means the IF part happened.');
+    expect(l1.distinctions).toEqual([LETTER_VS_TRUTH]);
+    expect(l1.ideas.length).toBeLessThanOrEqual(7);
+    const k = l1.ideas.indexOf(L1_LETTERS);
+    expect(k).toBe(l1.ideas.length - 1);
+    expect(L1_LETTERS.title).toBe('Letters for the parts');
+    expect(L1_LETTERS.distinction).toBe(LETTER_VS_TRUTH.id);
+    const sc = L1_LETTERS.scene;
+    if (sc?.kind !== 'contrast') throw new Error('contrast');
+    const [a, b] = sc.pairs;
+    // The same case: told in the lunchroom's words, and with P and Q.
+    const ra = readCase(SKINS.dessert, a.world, { vowel: 'E', consonant: 'K', even: '4', odd: '7' }, true);
+    const rb = readPQ(b.world);
+    expect(ra).toEqual(rb);
+    // Each panel is about the IF part: its words, and whether it happened in that case (the same truth both times).
+    expect(a.says).toBe(`${capFirst(SKINS.dessert.parts.P.if)}.`);
+    expect(b.says).toBe('P');
+    expect([a.truth, b.truth]).toEqual([ra.p, rb.p]);
+    for (const p of [a, b]) expect(p.then).toMatch(ruleOk(ra.p, ra.q) ? /This case keeps the rule\.$/ : /This case breaks the rule\.$/);
+    expect(sc.words).toEqual({ worldTag: 'The case', saysWord: 'is:', truth: 'It happened', untruth: 'It did not happen' });
+    expect(sc.ask).toEqual({ q: 'Did the truth change?', a: 'No. Only the words did. P is the IF part, and “P is true” means the IF part happened.' });
+    // Its board right after it; the lunchroom boards come before the card, right after “THEN without IF is fine”.
+    expect(l1.drill).toEqual([L1_DRILL, L1_TWIN, L1_PQ]);
+    expect([L1_DRILL.afterCard, L1_TWIN.afterCard, L1_PQ.afterCard]).toEqual([k - 1, k - 1, k]);
+    expect(l1.ideas[k - 1].scene).toEqual(L1_DRILL.scene);
+    expect(L1_PQ.distinction).toBe(LETTER_VS_TRUTH.id);
+    expect(lines(L1_PQ.scene)).toEqual(['P and Q stand for any two sentences.', 'If P, then Q.', PQ_KEY]);
+    expect(L1_PQ.columns).toEqual(['Q is true', 'Q is false']);
+    const breaks: string[] = [];
+    for (const r of L1_PQ.rows) {
+      r.marks.forEach((m, j) => {
+        const p = r.label === 'P is true', q = L1_PQ.columns![j] === 'Q is true';
+        expect(m.answer, `${r.label} – ${L1_PQ.columns![j]}`).toBe(ruleOk(p, q) ? 'yes' : 'no');
+        if (m.answer === 'no') breaks.push(`${r.label} – ${L1_PQ.columns![j]}`);
+      });
+    }
+    expect(breaks).toEqual(['P is true – Q is false']);
+    // Lesson 4: the same test with letters, last, before any P and Q question.
+    expect(l4.drill).toEqual([L4_SAME, L4_TRAPS, L4_PQ]);
+    expect(lines(L4_PQ.scene)).toEqual(['P and Q stand for any two sentences.', 'If P, then Q.', PQ_KEY, COMPARE_LINE]);
+    const named: Record<string, Cond> = { 'The rule': RULE };
+    for (const line of L4_PQ.body) {
+      const m = line.match(/^(Flip and NOT|Flip only|NOT only): “(.+?)”/);
+      if (m) named[m[1]] = readCond('pq', m[2]);
+    }
+    expect(named['Flip and NOT']).toEqual(FLIP_AND_NOT);
+    for (const r of L4_PQ.rows) {
+      const row = readKase(SKINS.pq, `${r.label}.`);
+      r.marks.forEach((m, j) => expect(m.answer, `${r.label} – ${L4_PQ.columns![j]}`).toBe(condOk(named[L4_PQ.columns![j]], row.p, row.q) ? 'yes' : 'no'));
+    }
+    expect(marksToTap(L4_PQ).length).toBeLessThanOrEqual(12);
+    // P and Q case cards name the letters, “The IF part (P): true”; every P and Q rule card has the key line.
+    let seen = 0;
+    for (const x of allMade().filter((y) => y.skin === 'pq')) {
+      const it = x.m.item;
+      expect(lines(it.scene), x.gen).toContain(PQ_KEY);
+      const cases: TeachCase[] = [...(it.teach?.cases ?? []), ...(it.hintCase ? [it.hintCase] : []), ...(it.kind === 'choose' ? Object.values(it.feedback ?? {}).flatMap((f) => (f.example ? [f.example] : [])) : [])];
+      for (const c of cases) {
+        const who = (c.truths ?? []).map((t) => t.who);
+        expect(who, `${x.gen}: ${c.label}`).not.toContain('The IF part');
+        expect(who, `${x.gen}: ${c.label}`).not.toContain('The THEN part');
+        if (who.includes('The IF part (P)')) {
+          seen++;
+          const r = readPQ(c.label);
+          expect(c.truths!.find((t) => t.who === 'The IF part (P)')!.value).toBe(r.p);
+          expect(c.truths!.find((t) => t.who === 'The THEN part (Q)')!.value).toBe(r.q);
+        }
+      }
+    }
+    expect(seen).toBeGreaterThan(0);
+  });
+
+  it('X-pq: P and Q is back in the draws, tagged, and every lesson 2 to 4 pack has one the pass rule asks for', () => {
+    expect(L1_SKINS).toContain('pq');
+    expect(SKIN_IDS).toContain('pq');
+    const PQ = { firstTry: 3, include: [{ tag: 'pq', label: 'a question with P and Q' }] };
+    let l1pq = 0;
+    for (const seed of SEEDS40) {
+      for (const l of stop6.lessons) {
+        const items = l.practice(createRng(seed));
+        for (const it of items) {
+          // finish() copies the generator's tag; a P and Q question is tagged “pq”, and only one is.
+          expect(it.tags, it.id).toContain(it.skill.replace('s6.', ''));
+          expect(it.tags!.includes('pq'), it.id).toBe(skinOfScene(it) === 'pq');
+        }
+        const pq = items.filter((it) => it.tags!.includes('pq'));
+        if (l === l1) l1pq += pq.length;
+        if (l === l2 || l === l3 || l === l4) {
+          expect(l.pass, l.id).toEqual(PQ);
+          expect(pq.length, `${l.id} seed ${seed}`).toBe(1);
+          // Still two kinds of story in every pack.
+          expect(new Set(items.map((it) => SKINS[skinOfScene(it)].group)).size).toBeGreaterThanOrEqual(2);
+        }
+      }
+      for (const it of stop6.check!(createRng(seed))) expect(it.tags, it.id).toContain(it.skill.replace('s6.', ''));
+    }
+    expect(l1pq, 'lesson 1 can draw P and Q, after its board').toBeGreaterThan(0);
+    expect(l1.pass).toBeUndefined();
+    expect(l5.pass).toBeUndefined();
+    // When the P and Q question is missed, an extra P and Q question comes from the lesson's own practice.
+    for (const l of [l2, l3, l4]) {
+      for (const seed of [1, 2, 3]) {
+        const shown = l.practice(createRng(seed));
+        const x = extraQuizItem(l, seed, shown, ['pq'], 0);
+        expect(x?.tags, `${l.id} seed ${seed}`).toContain('pq');
+        expect(x?.workFirst).toBeUndefined();
+      }
+    }
+  });
+
+  it('X-work: the first lesson 2 and 3 question is marked on its own cases first, with the full scaffold', () => {
+    for (const seed of SEEDS40) {
+      for (const l of [l2, l3]) {
+        const items = l.practice(createRng(seed));
+        expect(items.slice(1).some((it) => it.workFirst), `${l.id}: only the first`).toBe(false);
+        const it = items[0];
+        const st = it.workFirst!;
+        expect(st, `${l.id} seed ${seed}`).toBeDefined();
+        expect(st.scaffold).toBe('full');
+        expect(st.scene).toEqual(it.scene);
+        expect(st.done).toBe('Every case is marked. Now answer the question.');
+        expect(st.words?.closing).toBe(KEPT_CLOSING);
+        const skin = SKINS[skinOfScene(it)];
+        const first = it.prompt.split(/(?<=\.) /)[0];
+        const fact = readFact(skin, first).lit;
+        // Both cases that fit the fact, none shown: each read back from its words and worked out by the brute force.
+        const reads = st.rows.map((r) => {
+          const row = skin.id === 'pq' ? readPQ(r.label) : readSays(skin, r.label);
+          expect(value(fact, row.p, row.q), r.label).toBe(true);
+          expect(r.marks.every((m) => !m.given)).toBe(true);
+          for (const m of r.marks) {
+            if (m.label === CAN_LABEL) expect(m.answer, r.label).toBe(ruleOk(row.p, row.q) ? 'yes' : 'no');
+            else expect(m.answer, `${r.label} ${m.label}`).toBe(value(readFact(skin, unquoteS(m.label)).lit, row.p, row.q) ? 'true' : 'false');
+          }
+          return keyOf(row.p, row.q);
+        });
+        expect(reads.sort()).toEqual(CASES.filter((c) => value(fact, c.p, c.q)).map((c) => keyOf(c.p, c.q)).sort());
+        expect(checkDrill(st, {}).done).toBe(false);
+        expect(checkDrill(st, right(st)).done).toBe(true);
+        // The board never shows the answer's words: its last words only send the learner to the question.
+        expect([st.title, ...st.body, st.done].join(' ')).not.toMatch(/for sure|Nothing follows|can’t tell/i);
+      }
+    }
+  });
+
+  it('X-mix: each new misconception fires on the wrong picks the audit names, and never on right marks', () => {
+    const fire = (st: DrillStep, change: Record<string, string>) => checkDrill(st, { ...right(st), ...change }).diagnosis;
+    // s6.l2-do-fwd: Max without four legs marked as a case that can happen (the lesson 1 frame carried over).
+    expect(fire(L2_FWD, { 'Max-TF-can': 'yes' })).toBe('Max-TF-can-break-as-real');
+    expect(checkDrill(L2_FWD, { ...right(L2_FWD), 'Max-TF-can': 'yes' }).message).toMatch(/^You may be treating “this case breaks the rule” and “this case can happen” as the same thing\./);
+    // The twin board: the dog without four legs marked as able to happen; a case without the IF part marked as not.
+    expect(fire(L2_CAN, { 'P-notQ': 'yes' })).toBe('P-notQ-break-as-real');
+    expect(fire(L2_CAN, { 'notP-Q': 'no' })).toBe('notP-Q-no-if');
+    expect(fire(L2_CAN, { 'notP-notQ': 'no' })).toBe('notP-notQ-no-if');
+    expect(fire(L2_CAN, { 'P-Q': 'no' })).toBe('P-Q-only-one');
+    // Both slips at once: the break taken as real is named first.
+    expect(fire(L2_CAN, { 'P-notQ': 'yes', 'notP-Q': 'no' })).toBe('P-notQ-break-as-real');
+    // The four boxes with the always-true line: the break box kept, or the cat's box broken (the rule turned around).
+    expect(fire(L2_BOXES, { 'P-notQ': 'yes' })).toBe('break-box-kept');
+    expect(fire(L2_BOXES, { 'notP-Q': 'no' })).toBe('turned-around');
+    // Going backward: Rex as a dog, taken to be ruled out by the cat case shown above it.
+    expect(fire(L2_BACK, { 'Rex-TT-can': 'no' })).toBe('Rex-TT-can-only-one');
+    // Lesson 3: the break taken as real; a case without the IF part taken as impossible.
+    expect(fire(L3_HAPPENED, { 'Rex-TF-can': 'yes' })).toBe('Rex-TF-can-break-as-real');
+    expect(fire(L3_HAPPENED, { 'Max-FT-can': 'no' })).toBe('Max-FT-can-no-if');
+    expect(fire(L3_NOT, { 'Pip-TF-can': 'yes' })).toBe('Pip-TF-can-break-as-real');
+    expect(fire(L3_NOT, { 'Coco-FT-can': 'no' })).toBe('Coco-FT-can-no-if');
+    // Every board with mix-ups: right marks never fire one, and each one's own picks fire it.
+    for (const st of [...keptBoards(), L2_BOXES]) {
+      expect(checkDrill(st, right(st)).diagnosis, st.id).toBeUndefined();
+      for (const mc of st.misconceptions ?? []) {
+        expect(mc.when, mc.id).toBe('picks');
+        expect(fire(st, mc.picks!), `${st.id} ${mc.id}`).toBe(mc.id);
+        // The pattern is a wrong mark: the pick is never the mark's answer.
+        for (const [id, o] of Object.entries(mc.picks!)) expect(st.rows.flatMap((r) => r.marks).find((m) => m.id === id)!.answer, mc.id).not.toBe(o);
+        expect(mc.text, mc.id).toMatch(/^You may be treating .+ as the same thing\. They are two different things/);
+        expect(sentences(mc.text).length, mc.text).toBeLessThanOrEqual(4);
+      }
+    }
+  });
+
+  it('X-confused: one right option and a “Not sure” each, never the board’s own mark, and a Stop 6 closing', () => {
+    const check = (qs: ConfusedQuestion[] | undefined, where: string) => {
+      expect(qs?.length, where).toBeGreaterThanOrEqual(1);
+      expect(qs!.length, where).toBeLessThanOrEqual(3);
+      for (const q of qs!) {
+        expect(q.options.filter((o) => o.right).length, `${where}: ${q.q}`).toBe(1);
+        expect(q.options.map((o) => o.label), `${where}: ${q.q}`).toContain('Not sure');
+        expect(q.options.find((o) => o.label === 'Not sure')!.right).toBeUndefined();
+      }
+    };
+    /** The two broken-vs-can't-happen questions, with their right answers worked out by the brute force. */
+    const kept = (qs: ConfusedQuestion[], story: SkinId, where: string) => {
+      const [q1, q2] = qs;
+      // Asked in another story, so it never gives this board's own mark.
+      const other: SkinId = story === 'dessert' ? 'pets' : 'dessert';
+      expect(q1.q, where).toBe(`Say this rule is always true: “${ruleText(other)}” Can there be ${SKINS[other].kase.TF}?`);
+      expect(q1.q, where).not.toContain(ruleText(story));
+      // Always true: the break can't happen.
+      expect(q1.options.find((o) => o.right)!.label).toBe(ruleOk(TF.p, TF.q) ? 'Yes, that case can happen' : 'No, it can’t happen');
+      // Lesson 1: Ben's break was real, as every case is where kids can break the rule.
+      expect(q2.q).toBe('In Lesson 1, Ben got dessert and left some veggies. Was Ben a real case there?');
+      expect(q2.options.find((o) => o.right)!.label).toBe('Yes');
+    };
+    const pq = (q: ConfusedQuestion) => {
+      if (q.q.startsWith('In “If P, then Q,”')) expect(q.options.find((o) => o.right)!.label).toBe(SKINS.pq.parts.P.if);
+      else {
+        expect(q.q).toBe('P is true. Did the IF part happen?');
+        expect(q.options.find((o) => o.right)!.label).toBe(readPQ('P is true and Q is true').p ? 'Yes' : 'No');
+      }
+    };
+    for (const st of keptBoards()) {
+      const story = skinOfScene({ scene: st.scene } as Item);
+      check(st.confused, st.id);
+      kept(st.confused!, story, st.id);
+      expect(st.confused!.length, st.id).toBe(story === 'pq' ? 3 : 2);
+      if (story === 'pq') pq(st.confused![2]);
+      expect(st.words?.closing, st.id).toBe(KEPT_CLOSING);
+    }
+    check(L2_BOXES.confused, L2_BOXES.id);
+    for (const st of [L1_PQ, L4_PQ]) {
+      check(st.confused, st.id);
+      st.confused!.forEach(pq);
+      expect(st.words?.closing, st.id).toBe(LETTERS_CLOSING);
+    }
+    // Every question with “I’m confused” has a board that sets the closing line, so the panel never speaks of signs.
+    for (const seed of SEEDS.slice(0, 20)) {
+      for (const l of stop6.lessons) {
+        for (const it of l.practice(createRng(seed))) {
+          const story = skinOfScene(it);
+          const hasHelp = l === l2 || l === l3 || ((l === l1 || l === l4) && story === 'pq');
+          expect(!!it.confused, it.id).toBe(hasHelp);
+          if (!it.confused) continue;
+          check(it.confused, it.id);
+          expect(it.workFirst?.words?.closing ?? it.scratch?.words?.closing, it.id).toBe(l === l2 || l === l3 ? KEPT_CLOSING : LETTERS_CLOSING);
+          if (l === l2 || l === l3) kept(it.confused, story, it.id);
+          else it.confused.forEach(pq);
+          // A thinking board on every helped question but the first one of lessons 2 and 3 (that one has its own board).
+          if (it.scratch) {
+            expect(it.scratchLabel, it.id).toBeTruthy();
+            expect(it.scratch.done).toBe('');
+          }
+        }
+      }
+    }
+  });
+
+  it('X-read: the new words read at the game’s level, with curly quotes and no symbols', () => {
+    const contrast = [L1_LETTERS, L2_BROKEN].flatMap((c) => {
+      if (c.scene?.kind !== 'contrast') return [];
+      return [c.title, ...c.body, ...c.scene.pairs.flatMap((p) => [p.world, p.who, p.says, p.because, p.then ?? '']), c.scene.ask!.q, c.scene.ask!.a, ...Object.values(c.scene.words ?? {})];
+    });
+    const boards = [L2_CAN, L1_PQ, L4_PQ, L2_BOXES, ...keptBoards(SEEDS.slice(0, 4))];
+    const helps = boards.flatMap((st) => [
+      ...(st.misconceptions ?? []).map((m) => m.text),
+      ...(st.confused ?? []).flatMap((q) => [q.q, q.teach, ...q.options.map((o) => o.label)]),
+      st.words?.closing ?? '',
+      ...st.rows.map((r) => r.needs ?? ''),
+    ]);
+    const can = [L2_CAN.caption!, ...L2_CAN.body, L2_CAN.done, L2_CAN.twin!, ...L2_CAN.rows.flatMap((r) => r.marks.flatMap((m) => Object.values(m.why)))];
+    const text = [...contrast, ...helps, ...can, PQ_KEY, ...SKIN_IDS.map((s) => SKINS[s].kept), COMPARE_LINE].filter(Boolean);
+    checkLines(text);
+    expect(fkGrade(text.join('\n'))).toBeLessThanOrEqual(READING.maxGrade);
+    expect(longestSentence(text.join('\n')).words).toBeLessThanOrEqual(READING.maxSentenceWords);
+    expect(text.join('\n')).not.toMatch(/["']|[=≠✓→&]|\bWrong\b/);
+    // Every board and question text of lessons 1 to 4, the new ones included, at the level too.
+    for (const l of [l1, l2, l3, l4]) {
+      const all = [...l.drill!.flatMap(boardWords), ...SEEDS.slice(0, 4).flatMap((s) => l.practice(createRng(s)).flatMap(itemWords))];
+      checkLines(all);
+      expect(fkGrade(all.join('\n')), l.id).toBeLessThanOrEqual(READING.maxGrade);
+      expect(l.ideas.length, l.id).toBeLessThanOrEqual(7);
+    }
+  });
+
+  it('X-remind: lessons 2 to 4 rely on the letters (their pass rule asks for P and Q), so each says taughtIn and reminds', () => {
+    // Which fact a P and Q sentence names: “P is false” is notP.
+    const pqLit = (t: string): Lit => LITS.find((l) => SKINS.pq.fact(l, '') === t)!;
+    for (const l of [l2, l3, l4]) {
+      expect(l.distinctions, l.id).toContainEqual({ ...LETTER_VS_TRUTH, taughtIn: 's6.l1' });
+      const card = l.ideas.find((c) => c.distinction === LETTER_VS_TRUTH.id)!;
+      expect(card, l.id).toBeDefined();
+      expect(card.body.join(' '), l.id).toMatch(/With letters.*“P is true” means the IF part happened[.,]/);
+      expect(l.ideas.length, l.id).toBeLessThanOrEqual(7);
+    }
+    // Lesson 2: forward with letters. The P case that keeps the rule makes the named sentence true in every case left.
+    const fwd = l2.ideas.find((c) => c.distinction === LETTER_VS_TRUTH.id)!.body.join(' ').match(/“(P is \w+)” means the IF part happened, so “(Q is \w+)” is true for sure\./)!;
+    const [given, said] = [pqLit(fwd[1]), pqLit(fwd[2])];
+    expect(given).toBe('P');
+    const left = CASES.filter((c) => value(given, c.p, c.q) && ruleOk(c.p, c.q));
+    expect(left.length).toBeGreaterThan(0);
+    expect(left.every((c) => value(said, c.p, c.q))).toBe(true);
+    // Lesson 3: the four facts, each one a different part and truth.
+    const four = l3.ideas.find((c) => c.distinction === LETTER_VS_TRUTH.id)!.body.join(' ').match(/the four facts are “(.+?),” “(.+?),” “(.+?)” and “(.+?)\.”/)!;
+    expect(four.slice(1, 5).map(pqLit).sort()).toEqual([...LITS].sort());
+    // Lesson 4: “not P” is true exactly in the cases where the named fact holds.
+    const notP = l4.ideas.find((c) => c.distinction === LETTER_VS_TRUTH.id)!.body.join(' ').match(/“not P” is true when (P is \w+)\./)!;
+    for (const c of CASES) expect(value(pqLit(notP[1]), c.p, c.q)).toBe(value('notP', c.p, c.q));
+  });
+
+  it('X-slip: a plain one-mark slip names only that mark; the letters board catches the letters taken for things', () => {
+    const check = (st: DrillStep, change: Record<string, string>) => checkDrill(st, { ...right(st), ...change });
+    // On every lesson 2 and 3 row board, one wrong sentence mark is a slip: no mix-up is named, only that mark's words.
+    for (const st of keptBoards(SEEDS.slice(0, 6))) {
+      if (st.columns) continue;
+      for (const m of marksToTap(st).filter((x) => x.label !== CAN_LABEL)) {
+        const wrongPick = m.options.find((o) => o.id !== m.answer)!.id;
+        const r = check(st, { [m.id]: wrongPick });
+        expect(r.diagnosis, `${st.id} ${m.id}`).toBeUndefined();
+        expect(r.message, `${st.id} ${m.id}`).toBe(m.why[wrongPick]);
+      }
+    }
+    // The four boxes: a slip on a box no mix-up is about names nothing.
+    expect(check(L2_BOXES, { 'P-Q': 'no' }).diagnosis).toBeUndefined();
+    expect(check(L2_BOXES, { 'notP-notQ': 'no' }).diagnosis).toBeUndefined();
+    // The letters board: the break box (P is true, Q is false) marked as kept.
+    const brk = marksToTap(L1_PQ).find((m) => m.id === 'P-notQ')!;
+    expect(ruleOk(true, false)).toBe(false);
+    expect(brk.answer).toBe('no');
+    expect(check(L1_PQ, { 'P-notQ': 'yes' }).diagnosis).toBe('letter-as-thing');
+    expect(check(L1_PQ, { 'notP-Q': 'no' }).diagnosis).toBeUndefined();
+    expect(check(L1_PQ, {}).diagnosis).toBeUndefined();
+    const text = L1_PQ.misconceptions![0].text;
+    expect(text).toMatch(/^You may be treating the letter P and “P is true” as the same thing\. They are two different things/);
+    // Ben's case, in words and with letters, is the case on that box, and it breaks the rule.
+    const ben = text.match(/(Ben got dessert), so (P is \w+)\. (Ben left some veggies), so (Q is \w+)\. That case (breaks|keeps) the rule\./)!;
+    const row = readCase(SKINS.dessert, `${ben[1]} and ${ben[3].replace(/^Ben /, '')}`, { vowel: 'E', consonant: 'K', even: '4', odd: '7' }, true);
+    expect(readPQ(`${ben[2]} and ${ben[4]}`)).toEqual(row);
+    expect(row).toEqual({ p: true, q: false });
+    expect(ben[5]).toBe(ruleOk(row.p, row.q) ? 'keeps' : 'breaks');
+  });
+
+  it('X-frame: a wrong answer that keeps the case that would break the rule hears the always-true line', () => {
+    const LINE = 'Here the rule is always true, so that case can’t happen.';
+    let seen = 0;
+    for (const x of allMade()) {
+      const it = x.m.item;
+      if (it.kind !== 'choose') continue;
+      const tf = SKINS[x.skin].kase.TF;
+      // Forward (lesson 2): “Can’t tell”. Lesson 3: “Nothing follows for sure” when something does follow.
+      const fb = x.gen === 'turn' && x.m.meta.fact === 'P' ? it.feedback!.maybe : x.gen === 'move' && it.answer !== NOTHING ? it.feedback![NOTHING] : undefined;
+      if (!fb) continue;
+      seen++;
+      expect(fb.detail.join(' '), `${x.gen} ${x.skin}`).toContain(LINE);
+      // The case it crosses out is the one that breaks the rule.
+      expect(ruleOk(true, false)).toBe(false);
+      expect(fb.detail.join(' ').toLowerCase(), `${x.gen} ${x.skin}`).toContain(tf.toLowerCase());
+    }
+    expect(seen).toBeGreaterThan(0);
+  });
+});
+
+/** A sentence mark's label without its curly quotes and final period: “Max has four legs.” */
+const unquoteS = (s: string) => s.replace(/^“/, '').replace(/”$/, '').replace(/\.$/, '');

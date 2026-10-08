@@ -4,7 +4,7 @@
  * puzzles where exactly one box fits the rule, and writes the explanation from that case check.
  */
 import { syncWhyWrong } from '../teach';
-import type { CaseStep, CaseVerdict, ChoiceFeedback, DrillMark, DrillRow, DrillStep, IdeaCard, Rng, Scene, SignBox, Teach, TeachCase, Truth } from '../types';
+import type { Because, CaseStep, CaseVerdict, ChoiceFeedback, ConfusedQuestion, ContrastPanel, Distinction, DrillMark, DrillRow, DrillStep, IdeaCard, Misconception, Rng, Scene, SignBox, Teach, TeachCase, Truth } from '../types';
 import type { ItemCore, Made } from './statements';
 
 export type SignRule = 'one' | 'two' | 'none' | 'owner';
@@ -267,10 +267,13 @@ export function signCase(p: SignPuzzle, skin: SignSkin, b: number): TeachCase {
 export function signHeadline(p: SignPuzzle, skin: SignSkin, b: number): string {
   const w = signWords(skin);
   const ts = trueSigns(p.signs, b);
+  // The owner's rule: the truth comes from the sign's words in that test, never from the rule (a learner who stamps by
+  // the rule would read "makes it false, but the rule needs it true" as agreement).
   if (p.rule === 'owner') {
-    if (!ts.includes(b)) return `Your answer makes ${w.signOf(b)} false, but the rule needs it to be true.`;
+    if (!ts.includes(b)) return `Your answer makes ${w.signOf(b)} false, from its words, but the rule needs it to be true.`;
     const others = ts.filter((i) => i !== b);
-    return `Your answer makes ${w.signList(others)} true too, but the rule needs ${others.length === 1 ? 'it' : 'them'} to be false.`;
+    const one = others.length === 1;
+    return `Your answer makes ${w.signList(others)} true too, from ${one ? 'its' : 'their'} words, but the rule needs ${one ? 'it' : 'them'} to be false.`;
   }
   if (p.rule === 'none') return `Your answer makes ${w.signList(ts)} true, but the rule says every sign is false.`;
   const many = ts.length === 0 ? 'no sign' : ts.length === 3 ? 'all three signs' : `${NUM[ts.length]} sign${ts.length === 1 ? '' : 's'}`;
@@ -286,9 +289,10 @@ function signFeedback(p: SignPuzzle, skin: SignSkin, b: number): ChoiceFeedback 
     `Then ${each[0]}, ${each[1]}, and ${each[2]}.`,
     `${signCaseNote(p, skin, b)} So the ${w.item} can’t be ${w.prep} ${w.the(b)}.`,
   ];
-  // A sign that points to this box can make it look right. Only the rule says which signs to trust.
+  // A sign that points to this box can make it look right. A sign's truth comes from its words in a test; the rule
+  // only says which test to keep.
   const pointer = p.signs.findIndex((s, i) => (s.t === 'here' && i === b) || (s.t === 'in' && s.x === b));
-  if (pointer >= 0) detail.push(`${cap(w.signOf(pointer))} says the ${w.item} is ${w.prep} ${w.the(b)}. But signs can be false. Only the rule tells you which signs to trust.`);
+  if (pointer >= 0) detail.push(`${cap(w.signOf(pointer))} says the ${w.item} is ${w.prep} ${w.the(b)}. But a sign can be false. Stamp it from its words in each test. Then the rule says which test to keep.`);
   // The example card shows each sign's truth; the detail above already gives the count, so the card has no note.
   const { note: _note, ...example } = signCase(p, skin, b);
   return { headline: signHeadline(p, skin, b), detail, example };
@@ -354,6 +358,52 @@ export function signMarkWhy(p: SignPuzzle, skin: SignSkin, i: number, b: number)
   return `If the ${w.item} is ${w.prep} ${w.the(b)}, ${w.signOf(i)} is ${tv(signHolds(p.signs[i], i, b))}. It says, “${w.signText(p.signs[i])}” The ${w.item} ${b === target ? 'is' : 'is not'} ${w.prep} ${w.the(target)}.`;
 }
 
+/**
+ * The distinction every sign puzzle rests on: where the treasure is (the test world) is one thing; whether a sign's
+ * words are true in that world is another. A box can hold the treasure while its own sign is false.
+ */
+/** The sign boards' "I’m confused" closing line (BoardWords.closing); other boards set their own. */
+export const SIGN_CLOSING = 'Those two ideas are apart now. Back to the board: read each sign, then check its words against the test.';
+
+export const TREASURE_VS_SIGN: Distinction = { id: 'treasure-vs-sign', a: 'Where the treasure is (the test world).', b: 'Whether a sign’s words are true in that world.' };
+
+/**
+ * The distinction every rule rests on: the rule is about the real treasure place and is checked after the stamps; a
+ * stamp is what one sign's words give in this test. A test may break the rule, and breaking it is what rejects the box.
+ * Taught in Treasure signs (signRuleContrastCard, signRuleStampDrill), with the owner's rule (signOwnerContrastCard).
+ */
+export const RULE_VS_STAMP: Distinction = { id: 'rule-vs-stamp', a: 'What the rule says about the real treasure place.', b: 'What a sign’s words give in this test.' };
+
+/** A sign's claim with "this box" resolved: "the treasure is not in the Silver chest". */
+function claimOf(p: SignPuzzle, w: ReturnType<typeof signWords>, i: number): string {
+  return claimOfSign(w, p.signs[i], i);
+}
+
+/** The claim of sign `s` on box i, with "this box" resolved. */
+function claimOfSign(w: ReturnType<typeof signWords>, s: Sign, i: number): string {
+  return `the ${w.item} is ${s.t === 'notHere' || s.t === 'notIn' ? 'not ' : ''}${w.prep} ${w.the(signTarget(s, i))}`;
+}
+
+/** The comparison behind sign i's stamp with the treasure in box b: what it says, what the test says, and whether they agree. */
+export function signBecause(p: SignPuzzle, skin: SignSkin, i: number, b: number): Because {
+  const w = signWords(skin);
+  return { says: cap(claimOf(p, w, i)) + '.', world: `The ${w.item} is ${w.prep} ${w.the(b)}.`, match: signHolds(p.signs[i], i, b) };
+}
+
+/** The two facts to compare before stamping sign i in box b's case, with no verdict (DrillMark.compare). */
+export function signCompare(p: SignPuzzle, skin: SignSkin, i: number, b: number): { says: string; world: string } {
+  const w = signWords(skin);
+  return { says: cap(claimOf(p, w, i)) + '.', world: `The ${w.item} is ${w.prep} ${w.the(b)}.` };
+}
+
+/** What the rule needs, next to a case's count: "exactly 1 true sign", "no true sign", "only the Gold chest sign true". */
+export function signNeeds(p: SignPuzzle, skin: SignSkin, b: number): string {
+  const w = signWords(skin);
+  if (p.rule === 'owner') return `only ${w.signOf(b)} true`;
+  if (p.rule === 'none') return 'no true sign';
+  return `exactly ${needCount[p.rule]} true sign${needCount[p.rule] === 1 ? '' : 's'}`;
+}
+
 /** The note for a marked case: the count, what the rule needs, and the decision. */
 export function signDecision(p: SignPuzzle, skin: SignSkin, b: number): string {
   const w = signWords(skin);
@@ -380,6 +430,7 @@ export function signCaseRow(p: SignPuzzle, skin: SignSkin, b: number, given: boo
       on: i,
       ...(given ? { given: true } : {}),
       why: { [tv(!value)]: signMarkWhy(p, skin, i, b) },
+      compare: signCompare(p, skin, i, b),
     };
   });
   const need = p.rule === 'owner' ? `${w.signOf(b)} to be the only true sign` : p.rule === 'none' ? 'every sign to be false' : `exactly ${needCount[p.rule]} true sign${needCount[p.rule] === 1 ? '' : 's'}`;
@@ -393,7 +444,129 @@ export function signCaseRow(p: SignPuzzle, skin: SignSkin, b: number, given: boo
       ? { reject: `The rule needs ${need}. This case has that. So keep ${w.the(b)}.` }
       : { keep: `The rule needs ${need}. This case has ${n} true sign${n === 1 ? '' : 's'}${p.rule === 'owner' && n === 1 ? `, but it is not ${w.signOf(b)}` : ''}. So reject ${w.the(b)}.` },
   });
-  return { id, label: `Pretend the ${w.item} is ${w.prep} ${w.the(b)}.`, marks, note: signDecision(p, skin, b), case: { box: b, name: w.the(b) } };
+  return { id, label: `Pretend the ${w.item} is ${w.prep} ${w.the(b)}.`, marks, note: signDecision(p, skin, b), case: { box: b, name: w.the(b) }, needs: signNeeds(p, skin, b), needTrue: p.rule === 'owner' ? 1 : needCount[p.rule], ...(p.rule === 'owner' ? { needOn: b } : {}) };
+}
+
+/**
+ * The mix-ups a wrong case board can show, with the words that teach the distinction (Misconception), in the order
+ * they are checked. First the rule bent into a stamping instruction (fit-rule), then the one the chests are known to
+ * cause: "the treasure is here" taken to mean "this sign is true" (own-true), and its mirror (own-false). The texts
+ * follow the rule: under "every sign is false" or the owner's rule, a True stamp is not a reason to keep the box.
+ */
+export function signMisconceptions(skin: SignSkin, rule: SignRule = 'one'): Misconception[] {
+  const w = signWords(skin);
+  const check = `Read the sign’s words. Then check them against the test: where are we pretending the ${w.item} is?`;
+  const ruleIs =
+    rule === 'owner'
+      ? `The rule is about the real ${w.item} place: that ${w.noun}’s own sign is true, and the other two are false.`
+      : rule === 'none'
+        ? `The rule is about the real ${w.item} place: there, every sign is false.`
+        : `The rule is about the real ${w.item} place: there, exactly ${NUM[needCount[rule]]} sign${needCount[rule] === 1 ? ' is' : 's are'} true.`;
+  const compare =
+    rule === 'owner'
+      ? `Look at which sign is True, not only how many. Part 1: is this ${w.noun}’s own sign True? Part 2: are the other two False? If either part fails, reject the ${w.noun}.`
+      : rule === 'none'
+        ? `The rule needs no True stamp at all. If even one sign is True in this test, reject the ${w.noun}.`
+        : `The rule says how many signs must be true. If the count is not that number, reject the ${w.noun}.`;
+  return [
+    {
+      id: 'fit-rule',
+      when: 'fit-rule',
+      text: `You may be using the rule to set the stamps. A stamp comes from the sign’s words only: do they fit this test? ${ruleIs} It is checked after the stamps, never used to change them. If the stamps do not fit the rule, that is the answer: reject this ${w.noun}.`,
+    },
+    {
+      id: 'own-true',
+      when: 'own-true',
+      // Under the owner's rule the real treasure box's sign IS true, so "a box can have the treasure while its sign is
+      // false" would contradict the rule banner over the board. There the belief is the rule used as a stamp.
+      text:
+        rule === 'owner'
+          ? `You may be treating the rule and this ${w.noun}’s stamp as the same thing. They are two different things: the rule is about the real ${w.item} ${w.noun}, and it is checked after the stamps. Stamp this ${w.noun}’s sign from its words only. If they do not fit the test, it is False, and part 1 of the rule fails.`
+          : `You may be treating “the ${w.item} is ${w.prep} this ${w.noun}” and “this ${w.noun}’s sign is true” as the same thing. They are two different things. A ${w.noun} can have the ${w.item} while its sign is false. ${check}`,
+    },
+    {
+      id: 'own-false',
+      when: 'own-false',
+      // The mirror of own-true: the treasure here taken to make its own sign false (after "a chest can have the
+      // treasure while its sign is false", or a rule bent into stamps).
+      text: `You may be treating “the ${w.item} is ${w.prep} this ${w.noun}” and “this ${w.noun}’s sign is false” as the same thing. They are two different things. Where the ${w.item} is does not make a sign false. In this test the ${w.item} is here, and this sign’s words fit that, so the sign is true, whatever the rule says. ${check}`,
+    },
+    {
+      id: 'verdict-only',
+      when: 'verdict-only',
+      text: `Your stamps are right. Now compare them with the rule. ${compare}`,
+    },
+    {
+      id: 'copied',
+      when: 'copied',
+      text: `These stamps match a different test. A sign can be true in one test and false in the next, because the ${w.item} moved. Check each sign again against this test: where is the ${w.item} now?`,
+    },
+    {
+      id: 'all-one',
+      when: 'all-one',
+      text: `A stamp is about one sign’s words, not about the ${w.noun}. Pretending the ${w.item} is here does not make every sign true, or every sign false. Read each sign on its own and check its words against the test.`,
+    },
+  ];
+}
+
+/**
+ * The "I’m confused" questions for a sign board, one per distinction: the treasure's place vs a sign's truth, the rule
+ * vs the stamps, and a sign's truth in one test vs the next. Each finds one merged idea and teaches it apart.
+ */
+export function signConfused(skin: SignSkin, rule: SignRule = 'one'): ConfusedQuestion[] {
+  const w = signWords(skin);
+  const ruleQ: ConfusedQuestion =
+    rule === 'none'
+      ? {
+          q: `The rule says every sign is false. In this test, the words on one sign fit the test. How do you stamp that sign?`,
+          options: [{ label: 'False, so it fits the rule' }, { label: `True. Then the rule says: reject this ${w.noun}`, right: true }, { label: 'Not sure' }],
+          teach: `Stamp from the words only. A stamp says whether a sign’s words fit this test. The rule is about the real ${w.item} place, and it is checked after the stamps. A True stamp under this rule just means: reject this ${w.noun}.`,
+        }
+      : rule === 'owner'
+        ? {
+            q: `The rule says the sign on the ${w.noun} with the ${w.item} is true. In this test, the picked ${w.noun}’s own sign does not fit the test. How do you stamp it?`,
+            options: [{ label: 'True, because the rule says so' }, { label: `False. Then part 1 of the rule fails: reject this ${w.noun}`, right: true }, { label: 'Not sure' }],
+            teach: `Stamp from the words only. The rule does not make the own sign true; it asks whether it is. If the own sign comes out False in this test, this ${w.noun} fails the rule, so reject it.`,
+          }
+        : {
+            q: `The rule says exactly ${NUM[needCount[rule]]} sign${needCount[rule] === 1 ? ' is' : 's are'} true. In this test, the words on ${needCount[rule] === 1 ? 'two signs' : 'all three signs'} fit the test. How do you stamp them?`,
+            options: [{ label: `Only ${NUM[needCount[rule]]} True, so it fits the rule` }, { label: `All of them True. Then the rule says: reject this ${w.noun}`, right: true }, { label: 'Not sure' }],
+            teach: `Stamp from the words only. A stamp says whether a sign’s words fit this test. The rule is about the real ${w.item} place, and it is checked after the stamps. Too many True stamps just means: reject this ${w.noun}.`,
+          };
+  // Where the treasure is decides a sign neither way: it does not make the sign true, and it does not make it false.
+  // Under the owner's rule a false own sign in a test means that test fails, not that the treasure moved.
+  const owner = rule === 'owner';
+  const after = owner ? `Then part 1 of the rule fails, so you reject that ${w.noun}.` : `And a false sign does not move the ${w.item}: it can still be here.`;
+  return [
+    {
+      q: `We pretend the ${w.item} is ${w.prep} one ${w.noun}. Does that decide if that ${w.noun}’s sign is true or false?`,
+      options: [{ label: 'Yes: the sign must be true' }, { label: 'Yes: the sign must be false' }, { label: 'No: only its words decide, checked against the test', right: true }, { label: 'Not sure' }],
+      teach: `No. Where the ${w.item} is does not make a sign true, and it does not make it false. A sign is true only when its words fit the test. ${owner ? 'In a test, a' : 'A'} ${w.noun} can have the ${w.item} while its sign says “The ${w.item} is not ${w.prep} this ${w.noun}.” That sign is false. ${after}`,
+    },
+    ruleQ,
+    {
+      q: 'Can the same sign be true in one test and false in the next test?',
+      options: [{ label: 'Yes', right: true }, { label: 'No, a sign is true or false for good' }, { label: 'Not sure' }],
+      teach: `Yes. Each test pretends the ${w.item} is somewhere new. The sign’s words stay the same, but the ${w.item} moved, so the words can fit one test and not the next. Stamp every sign again in every test.`,
+    },
+  ];
+}
+
+/** The note on the test-world line, by rule: under "every sign is false" or the owner's rule, a True stamp is still a stamp. */
+export function signWorldNote(skin: SignSkin, rule: SignRule): string {
+  const w = signWords(skin);
+  if (rule === 'none') return `For this test only. Stamp from the words: a sign can come out True here. The rule is checked after.`;
+  if (rule === 'owner') return `For this test only. Stamp each sign from its words. The rule is checked after the stamps.`;
+  return `For this test only. Where the ${w.item} is does not say if a sign is true.`;
+}
+
+/** The method's steps on a full-scaffold board. The owner's rule has two parts, so its compare step names them. */
+export function signSteps(skin: SignSkin, rule: SignRule): string[] {
+  const w = signWords(skin);
+  const pretend = `Pretend the ${w.item} is ${w.prep} one ${w.noun}`;
+  if (rule === 'owner') return [pretend, 'Stamp each sign from its words', `Part 1: is this ${w.noun}’s own sign True?`, 'Part 2: are the other two signs False?', `Keep or reject the ${w.noun}`];
+  if (rule === 'none') return [pretend, 'Stamp each sign: do its words fit the test?', 'Count the True stamps', 'The rule needs none. Is the count 0?', `Keep or reject the ${w.noun}`];
+  return [pretend, 'Stamp each sign: do its words fit the test?', 'Count the True stamps', 'Compare the count with the rule', `Keep or reject the ${w.noun}`];
 }
 
 export interface SignDrillOptions {
@@ -407,6 +580,8 @@ export interface SignDrillOptions {
   done: string;
   /** A twin board: what changed, in words, and the sign it changed. */
   twin?: { note: string; sign: number };
+  /** How much of the reasoning stays on screen (DrillStep.scaffold). Default 'light'. */
+  scaffold?: 'full' | 'light';
 }
 
 /** A case board on a sign puzzle: the same boxes and rule as the scene, some cases shown, some to mark. */
@@ -421,6 +596,376 @@ export function signDrill(p: SignPuzzle, skin: SignSkin, o: SignDrillOptions): D
     layout: 'cases',
     rows: [...o.shown.map((b) => signCaseRow(p, skin, b, true)), ...o.mark.map((b) => signCaseRow(p, skin, b, false))],
     done: o.done,
+    ...(o.scaffold ? { scaffold: o.scaffold } : {}),
+    misconceptions: signMisconceptions(skin, p.rule),
+    confused: signConfused(skin, p.rule),
+    distinction: TREASURE_VS_SIGN.id,
+    words: { worldNote: signWorldNote(skin, p.rule), closing: SIGN_CLOSING },
+    steps: signSteps(skin, p.rule),
+  };
+}
+
+// ---------- the distinction: where the treasure is vs whether a sign is true ----------
+
+/** The two panels of the contrast: the same test world, the same box, a sign that fits and one that does not. */
+function contrastScene(skin: SignSkin, b: number, real: Sign): Extract<Scene, { kind: 'contrast' }> {
+  const w = signWords(skin);
+  const [fits, miss] = contrastSigns(b, real);
+  return {
+    kind: 'contrast',
+    pairs: [signPanel(skin, b, fits, b), signPanel(skin, b, miss, b)],
+    ask: { q: `Did the ${w.item} move?`, a: `No. Only the words on the sign changed. So where the ${w.item} is and whether a sign is true are two different things.` },
+  };
+}
+
+/**
+ * The key-idea card that teaches the distinction, before any case is marked: two signs on the same box, in the same
+ * test world, one true and one false. The treasure never moved; the words did.
+ */
+export function signContrastCard(p: SignPuzzle, skin: SignSkin): IdeaCard {
+  const w = signWords(skin);
+  const b = p.answer;
+  return {
+    title: 'Two different things',
+    distinction: TREASURE_VS_SIGN.id,
+    body: [
+      'Two things are being tested, and they are not the same.',
+      `One: where we pretend the ${w.item} is. Two: whether the words on a sign fit that pretend place.`,
+      `A ${w.noun} can have the ${w.item} while its own sign is false. Look at the two signs below. Same test, same ${w.noun}, different words.`,
+    ],
+    scene: contrastScene(skin, b, p.signs[b]),
+  };
+}
+
+/**
+ * The small board right after the contrast card: stamp the two signs from the picture yourself. It is the Do for the
+ * distinction, so the first case board is not the first time the learner separates the two ideas.
+ */
+export function signDistinctionDrill(p: SignPuzzle, skin: SignSkin, id: string, afterCard: number): DrillStep {
+  const w = signWords(skin);
+  const b = p.answer;
+  const scene = contrastScene(skin, b, p.signs[b]);
+  const row = (k: 0 | 1): DrillRow => {
+    const panel = scene.pairs[k];
+    const value = panel.truth;
+    const wrongWhy = value
+      ? `${panel.who} says, “${panel.says}” The test says the ${w.item} is ${w.prep} ${w.the(b)}. The words fit the test, so this sign is true.`
+      : `${panel.who} says, “${panel.says}” The test says the ${w.item} is ${w.prep} ${w.the(b)}. The words do not fit the test, so this sign is false, even though the ${w.item} is here.`;
+    return {
+      id: `pair${k}`,
+      label: `${panel.world} ${panel.who} says, “${panel.says}”`,
+      marks: [{ id: `pair${k}-stamp`, label: `${panel.who}: true or false in this test?`, options: [{ id: 'true', label: 'True' }, { id: 'false', label: 'False' }], answer: tv(value), why: { [tv(!value)]: wrongWhy } }],
+    };
+  };
+  return {
+    id,
+    title: 'Stamp the two signs',
+    body: [`The ${w.item} is ${w.prep} ${w.the(b)} in both tests. Read each sign’s words. Do they fit the test?`],
+    scene,
+    rows: [row(0), row(1)],
+    afterCard,
+    distinction: TREASURE_VS_SIGN.id,
+    done: `Right. The ${w.item} is ${w.prep} ${w.the(b)} both times, but one sign is true and one is false. The words decide, not the ${w.item}.`,
+  };
+}
+
+// ---------- the distinction: the rule vs the stamps ----------
+//
+// A stamp comes from one sign's words in one test. The rule is about the real treasure place: it is checked after the
+// stamps, on the whole case, and a case that breaks it is rejected. Never the other way round: the rule never sets or
+// changes a stamp. Every truth below comes from signHolds(), every count from trueSigns() and every verdict from
+// fitsRule().
+
+/** One contrast panel: sign `s` on box i, in the test where the treasure is in box b, with the comparison in words. */
+function signPanel(skin: SignSkin, i: number, s: Sign, b: number): ContrastPanel {
+  const w = signWords(skin);
+  const truth = signHolds(s, i, b);
+  const not = s.t === 'notHere' || s.t === 'notIn';
+  return {
+    world: `Test: the ${w.item} is ${w.prep} ${w.the(b)}.`,
+    who: cap(w.signOf(i)),
+    says: w.signText(s),
+    truth,
+    because: `It says ${not ? 'not ' : ''}${w.the(signTarget(s, i))}. The test says ${w.the(b)}. ${truth ? 'The words fit the test, so True.' : 'The words do not fit the test, so False.'}`,
+  };
+}
+
+/** What a count rule needs, as stamps: "exactly 1 True stamp", "no True stamp". */
+const needStamps = (rule: Exclude<SignRule, 'owner'>) =>
+  rule === 'none' ? 'no True stamp' : `exactly ${needCount[rule]} True stamp${needCount[rule] === 1 ? '' : 's'}`;
+
+/** The two true signs of a test that a count rule rejects (the contrast's panels), and the sign left out of them. */
+function ruleCase(p: SignPuzzle, b: number): { pair: [number, number]; rest: number; rule: Exclude<SignRule, 'owner'> } {
+  const ts = trueSigns(p.signs, b);
+  if (p.rule === 'owner' || ts.length !== 2 || fitsRule(p.signs, p.rule, b)) throw new Error('the rule contrast needs a count rule and a test with exactly two true signs that breaks it');
+  return { pair: [ts[0], ts[1]], rest: [0, 1, 2].find((k) => !ts.includes(k))!, rule: p.rule };
+}
+
+/**
+ * The rule vs the stamps, for a count rule: one test (the treasure in box b) where the words make two signs true and
+ * the rule wants a different count. Both are stamped True from their words; only then is the rule checked, and it
+ * rejects the box. Each panel's last line says what happens next.
+ */
+function ruleContrastScene(p: SignPuzzle, skin: SignSkin, b: number): Extract<Scene, { kind: 'contrast' }> {
+  const w = signWords(skin);
+  const { pair: [i, j], rule } = ruleCase(p, b);
+  const n = trueSigns(p.signs, b).length;
+  return {
+    kind: 'contrast',
+    pairs: [
+      { ...signPanel(skin, i, p.signs[i], b), then: 'Stamp it True. The rule waits until every sign is stamped.' },
+      { ...signPanel(skin, j, p.signs[j], b), then: `Stamp it True too, even with the rule. That makes ${n} True stamps.` },
+    ],
+    ask: {
+      q: 'Did the rule change a stamp?',
+      a: `No. The words decide each stamp. Then the rule is checked: ${n} True stamps, but it needs ${needStamps(rule)}. So reject ${w.the(b)}.`,
+    },
+  };
+}
+
+/**
+ * The "before you start" card: the rule is checked last. In one test the words give two True stamps under a rule that
+ * wants another count; the stamps stay, and the rule rejects the box. Shown after the treasure-vs-sign contrast.
+ */
+export function signRuleContrastCard(p: SignPuzzle, skin: SignSkin, b: number): IdeaCard {
+  const w = signWords(skin);
+  const { rest } = ruleCase(p, b);
+  const restFits = signHolds(p.signs[rest], rest, b);
+  return {
+    title: 'Before you start: stamps first, rule last',
+    distinction: RULE_VS_STAMP.id,
+    body: [
+      `The rule says, “${w.ruleText(p.rule)}” It is checked last. First stamp each sign from its words.`,
+      `If the count does not fit the rule, reject the ${w.noun}. Never change a stamp to make it fit.`,
+      `Below, we pretend the ${w.item} is ${w.prep} ${w.the(b)}. The words on two signs fit that test. ${cap(w.signOf(rest))} ${restFits ? 'fits too, so it is True' : 'does not fit, so it is False'}.`,
+    ],
+    scene: ruleContrastScene(p, skin, b),
+  };
+}
+
+/**
+ * The board right after the rule card: stamp the two signs from their words, then check the rule and keep or reject
+ * the box. Its misconceptions catch stamps bent to fit the rule, and a kept box with the right stamps.
+ */
+export function signRuleStampDrill(p: SignPuzzle, skin: SignSkin, id: string, afterCard: number, b: number): DrillStep {
+  const w = signWords(skin);
+  const scene = ruleContrastScene(p, skin, b);
+  const { pair, rest, rule } = ruleCase(p, b);
+  const ts = trueSigns(p.signs, b);
+  const fit = fitsRule(p.signs, p.rule, b);
+  const need = signNeeds(p, skin, b);
+  const stampRow = (k: 0 | 1): DrillRow => {
+    const panel = scene.pairs[k];
+    const value = panel.truth;
+    const test = `The test says the ${w.item} is ${w.prep} ${w.the(b)}.`;
+    return {
+      id: `pair${k}`,
+      label: `${panel.world} ${panel.who} says, “${panel.says}”`,
+      marks: [
+        {
+          id: `pair${k}-stamp`,
+          label: `${panel.who}: True or False in this test?`,
+          options: TF,
+          answer: tv(value),
+          why: {
+            [tv(!value)]: value
+              ? `${panel.who} says, “${panel.says}” ${test} The words fit the test, so this sign is True. The rule does not change a stamp.`
+              : `${panel.who} says, “${panel.says}” ${test} The words do not fit the test, so this sign is False.`,
+          },
+          compare: signCompare(p, skin, pair[k], b),
+        },
+      ],
+    };
+  };
+  const decide: DrillRow = {
+    id: 'rule',
+    label: `Last, check the rule: “${w.ruleText(p.rule)}” ${cap(w.signOf(rest))} is ${cap(tv(signHolds(p.signs[rest], rest, b)))} in this test.`,
+    needs: need,
+    marks: [
+      {
+        id: 'rule-decide',
+        label: `Keep or reject ${w.the(b)}?`,
+        options: DECIDE,
+        answer: fit ? 'keep' : 'reject',
+        why: fit
+          ? { reject: `The rule needs ${need}. This test has that. So keep ${w.the(b)}.` }
+          : { keep: `The rule needs ${need}. This test has ${signCount(ts.length)}: ${w.signList(ts)}. So reject ${w.the(b)}.` },
+      },
+    ],
+  };
+  const rows = [stampRow(0), stampRow(1), decide];
+  const right = (r: DrillRow) => r.marks[0].answer;
+  const flip = (v: string) => (v === 'true' ? 'false' : 'true');
+  const bent = `You may be treating the rule and the stamps as the same thing. They are two different things: a stamp comes from a sign’s words, and the rule is checked after.`;
+  return {
+    id,
+    title: 'Stamp first, then check the rule',
+    body: [`The ${w.item} is ${w.prep} ${w.the(b)} in both panels. Stamp each sign from its words. Then check the rule last.`],
+    scene,
+    rows,
+    afterCard,
+    distinction: RULE_VS_STAMP.id,
+    scaffold: 'full',
+    steps: [`Stamp ${w.signOf(pair[0])} from its words`, `Stamp ${w.signOf(pair[1])} from its words`, 'Count the True stamps, then check the rule'],
+    // A stamp bent so the count fits, with Keep; right stamps with Keep. A wrong stamp with Reject, or with no verdict
+    // yet, shows no belief (the count then fits, so a learner who bent it would keep): it gets the mark's own words, which
+    // already say the rule does not change a stamp.
+    // The bent stamps are every way of changing the two True stamps so the count is what the rule needs (the third
+    // sign is False here): one of them under “Exactly one”, both under “Every sign is false”.
+    misconceptions: [
+      ...([
+        ['fit-rule', [right(rows[0]), flip(right(rows[1]))]],
+        ['fit-rule-first', [flip(right(rows[0])), right(rows[1])]],
+        ['fit-rule-both', [flip(right(rows[0])), flip(right(rows[1]))]],
+      ] as const)
+        .filter(([, v]) => v.filter((x) => x === 'true').length === needCount[rule])
+        .map(([mid, [v0, v1]]): Misconception => ({
+          id: mid,
+          when: 'picks',
+          picks: { 'pair0-stamp': v0, 'pair1-stamp': v1, 'rule-decide': 'keep' },
+          text: `${bent} Never change a stamp to make it fit. If the True stamps break the rule, reject the ${w.noun}.`,
+        })),
+      {
+        id: 'verdict-only',
+        when: 'picks',
+        picks: { 'pair0-stamp': right(rows[0]), 'pair1-stamp': right(rows[1]), 'rule-decide': fit ? 'reject' : 'keep' },
+        text: `You may be treating right stamps and a kept ${w.noun} as the same thing. They are two different things: right stamps can still break the rule. Count the True stamps, then compare the count with the rule.`,
+      },
+    ],
+    done: `Right. The words gave ${NUM[ts.length]} True stamps, and the rule did not change them. The rule needs ${need}, so ${w.the(b)} is crossed out.`,
+  };
+}
+
+// ---------- the owner's rule: the rule checks the own stamp, it does not set it ----------
+
+/**
+ * The two signs of a contrast on box b, in the test where the treasure is in box b: one that fits the test ("in this
+ * box"), and the sign the puzzle really has on box b when it is false there, otherwise one that names another box.
+ */
+function contrastSigns(b: number, real: Sign): [Sign, Sign] {
+  const other = [0, 1, 2].find((k) => k !== b)!;
+  return [{ t: 'here' }, signHolds(real, b, b) ? { t: 'in', x: other } : real];
+}
+
+/**
+ * The owner's rule vs the stamp: the same test (the treasure in box b) twice, with two different signs on box b. One
+ * fits the test, so it is True and part 1 of the rule passes; one does not, so it is False and part 1 fails. The rule
+ * did not change either stamp: it checks them.
+ */
+function ownerContrastScene(p: SignPuzzle, skin: SignSkin, b: number): Extract<Scene, { kind: 'contrast' }> {
+  if (p.rule !== 'owner') throw new Error('the owner contrast needs the owner’s rule');
+  const w = signWords(skin);
+  const then = (truth: boolean) =>
+    truth ? `Part 1 passes: ${w.signOf(b)} is True. Next, check part 2.` : `Part 1 fails: ${w.signOf(b)} is False. Reject ${w.the(b)}.`;
+  const pairs = contrastSigns(b, p.signs[b]).map((s) => {
+    const panel = signPanel(skin, b, s, b);
+    return { ...panel, then: then(panel.truth) };
+  }) as [ContrastPanel, ContrastPanel];
+  return {
+    kind: 'contrast',
+    pairs,
+    ask: { q: 'Did the rule change the stamp?', a: 'No. The words decide the stamp. The rule decides keep or reject, after the stamps.' },
+  };
+}
+
+/**
+ * The owner's contrast card: the rule does not make a sign true; it checks the stamp the words give. Same test, two
+ * signs on the pretend box: True passes part 1, False fails it.
+ */
+export function signOwnerContrastCard(p: SignPuzzle, skin: SignSkin, b: number): IdeaCard {
+  const w = signWords(skin);
+  return {
+    title: 'The rule checks the stamp',
+    distinction: RULE_VS_STAMP.id,
+    body: [
+      `Here is one test, two times: we pretend the ${w.item} is ${w.prep} ${w.the(b)}. Only the words on ${w.signOf(b)} change.`,
+      `Stamp the sign from its words. Then part 1 of the rule checks the stamp. True passes. False fails, so you reject the ${w.noun}.`,
+    ],
+    scene: ownerContrastScene(p, skin, b),
+  };
+}
+
+/**
+ * The board right after the owner's contrast: in each test, stamp the sign on box b from its words, then say whether
+ * part 1 of the rule passes. Its misconceptions catch the rule used as a stamp, and the treasure taken to make a sign false.
+ */
+export function signOwnerDrill(p: SignPuzzle, skin: SignSkin, id: string, afterCard: number, b: number): DrillStep {
+  const w = signWords(skin);
+  const scene = ownerContrastScene(p, skin, b);
+  const signs = contrastSigns(b, p.signs[b]);
+  const PART1 = [{ id: 'holds', label: 'Passes' }, { id: 'crashes', label: 'Fails' }];
+  const test = `The test says the ${w.item} is ${w.prep} ${w.the(b)}.`;
+  const row = (k: 0 | 1): DrillRow => {
+    const panel = scene.pairs[k];
+    const value = panel.truth;
+    return {
+      id: `own${k}`,
+      label: `${panel.world} ${panel.who} says, “${panel.says}”`,
+      marks: [
+        {
+          id: `own${k}-stamp`,
+          label: `${panel.who}: True or False in this test?`,
+          options: TF,
+          answer: tv(value),
+          why: {
+            [tv(!value)]: value
+              ? `${panel.who} says, “${panel.says}” ${test} The words fit the test, so this sign is True.`
+              : `${panel.who} says, “${panel.says}” ${test} The words do not fit the test, so this sign is False, even with the rule.`,
+          },
+          compare: { says: cap(claimOfSign(w, signs[k], b)) + '.', world: `The ${w.item} is ${w.prep} ${w.the(b)}.` },
+        },
+        {
+          id: `own${k}-part1`,
+          label: 'Part 1 of the rule: does it pass?',
+          options: PART1,
+          answer: value ? 'holds' : 'crashes',
+          why: value
+            ? { crashes: `${panel.who} is True in this test. Part 1 needs that sign to be True, so part 1 passes.` }
+            : { holds: `${panel.who} is False in this test. Part 1 needs it to be True, so part 1 fails. Reject ${w.the(b)}.` },
+        },
+      ],
+    };
+  };
+  const rows = [row(0), row(1)];
+  const right = (r: DrillRow) => r.marks[0].answer;
+  const flip = (v: string) => (v === 'true' ? 'false' : 'true');
+  /** The panel whose sign does not fit the test (part 1 fails there). */
+  const failing = scene.pairs.findIndex((pp) => !pp.truth);
+  return {
+    id,
+    title: 'Stamp it, then check part 1',
+    body: [`The ${w.item} is ${w.prep} ${w.the(b)} in both tests. Stamp ${w.signOf(b)} from its words. Then check part 1 of the rule.`],
+    scene,
+    rows,
+    afterCard,
+    distinction: RULE_VS_STAMP.id,
+    scaffold: 'full',
+    steps: ['Stamp the first sign from its words', 'Check part 1 for the first sign', 'Stamp the second sign from its words', 'Check part 1 for the second sign'],
+    misconceptions: [
+      {
+        // The false sign stamped True (the true one right): the rule read as "the treasure box's sign is True".
+        id: 'rule-stamp',
+        when: 'picks',
+        picks: { 'own0-stamp': right(rows[0]), 'own1-stamp': flip(right(rows[1])) },
+        text: `You may be treating the rule and the stamp as the same thing. They are two different things: the rule is about the real ${w.item} ${w.noun}, and it is checked after the stamps. Stamp from the words only. A False stamp here means part 1 fails, so reject ${w.the(b)}.`,
+      },
+      {
+        // The true sign stamped False (the false one right): the treasure taken to make its sign false.
+        id: 'here-false',
+        when: 'picks',
+        picks: { 'own0-stamp': flip(right(rows[0])), 'own1-stamp': right(rows[1]) },
+        text: `You may be treating where the ${w.item} is and whether its sign is true as the same thing. They are two different things: only the words decide the stamp. A ${w.noun}’s own sign can be True in a test, and then part 1 passes.`,
+      },
+      {
+        // The False sign stamped right, but part 1 passed anyway: the rule taken as already true in the test. Only on the
+        // failing panel: on the passing one, Fails after a True stamp is not that belief, so the mark's own words follow.
+        id: 'verdict-only',
+        when: 'picks',
+        picks: { [`own${failing}-stamp`]: 'false', [`own${failing}-part1`]: 'holds' },
+        text: `You may be treating “the rule says it” and “this test passes” as the same thing. They are two different things: in a test, the rule is a check, and it can fail. Part 1 passes only when ${w.signOf(b)} is stamped True.`,
+      },
+    ],
+    done: `Right. The test never moved. When ${w.signOf(b)} came out True, part 1 passed. When it came out False, part 1 failed, so you reject ${w.the(b)}. The words set the stamp. The rule checks it after.`,
   };
 }
 
@@ -469,7 +1014,7 @@ export function signWalk(p: SignPuzzle, skin: SignSkin): IdeaCard[] {
   const verdicts = caseVerdicts(p);
   const cases = [0, 1, 2].map((b): IdeaCard => {
     const steps: CaseStep[] = [
-      ...p.signs.map((_, i) => ({ label: `Check ${w.signOf(i)}`, say: stampWhy(p, skin, i, b) })),
+      ...p.signs.map((_, i) => ({ label: `Check ${w.signOf(i)}`, say: stampWhy(p, skin, i, b), because: signBecause(p, skin, i, b) })),
       { label: 'Count and decide', say: caseVerdictLine(p, skin, b) },
     ];
     return {
@@ -564,6 +1109,8 @@ export function signItem(rng: Rng, opts: SignItemOptions): SignMade {
     hintCase: signHintCase(p, opts.skin),
     teach: signTeach(p, opts.skin),
     scratch: signScratch(p, opts.skin),
+    confused: signConfused(opts.skin, p.rule),
+    confusedClosing: SIGN_CLOSING,
   };
   syncWhyWrong(item);
   if (signDeniesAnswer(p)) item.conflict = true;

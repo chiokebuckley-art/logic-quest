@@ -1,9 +1,13 @@
 /**
  * Stop 7, Lesson 2 · The best explanation (abduction).
  * Pick the simplest explanation that fits every clue: a best guess. Then check it, because a new clue can change it.
+ * Each idea is the whole story of what happened: it fits a clue when the clue could still be true in that story, and
+ * misses it when the story would make the clue different. Fitting is not explaining (the distinction fits-vs-explains,
+ * taught with a contrast card and its board right after card 2).
  *
- * See: four cards build the idea on one story (the wet grass), and the worked example marks it on a grid (ideas by
- * clues, ✓ fits and ✗ does not, the best named). Do: two boards on that grid, right after it: mark a new clue (the dry
+ * See: five cards build the idea on one story (the wet grass), and the worked example marks it on a grid (ideas by
+ * clues, ✓ fits and ✗ misses, the best named). Do: first, right after the contrast card, four cases of an idea and a
+ * clue: does the idea explain it, and does it fit? Then two boards on the grid, right after it: mark a new clue (the dry
  * roof, which rules the rain idea out, so it is a good check), then, on a twin grid with that clue added, pick the best
  * guess from the first two clues (fewest extra things), pick a check that could rule one of the two fitting ideas out,
  * mark which ideas fit all three clues and pick the best guess now. The last card works one check (a clue one idea
@@ -13,6 +17,7 @@
  * The wet grass story is never a quiz, check or Arcade item.
  */
 import {
+  FITS_VS_EXPLAINS,
   WORKED,
   WORKED_NEW,
   WORKED_PAIR,
@@ -22,6 +27,8 @@ import {
   bestItem,
   bestOf,
   fitBoard,
+  fitsBoard,
+  fitsContrastCard,
   MAKERS,
   newClueItem,
   newClueScene,
@@ -75,12 +82,15 @@ export const lesson: LessonModule['lesson'] = {
     {
       title: 'Fit every clue',
       body: [
-        'An idea fits a clue when the clue makes sense if the idea is true.',
+        'Picture the idea as the whole story of what happened. It fits a clue if the clue could still be true in that story. It misses a clue if the story would make the clue different.',
         `Say the street is wet too. ${WORKED_SHOWN[1].why.rain} So ${RAIN.name} fits that clue.`,
-        `${WORKED_SHOWN[1].why.sprinkler} So ${SPRINKLER.name} does not fit that clue.`,
+        `${WORKED_SHOWN[1].why.sprinkler} So ${SPRINKLER.name} misses that clue.`,
+        'In Stop 6, you asked: could it happen another way? Here, each idea is the whole story. Don’t add a second idea to save it.',
         'The best explanation must fit every clue. If an idea misses even one clue, it is out.',
       ],
     },
+    // Before any grid: fitting is not explaining (a contrast, and its board right after it).
+    fitsContrastCard(),
     {
       title: 'Keep it simple',
       body: [
@@ -96,8 +106,8 @@ export const lesson: LessonModule['lesson'] = {
       title: 'Example: the wet grass',
       scene: workedScene(),
       body: [
-        'Here is the wet grass case, marked for you. ✓ means the idea fits the clue. ✗ means it does not.',
-        `${cap(SPRINKLER.name)} does not fit the wet street. ${cap(RAIN.name)} and ${TRUCK.name} fit both clues.`,
+        'Here is the wet grass case, marked for you. Each idea is the whole story. ✓ means the idea fits the clue. ✗ means it misses.',
+        `${cap(SPRINKLER.name)} misses the wet street. ${cap(RAIN.name)} and ${TRUCK.name} fit both clues.`,
         `${cap(RAIN.name)} needs nothing extra. ${cap(TRUCK.name)} needs ${TRUCK.extras.length} extra things. So ${BEST.name} is the best guess.`,
       ],
     },
@@ -114,7 +124,9 @@ export const lesson: LessonModule['lesson'] = {
       ],
     },
   ],
-  drill: [fitBoard(), bestBoard()],
+  // The contrast's board right after its card; the two grid boards right after the worked example.
+  drill: [fitsBoard(), fitBoard(), bestBoard()],
+  distinctions: [FITS_VS_EXPLAINS],
   practice: practiceOf(LESSON, practice),
   pass: { firstTry: 3, include: [CAN_FAIL] },
 };

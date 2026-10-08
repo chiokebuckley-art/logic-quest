@@ -19,37 +19,63 @@
  * (the converse trap) marks its own rule's four boxes by hand before anything is turned around, since lessons can be
  * opened in any order. "Which sentence means the same?" offers only the three sentences lesson 4 marks (no odd
  * rewrites), in practice, the check, the Arcade and new examples alike.
+ *
+ * Distinctions taught apart (docs/audit/hidden-distinctions.md, Stop 6):
+ *  - letter-vs-truth (lesson 1): P and Q stand for the IF part and the THEN part, and “P is true” means the IF part
+ *    happened. Card “Letters for the parts” (the same case in words and with letters), then the four boxes with
+ *    letters; the key line on every P and Q rule card; P and Q case cards name the letters; lesson 4 marks the same
+ *    test with letters. Lessons 2 to 4 pass only with a P and Q question right on the first try, and each reminds on
+ *    a card (taughtIn lesson 1): forward with letters, the four facts with letters, “not P” with letters.
+ *  - broken-vs-cant-happen (lesson 2, reminded in lesson 3): lesson 1's rules can be broken (a break is a real kid);
+ *    lessons 2 and 3 use rules that are always true here, so the case that would break the rule can't happen. Card
+ *    “Broken, or can’t happen?”, then the four boxes marked can happen or can't. Every lesson 2 and 3 rule card and
+ *    case says “Always true here: …”; lessons 4 and 5 say their own frame. The first lesson 2 and 3 question is
+ *    marked on its own cases first.
  */
 import {
+  BROKEN_VS_CANT,
   CARD_SKINS,
   CONTRA,
   CONVERSE,
   HAT_BOXES,
   INVERSE,
+  KEPT_CLOSING,
   L1_SKINS,
+  LETTERS_CLOSING,
+  LETTER_VS_TRUTH,
   LITS,
   MOVES,
   MOVE_FACT,
   MOVE_TAGS,
   PET_BOXES,
+  PQ_BOXES,
+  PQ_KEY,
   REWRITES,
   ROWS,
   SENTENCE_WHO,
   SKINS,
   SKIN_IDS,
+  boxMixes,
   boxWords,
+  brokenContrast,
+  canBoxDrill,
   cardDrill,
   cardItem,
   checkerItem,
   condText,
   didBreakItem,
   factCasesDrill,
+  factWork,
+  follows,
   fourBoxDrill,
+  keptConfused,
+  lettersContrast,
   litHolds,
   meaningDrill,
   meaningGrid,
   moveItem,
   moveRule,
+  pqConfused,
   rowAt,
   rowOfCase,
   ruleGrid,
@@ -68,7 +94,7 @@ import {
   type Row,
   type SkinId,
 } from '../engine/puzzles/conditionals';
-import type { DrillStep, Item, LessonDef, Rng, Scene, StopDef } from '../engine/types';
+import type { DrillStep, IdeaCard, Item, LessonDef, LessonPass, Rng, Scene, StopDef } from '../engine/types';
 
 const STOP = 6;
 const L1 = 's6.l1';
@@ -77,7 +103,18 @@ const L3 = 's6.l3';
 const L4 = 's6.l4';
 const L5 = 's6.l5';
 
-const finish = (m: CondMade, id: string, lesson: string): Item => ({ id, stop: STOP, lesson, skill: `s${STOP}.${m.tag}`, ...m.item }) as Item;
+/**
+ * A made item, placed in its lesson. Its tags are the generator's skill tag plus any the generator set ('pq' on a P and
+ * Q question), so a lesson's pass rule can ask for them (LessonPass.include).
+ */
+const finish = (m: CondMade, id: string, lesson: string): Item =>
+  ({ id, stop: STOP, lesson, skill: `s${STOP}.${m.tag}`, ...m.item, tags: [...new Set([m.tag, ...(m.item.tags ?? [])])] }) as Item;
+
+/** Lessons 2 to 4 pass only with a P and Q question right on the first try: the letters were taught in lesson 1. */
+const PQ_PASS: LessonPass = { firstTry: 3, include: [{ tag: 'pq', label: 'a question with P and Q' }] };
+
+/** The first quiz of a new method carries its own board, marked before the answer buttons show. */
+const withWork = (it: Item, work?: DrillStep): Item => (work ? { ...it, workFirst: work } : it);
 
 /**
  * Makes the items of one set. No two items in a set share a prompt and scene: a repeat is thrown away
@@ -105,11 +142,15 @@ function skinDeck(rng: Rng): (from: readonly SkinId[]) => SkinId {
   };
 }
 
-/** Skins for a practice set: one everyday, one fantasy, one abstract (when `from` has them), then others, shuffled. */
-function practiceSkins(rng: Rng, count: number, from: readonly SkinId[]): SkinId[] {
+/**
+ * Skins for a practice set: one everyday, one fantasy, one abstract (when `from` has them), then others, shuffled.
+ * `must`: a skin every set has (P and Q in lessons 2 to 4, for the pass rule); it fills its group's place.
+ */
+function practiceSkins(rng: Rng, count: number, from: readonly SkinId[], must?: SkinId): SkinId[] {
   const next = skinDeck(rng);
-  const out: SkinId[] = [];
+  const out: SkinId[] = must ? [next([must])] : [];
   for (const g of ['everyday', 'fantasy', 'abstract'] as const) {
+    if (must && SKINS[must].group === g) continue;
     const inGroup = skinsIn(g, from);
     if (inGroup.length && out.length < count) out.push(next(inGroup));
   }
@@ -133,48 +174,155 @@ function movesScene(): Scene {
 
 /** A pet fact in the story's words: pet('Q', 'Rex') is "Rex has four legs". */
 const pet = (l: Lit, name: string) => SKINS.pets.fact(l, name);
+/** A fact with letters: pqFact('notP') is "P is false". */
+const pqFact = (l: Lit) => SKINS.pq.fact(l, '');
 
 /** Lesson 1, See: the lunchroom rule card, and its four boxes with three ✓ and one ✗ (the break, named in the caption). */
 export const L1_RULE = ruleScene('dessert');
 export const L1_SEE = ruleGrid('dessert');
 
-/** Lesson 1, Do: the same four boxes, empty. The learner marks every box; the only ✗ goes on the break. */
-export const L1_DRILL: DrillStep = fourBoxDrill(boxWords('dessert'), {
-  id: 's6.l1-do',
-  title: 'Mark the four boxes',
-  body: [
-    'These are the four boxes from the example, now empty. The rule is the same.',
-    'Mark each box. Put a ✓ if a kid in that box keeps the rule. Put a ✗ if the kid breaks it.',
-  ],
-});
+/**
+ * Lesson 1, Do: the same four boxes, empty. The learner marks every box; the only ✗ goes on the break. It opens after
+ * card 5 (“THEN without IF is fine”, on the same rule card), before “Letters for the parts” and its board.
+ */
+export const L1_DRILL: DrillStep = {
+  ...fourBoxDrill(boxWords('dessert'), {
+    id: 's6.l1-do',
+    title: 'Mark the four boxes',
+    body: [
+      'These are the four boxes from the example, now empty. The rule is the same.',
+      'Mark each box. Put a ✓ if a kid in that box keeps the rule. Put a ✗ if the kid breaks it.',
+    ],
+  }),
+  afterCard: 4,
+};
 
 /** Lesson 1, Do again: the handoff's sample. The same four boxes, with a new rule: a red card and a hat. */
-export const L1_TWIN: DrillStep = fourBoxDrill(HAT_BOXES, {
-  id: 's6.l1-do-hat',
-  title: 'A new rule, the same four boxes',
-  body: [`Here is a new rule: “${HAT_BOXES.lines[1]}”`, 'Mark the four boxes again. A ✓ keeps the rule. A ✗ breaks it.'],
-  twin: 'The same four boxes, with a new rule: a red card and a hat.',
+export const L1_TWIN: DrillStep = {
+  ...fourBoxDrill(HAT_BOXES, {
+    id: 's6.l1-do-hat',
+    title: 'A new rule, the same four boxes',
+    body: [`Here is a new rule: “${HAT_BOXES.lines[1]}”`, 'Mark the four boxes again. A ✓ keeps the rule. A ✗ breaks it.'],
+    twin: 'The same four boxes, with a new rule: a red card and a hat.',
+  }),
+  afterCard: 4,
+};
+
+/**
+ * Lesson 1, the letters (s6-pq-letters-untaught): before any P and Q question, a card tells the same case in the
+ * lunchroom's words and with letters (the same truths), and the learner marks the four boxes with letters. The rule
+ * card carries the key line (PQ_KEY).
+ */
+export const L1_LETTERS: IdeaCard = {
+  title: 'Letters for the parts',
+  distinction: LETTER_VS_TRUTH.id,
+  body: [
+    `Some rules use letters for the parts: “${ruleText('pq')}” P stands for the IF part. Q stands for the THEN part.`,
+    `Each letter stands for a whole sentence, like “${SKINS.dessert.parts.P.if}.” So “P is true” means the IF part happened. “Q is false” means the THEN part did not happen.`,
+    'Below is the same case, told two ways.',
+  ],
+  scene: lettersContrast(),
+};
+
+/** The four boxes with letters, before the lesson's own words are added. */
+const L1_PQ_BOARD = fourBoxDrill(PQ_BOXES, {
+  id: 's6.l1-do-pq',
+  title: 'The four boxes, with letters',
+  body: [
+    'Read each row and column with the key line: “P is true” means the IF part happened. “Q is false” means the THEN part did not.',
+    'Mark each box. Put a ✓ if that case keeps the rule. Put a ✗ if it breaks the rule.',
+  ],
+  twin: 'The same four boxes, with letters for the parts.',
 });
+/** The box that breaks the rule (P is true, Q is false), and the mark that says it keeps the rule. */
+const PQ_BREAK = L1_PQ_BOARD.rows.flatMap((r) => r.marks).find((m) => m.id === 'P-notQ')!;
+const PQ_BREAK_KEPT = PQ_BREAK.options.find((o) => o.id !== PQ_BREAK.answer)!.id;
+/** Ben's case from “Letters for the parts”, part by part: in words, and with letters (P is true, Q is false). */
+const BEN_ROW = rowAt(true, false);
+const benPart = (l: 'P' | 'Q') => {
+  const lit: Lit = litHolds(l, BEN_ROW) ? l : l === 'P' ? 'notP' : 'notQ';
+  return `${SKINS.dessert.fact(lit, 'Ben')}, so ${SKINS.pq.fact(lit, '')}.`;
+};
 
-/** Lessons 2 and 3, See: the pet rule card, always true in this story. */
-export const PETS_KEPT = ruleScene('pets', true);
+/**
+ * Its board, right after it: the four boxes with letters for the parts. The break box marked as kept is read as the
+ * letters taken for things: Ben's case is the same case in words.
+ */
+export const L1_PQ: DrillStep = {
+  ...L1_PQ_BOARD,
+  afterCard: 5,
+  distinction: LETTER_VS_TRUTH.id,
+  misconceptions: [
+    {
+      id: 'letter-as-thing',
+      when: 'picks',
+      picks: { [PQ_BREAK.id]: PQ_BREAK_KEPT },
+      text: `You may be treating the letter P and “P is true” as the same thing. They are two different things: P stands for the IF part, and “P is true” means the IF part happened. ${benPart('P')} ${benPart('Q')} ${ruleHolds(BEN_ROW) ? 'That case keeps the rule.' : 'That case breaks the rule.'}`,
+    },
+  ],
+  confused: pqConfused(),
+  words: { closing: LETTERS_CLOSING },
+};
 
-/** Lesson 2, See: the pet rule card of “One way only”, where a cat with four legs keeps the rule. */
-export const L2_RULE = ruleScene('pets');
+/** Lessons 2 and 3, See: the pet rule card, always true in this story (“Always true here: …”). */
+export const PETS_KEPT = ruleScene('pets', 'kept');
+
+/** Lesson 2, See: the pet rule card of “One way only”, where a cat with four legs keeps the rule. Always true here too. */
+export const L2_RULE = PETS_KEPT;
 
 /**
  * Lesson 2, Do first: the pet rule's four boxes, empty, all the learner's. The handoff puts any rule turned around
  * (the converse trap) only after the four boxes are marked by hand. Lessons can be opened in any order, so this
- * lesson marks them itself before its quiz. The board is the “One way only” card's rule card (the same scene).
+ * lesson marks them itself before its quiz. The board is the “One way only” card's rule card (the same scene, with
+ * the always-true line), right after that card. Its mix-ups: the break box kept (“nobody breaks it here”), and the
+ * cat's box broken (the rule read turned around).
  */
-export const L2_BOXES: DrillStep = fourBoxDrill(PET_BOXES, {
-  id: 's6.l2-do-boxes',
-  title: 'Mark the four boxes',
+export const L2_BOXES: DrillStep = {
+  ...fourBoxDrill(PET_BOXES, {
+    id: 's6.l2-do-boxes',
+    title: 'Mark the four boxes',
+    body: [
+      'Now mark the four boxes of this rule. Each box is one kind of animal.',
+      'Put a ✓ if a case in that box keeps the rule. Put a ✗ if a case in that box would break it.',
+    ],
+  }),
+  afterCard: 0,
+  misconceptions: boxMixes(PET_BOXES),
+  confused: keptConfused('pets'),
+  words: { closing: KEPT_CLOSING },
+};
+
+/**
+ * Lesson 2, right after “Broken, or can’t happen?”: the same four boxes, marked can happen or can't happen here. The
+ * box that breaks the rule is the one that can't happen, since the rule is always true here.
+ */
+export const L2_CAN: DrillStep = {
+  ...canBoxDrill('pets', PET_BOXES, {
+    id: 's6.l2-do-can',
+    title: 'Can it happen here?',
+    body: [
+      'The same four boxes. Here the rule is always true: no animal breaks it.',
+      'Mark each box. Put a check if that case can happen here. Put a cross if it can’t happen.',
+    ],
+    twin: 'The same four boxes. Now mark if each case can happen here.',
+  }),
+  afterCard: 2,
+};
+
+/**
+ * Lesson 2, before “Could it happen another way?” (s6-l2-breakable-vs-always-kept): the same case under a rule kids
+ * can break (lesson 1) and under a rule that is always true here. Ben did not change; only the rule did.
+ */
+export const L2_BROKEN: IdeaCard = {
+  title: 'Broken, or can’t happen?',
+  distinction: BROKEN_VS_CANT.id,
   body: [
-    'Before you turn this rule around, mark its four boxes.',
-    'Put a ✓ if an animal in that box keeps the rule. Put a ✗ if it breaks the rule.',
+    `In Lesson 1, kids could break the lunchroom rule: “${ruleText('dessert')}” ${SKINS.dessert.says('Ben', rowAt(true, false))}, so Ben broke it.`,
+    'In this lesson, each rule is always true. Nobody breaks it. So a case that would break the rule can’t happen here. We say that case crashes, and we cross it out.',
+    'Below is the same case, two ways.',
   ],
-});
+  scene: brokenContrast(),
+};
 
 /** Lesson 2, Do: going backward. Rex has four legs. Rex as a cat is shown (the card's case); the learner marks Rex as a dog. */
 export const L2_BACK: DrillStep = factCasesDrill(
@@ -182,10 +330,11 @@ export const L2_BACK: DrillStep = factCasesDrill(
   {
     id: 's6.l2-do-back',
     title: 'Mark a case: going backward',
-    body: [`${pet('Q', 'Rex')}. That is the THEN part. Two cases fit it.`, 'The case from the example is marked. Mark the other case. Can it happen? Is each sentence true in it?'],
+    body: [`${pet('Q', 'Rex')}. That is the THEN part. Two cases fit it.`, 'The case from the example is marked. Mark the other case. Can it happen here? Is each sentence true in it?'],
   },
   [{ name: 'Rex', fact: 'Q', say: ['P', 'notP'], shown: [rowAt(false, true)], mark: [rowAt(true, true)] }],
   'status',
+  { scaffold: 'full' },
 );
 
 /** Lesson 2, Do: going forward. Max is a dog. Max with four legs is shown; the learner marks Max without four legs. */
@@ -198,6 +347,7 @@ export const L2_FWD: DrillStep = factCasesDrill(
   },
   [{ name: 'Max', fact: 'P', say: ['Q', 'notQ'], shown: [rowAt(true, true)], mark: [rowAt(true, false)] }],
   'status',
+  { scaffold: 'full' },
 );
 
 /**
@@ -210,13 +360,14 @@ export const L3_HAPPENED: DrillStep = factCasesDrill(
   {
     id: 's6.l3-do-happened',
     title: 'Mark the cases: a part happened',
-    body: [`${pet('P', 'Rex')}. ${pet('Q', 'Max')}. One case for each pet is marked, as in the examples.`, 'Mark the other case for each pet. Can it happen? Is the sentence true in it?'],
+    body: [`${pet('P', 'Rex')}. ${pet('Q', 'Max')}. One case for each pet is marked, as in the examples.`, 'Mark the other case for each pet. Can it happen here? Is the sentence true in it?'],
   },
   [
     { name: 'Rex', fact: 'P', say: ['Q'], shown: [rowAt(true, true)], mark: [rowAt(true, false)] },
     { name: 'Max', fact: 'Q', say: ['P'], shown: [rowAt(true, true)], mark: [rowAt(false, true)] },
   ],
   'follows',
+  { scaffold: 'full' },
 );
 
 /**
@@ -266,6 +417,31 @@ export const L4_TRAPS: DrillStep = meaningDrill(
   },
   ['converse', 'inverse'],
 );
+
+/**
+ * Lesson 4, Do last: the same test with letters for the parts (s6-pq-letters-untaught), before any P and Q question
+ * in this lesson. The rule's boxes are shown; the learner marks the three sentences.
+ */
+export const L4_PQ: DrillStep = {
+  ...meaningDrill(
+    'pq',
+    {
+      id: 's6.l4-do-pq',
+      title: 'The same test, with letters',
+      body: [
+        PQ_KEY,
+        `Flip and NOT: “${condText('pq', CONTRA)}”`,
+        `Flip only: “${condText('pq', CONVERSE)}”`,
+        `NOT only: “${condText('pq', INVERSE)}”`,
+        'Mark a ✓ if a case keeps the sentence, a ✗ if it breaks it.',
+      ],
+      twin: 'The same four cases, with letters for the parts.',
+    },
+    ['contra', 'converse', 'inverse'],
+  ),
+  confused: pqConfused(),
+  words: { closing: LETTERS_CLOSING },
+};
 
 /** Lesson 5, Do: the lunchroom cards. The “Dessert” card is shown checked (the card's case); the learner checks the rest. */
 export const L5_CARDS: DrillStep = cardDrill(
@@ -338,15 +514,21 @@ const lessons: LessonDef[] = [
         ],
       },
       {
+        // The rule card again: the four-box boards open right after this card.
         title: 'THEN without IF is fine',
+        scene: L1_RULE,
         body: [
           'Dee ate all the veggies but did not get dessert. Maybe Dee was too full.',
           'Dee did not break the rule. The rule never says that eating your veggies gets you dessert.',
         ],
       },
+      // The letters, taught apart before any P and Q question: the same case in words and with P and Q.
+      L1_LETTERS,
     ],
-    // Do: the same four boxes, empty; then the handoff's red card and hat rule on the same four boxes.
-    drill: [L1_DRILL, L1_TWIN],
+    // Do: the same four boxes, empty; then the handoff's red card and hat rule on the same four boxes; then, after
+    // “Letters for the parts”, the four boxes with letters.
+    drill: [L1_DRILL, L1_TWIN, L1_PQ],
+    distinctions: [LETTER_VS_TRUTH],
     // Quiz: only the four boxes, in other stories. "Who broke it?" twice, the box with no IF part and no THEN part
     // (the conflict: nobody broke the rule), and one box at random. No rule is turned around in this lesson.
     practice: (rng) => {
@@ -371,7 +553,7 @@ const lessons: LessonDef[] = [
         title: 'One way only',
         scene: L2_RULE,
         body: [
-          `Here is a true rule: “${ruleText('pets')}”`,
+          `Here is a rule that is always true in this story: “${ruleText('pets')}”`,
           `Now turn it around. Swap the IF part and the THEN part. You get “${condText('pets', CONVERSE)}”`,
           `That one is not true. A cat has four legs, but a cat is not a dog. The cat keeps the rule. ${SKINS.pets.onlyAbout}`,
           'But the cat breaks the turned-around sentence.',
@@ -384,6 +566,7 @@ const lessons: LessonDef[] = [
           'The rule can be true while the turned-around sentence is false.',
         ],
       },
+      L2_BROKEN,
       {
         // See: one case marked on the board. Rex as a cat keeps the rule, so it can happen, and "Rex is a dog" is false.
         title: 'Could it happen another way?',
@@ -396,7 +579,7 @@ const lessons: LessonDef[] = [
       },
       {
         title: 'Wet grass',
-        scene: ruleScene('grass'),
+        scene: ruleScene('grass', 'kept'),
         body: [
           'The grass is wet. Did it rain?',
           'It might have. But a sprinkler could have made the grass wet. So could a hose.',
@@ -404,45 +587,59 @@ const lessons: LessonDef[] = [
         ],
       },
       {
+        // The reminder of lesson 1's letters: “P is true” is the IF part happening, so forward works with letters too.
         title: 'Going forward works',
+        distinction: LETTER_VS_TRUTH.id,
         body: [
           'Going forward is safe. When you know the IF part happened, the THEN part must be true.',
           'Max is a dog, so “Max has four legs” is true for sure. “Max does not have four legs” is false for sure.',
+          `With letters it works the same way. “${pqFact('P')}” means the IF part happened, so “${pqFact(follows('P')!)}” is true for sure.`,
           '“Can’t tell” is a real answer. Use it when the facts do not decide.',
         ],
       },
     ],
-    // Do: the pet rule's four boxes, all marked by hand (the converse trap comes only after them), then the two cases
+    // Do: the pet rule's four boxes, all marked by hand (the converse trap comes only after them), right after the
+    // first card; the same boxes marked can happen or can't happen, right after the contrast card; then the two cases
     // that fit "Rex has four legs" (backward), then the two that fit "Max is a dog" (forward).
-    drill: [L2_BOXES, L2_BACK, L2_FWD],
+    drill: [L2_BOXES, L2_CAN, L2_BACK, L2_FWD],
+    distinctions: [BROKEN_VS_CANT, { ...LETTER_VS_TRUTH, taughtIn: L1 }],
     // Quiz: the same two methods in other stories. Each sentence the quiz can ask (the IF part or NOT the IF part,
-    // the THEN part or NOT the THEN part) is one the boards mark.
+    // the THEN part or NOT the THEN part) is one the boards mark. The first question is marked on its own cases first.
+    // Every pack has one P and Q question, and the pass rule asks for it.
     practice: (rng) => {
-      const skins = practiceSkins(rng, 4, SKIN_IDS);
+      const skins = practiceSkins(rng, 4, SKIN_IDS, 'pq');
       const plan = rng.shuffle([{ fact: 'Q' }, { fact: 'Q' }, { fact: 'P', target: 'Q' }, { fact: 'P' }] as const);
       const one = distinctItems();
-      return plan.map((p, i) => finish(one(() => turnItem(rng, { skin: skins[i], ...p })), `s6-l2-${i + 1}`, L2));
+      const made = plan.map((p, i) => one(() => turnItem(rng, { skin: skins[i], ...p })));
+      return made.map((m, i) => withWork(finish(m, `s6-l2-${i + 1}`, L2), i === 0 ? factWork(m, 's6-l2-p1-work') : undefined));
     },
+    pass: PQ_PASS,
   },
   {
     id: L3,
     title: 'The four moves',
     ideas: [
       {
+        // The reminder of lesson 1's letters: the four facts with P and Q.
         title: 'Four kinds of facts',
+        distinction: LETTER_VS_TRUTH.id,
         body: [
           'Say you know a rule and one more fact. What follows for sure?',
           'The fact can be about the IF part or the THEN part. It can say that part happened, or that it did not. That makes four moves.',
+          `With letters, the four facts are “${pqFact('P')},” “${pqFact('notP')},” “${pqFact('Q')}” and “${pqFact('notQ')}.” “${pqFact('P')}” means the IF part happened.`,
         ],
       },
       {
         // See: the cases marked on the board. Rex as a dog with four legs can happen; without four legs, it can’t.
+        // The reminder of lesson 2's distinction: here the case that would break the rule can't happen.
         title: 'The IF part happened',
         scene: PETS_KEPT,
+        distinction: BROKEN_VS_CANT.id,
         body: [
           `${pet('P', 'Rex')}. A dog with four legs keeps the rule, so that case can happen.`,
-          'Could Rex be a dog without four legs? That case breaks the rule. Here the rule is always true, so it can’t happen.',
+          'Could Rex be a dog without four legs? That case breaks the rule. Here the rule is always true, so it can’t happen. It crashes: cross it out.',
           `So ${pet('Q', 'Rex')}. When the IF part happens, the THEN part must happen too.`,
+          'This is not like Lesson 1, where kids could break the rule. Look for the “Always true here” line.',
         ],
       },
       {
@@ -471,13 +668,16 @@ const lessons: LessonDef[] = [
     ],
     // Do: the four moves on the pet board, two per board: a part happened (Rex, Max), a part did not (Pip, Coco).
     drill: [L3_HAPPENED, L3_NOT],
-    // Quiz: one of each move, each in another story.
+    distinctions: [{ ...BROKEN_VS_CANT, taughtIn: L2 }, { ...LETTER_VS_TRUTH, taughtIn: L1 }],
+    // Quiz: one of each move, each in another story. The first is marked on its own cases first; one is P and Q.
     practice: (rng) => {
-      const skins = practiceSkins(rng, 4, SKIN_IDS);
+      const skins = practiceSkins(rng, 4, SKIN_IDS, 'pq');
       const moves = rng.shuffle(MOVES);
       const one = distinctItems();
-      return moves.map((move, i) => finish(one(() => moveItem(rng, { skin: skins[i], move })), `s6-l3-${i + 1}`, L3));
+      const made = moves.map((move, i) => one(() => moveItem(rng, { skin: skins[i], move })));
+      return made.map((m, i) => withWork(finish(m, `s6-l3-${i + 1}`, L3), i === 0 ? factWork(m, 's6-l3-p1-work') : undefined));
     },
+    pass: PQ_PASS,
   },
   {
     id: L4,
@@ -485,7 +685,7 @@ const lessons: LessonDef[] = [
     ideas: [
       {
         title: 'Flip and NOT',
-        scene: ruleScene('pets'),
+        scene: ruleScene('pets', 'compare'),
         body: [
           `Start with a rule: “${ruleText('pets')}”`,
           'To flip a rule, swap the IF part and the THEN part. That is the same as turning it around.',
@@ -515,19 +715,25 @@ const lessons: LessonDef[] = [
         ],
       },
       {
+        // The reminder of lesson 1's letters, and when a NOT part with a letter is true.
         title: 'How to test',
+        distinction: LETTER_VS_TRUTH.id,
         body: [
           'Try all four cases. IF and THEN both happen. IF happens but THEN does not. THEN happens but IF does not. Neither one happens.',
           'If a case breaks one sentence but not the other, they do not mean the same.',
+          `With letters, “${pqFact('P')}” means the IF part happened. And “not P” is true when ${pqFact('notP')}.`,
         ],
       },
     ],
-    // Do: the example's four cases. Mark the flip and NOT sentence, then flip only and NOT only.
-    drill: [L4_SAME, L4_TRAPS],
+    // Do: the example's four cases. Mark the flip and NOT sentence, then flip only and NOT only; then the same test with
+    // letters, before any P and Q question.
+    drill: [L4_SAME, L4_TRAPS, L4_PQ],
+    distinctions: [{ ...LETTER_VS_TRUTH, taughtIn: L1 }],
     // Quiz: the same test in other stories, on the three sentences the boards mark. No odd rewrite (NOT in one part
-    // only) is offered: no card or board marks one.
+    // only) is offered: no card or board marks one. Every pack has one P and Q question, and the pass rule asks for it.
+    pass: PQ_PASS,
     practice: (rng) => {
-      const skins = practiceSkins(rng, 4, SKIN_IDS);
+      const skins = practiceSkins(rng, 4, SKIN_IDS, 'pq');
       const plan = rng.shuffle(['pick', 'pick', 'trap', 'same'] as const);
       const one = distinctItems();
       return plan.map((p, i) => {
@@ -547,7 +753,7 @@ const lessons: LessonDef[] = [
     ideas: [
       {
         title: 'Checking a rule',
-        scene: ruleScene('dessert'),
+        scene: ruleScene('dessert', 'check'),
         body: [
           SKINS.dessert.cards!.intro,
           'You can see only one side of each card. Your job is to check that nobody broke the rule.',
@@ -557,7 +763,7 @@ const lessons: LessonDef[] = [
       {
         // See: one card marked on the board, back by back, then the turn.
         title: 'The IF card',
-        scene: ruleScene('dessert'),
+        scene: ruleScene('dessert', 'check'),
         body: [
           `The “${face('dessert', 'P')}” card could have “${face('dessert', 'Q')}” or “${face('dessert', 'notQ')}” on the back.`,
           `With “${face('dessert', 'Q')},” the rule is kept. With “${face('dessert', 'notQ')},” that kid broke the rule.`,
@@ -580,7 +786,7 @@ const lessons: LessonDef[] = [
       },
       {
         title: 'Letters and numbers',
-        scene: ruleScene('letters'),
+        scene: ruleScene('letters', 'check'),
         body: [
           'Here are four cards: E, K, 4 and 7. Which must you turn over?',
           'Turn over E and 7. E could have an odd number on the back. 7 could have a vowel.',

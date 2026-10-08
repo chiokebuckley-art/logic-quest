@@ -13,6 +13,7 @@ export function looks(it: Item): string {
     it.scene?.kind === 'speakers' ? it.scene.speakers.map((sp) => sp.says) : it.scene ?? null,
     it.kind === 'tapall' ? it.things : null,
     it.kind === 'choose' || it.kind === 'multi' ? it.choices.map((c) => c.label) : null,
+    it.frame ?? null,
   ]);
 }
 

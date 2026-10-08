@@ -64,6 +64,8 @@ export function PatternBridgeScreen({ route }: { route: Extract<Route,{name:'pat
   const [feedback,setFeedback] = useState<{right:boolean;why:string}|null>(null);
   const [done,setDone] = useState(false);
   const [misses,setMisses] = useState(0);
+  /** First tries per round: the round's first question answered right on the first go, so bridges count as practice. */
+  const roundMisses = useRef(0);
   const heading = useRef<HTMLHeadingElement>(null);
   const [paused,setPaused] = useState(false);
   useEffect(() => { heading.current?.focus({preventScroll:true}); },[roundIndex,step,done]);
@@ -72,10 +74,14 @@ export function PatternBridgeScreen({ route }: { route: Extract<Route,{name:'pat
   const advance = () => {
     setSelected('');setFeedback(null);
     if(step<5) {setStep(step+1);return;}
+    if(!route.workshop) actions.recordBridgeFirst(ids[roundIndex], roundMisses.current === 0);
+    roundMisses.current = 0;
     if(roundIndex<ids.length-1) {setRoundIndex(roundIndex+1);setStep(0);return;}
     actions.finishPatternBridge(route.workshop ? [] : ids,!!route.workshop);setDone(true);
   };
-  const question: Question | null = step===2?round.describe:step===3?round.predict:step===4?round.test:step===5?round.revise:null;
+  // Notice (0) and Compare (2) show text; Describe (1), Test (3), Predict (4) and Explain (5) ask. The test result shows once the
+  // prediction is right (so the learner commits first) and again under Explain.
+  const question: Question | null = step===1?round.describe:step===3?round.test:step===4?round.predict:step===5?round.explain:null;
   if(!save) return null;
   return <div className={`page pl-investigation pl-${save.patternBridge.path.toLowerCase()}`}>
     <div className="row between"><button className="btn" onClick={() => actions.navigate(route.event && d ? {name:'stop',stopId:d.stop} : {name:'library',kind:'lab'})}>{route.event && d ? 'Back to the stop' : 'Back to Pattern Lab'}</button>
@@ -94,12 +100,12 @@ export function PatternBridgeScreen({ route }: { route: Extract<Route,{name:'pat
       <section className="pl-work"><div className="kicker">{ROUTINE[step]}</div><h2 ref={heading} tabIndex={-1}>{round.title}</h2>
         <div className="pl-evidence"><p>{round.evidence}</p>{round.tokens && <ExactTokens tokens={round.tokens} />}</div>
         {step===0 && <p>Notice only what is shown. Do not add an unseen rule.</p>}
-        {step===1 && <p>{round.compare}</p>}
+        {step===2 && <p>{round.compare}</p>}
         {step===5 && <div className="pl-result"><h3>Test result</h3><p>{round.reveal}</p></div>}
         {question && <fieldset className="pl-question"><legend>{question.prompt}</legend>{question.options.map(option => <label key={option}><input type="radio" name="bridge-answer" value={option} checked={selected===option} disabled={!!feedback?.right} onChange={() => {setSelected(option);setFeedback(null);}} /><span>{option}</span></label>)}</fieldset>}
         {feedback && <div role="status" className="pl-feedback"><strong>{feedback.right?'Your answer fits.':'Check the evidence again.'}</strong><p>{feedback.why}</p></div>}
         {step===4 && feedback?.right && <div className="pl-result"><h3>Test result</h3><p>{round.reveal}</p></div>}
-        {question && !feedback?.right ? <button className="btn primary" disabled={!selected} onClick={() => {const right=selected===question.answer;setFeedback({right,why:question.why});if(!right)setMisses(m=>m+1);}}>Check against evidence</button> : <button className="btn primary" onClick={advance}>{step===5?(roundIndex===ids.length-1?'Finish investigation':'Next investigation'):`Continue to ${ROUTINE[step+1]}`}</button>}
+        {question && !feedback?.right ? <button className="btn primary" disabled={!selected} onClick={() => {const right=selected===question.answer;setFeedback({right,why:question.why});if(!right){setMisses(m=>m+1);roundMisses.current+=1;}}}>Check against evidence</button> : <button className="btn primary" onClick={advance}>{step===5?(roundIndex===ids.length-1?'Finish investigation':'Next investigation'):`Continue to ${ROUTINE[step+1]}`}</button>}
       </section></>}
   </div>;
 }

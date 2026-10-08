@@ -4,7 +4,10 @@ Pattern Lab remains an Engineering Quest module. This release implements the Log
 
 - Optional Explorer Workshop: notice, stated-rule sorting, smallest repeats, and another-case reasoning.
 - Thirteen preparation events across Signal Camp, Switch Caverns, Fog Marsh, Ladder Cliffs, optional Bridge of Rules/Twin Isles, Trickster Market, and Chance Dock.
-- Exact shared routine: Notice → Compare → Describe → Predict → Test → Revise.
+- Exact shared routine: Notice → Describe → Compare → Test → Predict → Explain. (Re-ordered in v0.10.0 with the owner’s OK
+  to match the Pattern Observatory; it was Notice → Compare → Describe → Predict → Test → Revise. Each investigation keeps
+  its questions: Describe asks, Compare is a line, Test asks how to check, Predict commits before the test result shows,
+  Explain states what the evidence supports.)
 - Nineteen optimized images derived from the supplied artwork collection. Destination designs are provisional; their event IDs map to the skill-overlap table in Part A.
 - Explicit Explorer, Trailblazer, and Logician selection per player. It changes the visible preparation activities and presentation, not native Logic Quest mastery.
 - Native Journey cards and Arcade cards use the matching destination artwork; relevant lessons include the routine chip.

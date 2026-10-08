@@ -10,6 +10,8 @@ import { PlayersScreen } from './game/screens/PlayersScreen';
 import { JourneyScreen } from './game/screens/JourneyScreen';
 import { HomeScreen } from './game/screens/HomeScreen';
 import { StopScreen } from './game/screens/StopScreen';
+import { EvidenceScreen } from './game/screens/EvidenceScreen';
+import { DiagnosticScreen } from './game/screens/DiagnosticScreen';
 import { LibraryScreen } from './game/screens/LibraryScreen';
 import { MeScreen } from './game/screens/MeScreen';
 import { SearchScreen } from './game/screens/SearchScreen';
@@ -27,7 +29,7 @@ function hidesNav(route: Route): boolean {
 
 /** Lessons, checks, practice and notebook fixes draw their own back header, so the game's top bar steps aside. */
 function playing(route: Route): boolean {
-  return route.name === 'lesson' || route.name === 'check' || (route.name === 'arcade' && !!route.practice) || (route.name === 'notebook' && !!route.fix);
+  return route.name === 'lesson' || route.name === 'check' || route.name === 'evidence' || route.name === 'diagnostic' || (route.name === 'arcade' && !!route.practice) || (route.name === 'notebook' && !!route.fix);
 }
 
 /**
@@ -81,6 +83,8 @@ function Screen({ route }: { route: Route }) {
     case 'progress': return <ProgressScreen />;
     case 'notebook': return <NotebookScreen route={route} />;
     case 'settings': return <SettingsScreen />;
+    case 'evidence': return <EvidenceScreen route={route} />;
+    case 'diagnostic': return <DiagnosticScreen />;
   }
 }
 

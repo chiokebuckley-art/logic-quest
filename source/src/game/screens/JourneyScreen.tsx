@@ -6,6 +6,9 @@ import { nextStep, viewAll, type StopView } from '../../engine/journey/mastery';
 import type { StopDef } from '../../engine/types';
 import { STOPS } from '../../content/stops';
 import { DESTINATIONS } from '../pattern/bridges';
+import { ObservatoryMap, type MapPlace } from '../components/ObservatoryMap';
+import { OBSERVATORY, placeNeeds, placeTitle, ringTitle } from '../observatory';
+import { LEVEL_NAMES, TRACK_NAMES, type Level } from '../../engine/evidence';
 import { DAILY_GOAL_MINUTES, goalPercent, stopCounts } from '../progressStats';
 import { useStore, type Route } from '../store';
 import { Icon } from '../components/Icon';
@@ -71,7 +74,16 @@ export function JourneyScreen({ route }: { route?: Extract<Route, { name: 'journ
   if (!save) return null;
   const track = route?.track ?? 'main';
   const all = viewAll(STOPS, save.stops, today);
-  const views = all.filter(({ stop }) => (track === 'side' ? stop.n >= 12 : stop.n <= 11));
+  const views = all.filter(({ stop }) => (track === 'side' ? stop.n >= 12 && !stop.observatory : track === 'observatory' ? !!stop.observatory : stop.n <= 11 && !stop.observatory));
+  const plain = save.evidence.plain;
+  const diag = save.evidence.diagnostic;
+  const places: MapPlace[] = OBSERVATORY.flatMap((stop) =>
+    stop.lessons.map((lesson) => {
+      const done = (save.stops[stop.id]?.lessonsDone ?? []).includes(lesson.id);
+      const state: MapPlace['state'] = done ? (save.stops[stop.id]?.weekDay ? 'mastered' : 'done') : placeNeeds(lesson, save).length ? 'locked' : 'open';
+      return { stop, lesson, state, title: placeTitle(lesson, plain) };
+    }),
+  );
   const next = nextStep(STOPS, save.stops, today);
   const counts = stopCounts(save.stops);
 
@@ -86,8 +98,32 @@ export function JourneyScreen({ route }: { route?: Extract<Route, { name: 'journ
       <div className="sl-chips" role="tablist" aria-label="Track">
         <button type="button" role="tab" aria-selected={track === 'main'} className="sl-chip c-gold" onClick={() => actions.navigate({ name: 'journey' })}>Main track</button>
         <button type="button" role="tab" aria-selected={track === 'side'} className="sl-chip c-gold" onClick={() => actions.navigate({ name: 'journey', track: 'side' })}>Side track · 12, 13</button>
+        <button type="button" role="tab" aria-selected={track === 'observatory'} className="sl-chip c-gold" onClick={() => actions.navigate({ name: 'journey', track: 'observatory' })}>Observatory</button>
         <button type="button" className="sl-chip c-violet" onClick={() => actions.navigate({ name: 'library', kind: 'lab' })}>Pattern Lab</button>
       </div>
+
+      {track === 'observatory' && (
+        <section className="sl-section" aria-labelledby="ob-title">
+          <div className="sl-section-head">
+            <h3 id="ob-title" className="sl-label">Pattern Observatory</h3>
+            <span className="sl-section-meta t-gold">{places.filter((p) => p.state === 'done' || p.state === 'mastered').length} of {places.length} places lit</span>
+          </div>
+          <p className="sl-sub">Ten places in four rings. Notice, describe, compare, test, predict, explain. It never blocks the main track.</p>
+          {places.length > 0 && <ObservatoryMap places={places} onPick={(stopId, lessonId) => actions.navigate({ name: 'lesson', stopId, lessonId, from: 'journey' })} />}
+          <button type="button" className="sl-row" onClick={() => actions.navigate({ name: 'diagnostic' })}>
+            <span className="sl-row-main">
+              <span className="sl-row-title">{diag ? 'Your starting levels' : 'Find your level'}</span>
+              <span className="sl-row-sub">{diag ? ([1, 2, 3, 4] as const).map((t) => `T${t} L${diag.levels[String(t)] ?? 1}`).join(' · ') : 'About 5 minutes. No timer. A miss just ends that track.'}</span>
+            </span>
+            <span className="sl-row-meta t-gold">{diag ? 'Again ▸' : 'Start ▸'}</span>
+          </button>
+          {diag && (
+            <p className="sl-note">
+              {([1, 2, 3, 4] as const).map((t) => `${TRACK_NAMES[t]}: L${diag.levels[String(t)] ?? 1} ${LEVEL_NAMES[(diag.levels[String(t)] ?? 1) as Level]}`).join('. ')}.
+            </p>
+          )}
+        </section>
+      )}
 
       <ol className="sl-rail">
         {views.map(({ stop, view }, i) => {
@@ -117,7 +153,7 @@ export function JourneyScreen({ route }: { route?: Extract<Route, { name: 'journ
                 onClick={() => actions.navigate({ name: 'stop', stopId: stop.id })}
               >
                 <span className="sl-row-main">
-                  <span className="sl-row-title">{stop.n}. {stop.title}</span>
+                  <span className="sl-row-title">{stop.observatory ? `Ring ${stop.observatory.ring}. ${ringTitle(stop, plain)}` : `${stop.n}. ${stop.title}`}</span>
                   <span className="sl-row-sub">{view.label}</span>
                 </span>
                 {view.status === 'locked' ? <Icon name="lock" size={15} color="var(--muted)" label="Locked" /> : cta && <span className={`sl-row-meta t-${cta.tone}`}>{cta.text}</span>}

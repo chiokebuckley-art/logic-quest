@@ -4,6 +4,7 @@
  */
 import { addDays, daysBetween, type StopProgress, type StopStatus } from '../engine/journey/mastery';
 import type { Tally } from '../engine/save/save';
+import { STOPS } from '../content/stops';
 
 /** Seconds of active play a day needs to count toward the streak. */
 export const STREAK_MIN_SECONDS = 60;
@@ -137,8 +138,8 @@ export function percent(part: number, whole: number): number | null {
   return whole > 0 ? Math.round((part / whole) * 100) : null;
 }
 
-/** Plain names for the skill tags the stops use, for the Grown-ups view and the CSV reader. */
-export const SKILL_NAMES: Readonly<Record<string, string>> = {
+/** Plain names for the skill tags the stops use, for the Grown-ups view and the CSV reader. A stop may bring its own (StopDef.skillNames). */
+const BASE_SKILL_NAMES: Readonly<Record<string, string>> = {
   's1.statement': 'Seeing that a sentence is a statement',
   's1.not-statement': 'Seeing that a sentence is not a statement',
   's1.false-is-statement': 'A false sentence is still a statement',
@@ -231,6 +232,8 @@ export const SKILL_NAMES: Readonly<Record<string, string>> = {
   's7.gut-agree': 'A right guess is still not a proof',
   's7.gut-proof': 'A strong feeling is not a proof',
 };
+
+export const SKILL_NAMES: Readonly<Record<string, string>> = Object.assign({}, BASE_SKILL_NAMES, ...STOPS.map((s) => s.skillNames ?? {}));
 
 /** 's2.or-both' -> 'OR includes both' (no stop number). Unknown tags fall back to their words. */
 export function skillName(skill: string): string {

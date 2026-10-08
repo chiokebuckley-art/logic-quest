@@ -1,14 +1,18 @@
 /**
  * Stop 7, Lesson 2 · The best explanation (abduction).
  *
- * The model: a story with clues and three ideas (explanations). Each clue says, for each idea, whether the idea fits
- * it (the clue makes sense if the idea is true). Each idea lists its extra things: what else must be true for it to
- * work, that no clue shows. The best explanation fits every clue; among those, it needs the fewest extra things
- * (bestOf). A new clue can rule the best guess out, and then the best is worked out again.
+ * The model: a story with clues and three ideas (explanations). Each idea is the whole story of what happened. Each
+ * clue says, for each idea, whether the idea fits it (the clue could still be true in that idea’s whole story) or
+ * misses it (the story would make the clue different). Fitting is weaker than explaining: a clue can fit an idea that
+ * says nothing about it (Clue.explains lists the ideas whose story makes the clue happen). Each idea lists its extra
+ * things: what else must be true for it to work, that no clue shows. The best explanation fits every clue; among
+ * those, it needs the fewest extra things (bestOf). A new clue can rule the best guess out, and then the best is
+ * worked out again.
  *
  * Every story has one clue that fits all three ideas, and one clue that rules out each idea (it fits the other two).
- * It also has a neutral clue (every idea fits it, whatever it shows): its check is the wrong "same" choice in a
- * "which check" question. It is never shown as a clue, so it never changes a best guess.
+ * It also has a neutral clue (every idea fits it, whatever it shows), about something no idea touches, so its check
+ * could never find any idea’s ruling-out clue: it is the wrong "same" choice in a "which check" question. It is never
+ * shown as a clue, so it never changes a best guess.
  * Every idea in a story needs a different number of extra things (0, 1 and 2), so any set of clues that leaves an
  * idea standing has exactly one best. The abstract skin (ideas X, Y, Z and clues A to D, drawn as a grid) is made at
  * random and kept only when it gives the same kind of question.
@@ -18,7 +22,7 @@
  * a proof?). Every answer, explanation, wrong-choice feedback, hint case and board mark is worked out here.
  */
 import { syncWhyWrong } from '../teach';
-import type { Choice, ChoiceFeedback, DrillMark, DrillRow, DrillStep, Rng, Scene, Teach, TeachCase, Truth } from '../types';
+import type { Choice, ChoiceFeedback, ConfusedQuestion, Distinction, DrillMark, DrillRow, DrillStep, IdeaCard, Misconception, Rng, Scene, Teach, TeachCase, Truth } from '../types';
 import type { ItemCore, Made } from './statements';
 
 // ---------- the model ----------
@@ -51,6 +55,11 @@ export interface Clue {
   fits: Record<string, boolean>;
   /** Idea id -> why it fits or does not fit, in plain words. Every idea that does not fit has one. */
   why: Record<string, string>;
+  /**
+   * The ideas whose story makes this clue happen (they explain it). Every idea that explains a clue fits it, but an
+   * idea can fit a clue it does not explain: its story only leaves the clue possible.
+   */
+  explains?: string[];
 }
 
 export interface Story {
@@ -95,14 +104,23 @@ export const allClues = (c: ExplainCase): Clue[] => [...c.shown, ...(c.added ? [
 
 // ---------- the stories ----------
 
-/** A story clue that rules out one idea and fits the other two. `others`: why the other ideas still fit, when it helps. */
-function ruleOut(id: string, text: string, check: string, out: string, why: string, ideas: readonly string[], others: Record<string, string> = {}): Clue {
-  return { id, text, check, fits: Object.fromEntries(ideas.map((i) => [i, i !== out])), why: { ...others, [out]: why } };
+/**
+ * A story clue that rules out one idea and fits the other two. `others`: why the other ideas still fit, when it helps.
+ * `explainedBy`: the other ideas whose story makes the clue happen (by default none: they only leave it possible).
+ */
+function ruleOut(id: string, text: string, check: string, out: string, why: string, ideas: readonly string[], others: Record<string, string> = {}, explainedBy: readonly string[] = []): Clue {
+  if (explainedBy.includes(out)) throw new Error(`${id}: the idea a clue rules out can’t explain it`);
+  return { id, text, check, fits: Object.fromEntries(ideas.map((i) => [i, i !== out])), why: { ...others, [out]: why }, explains: [...explainedBy] };
 }
 
-/** The story's main clue: every idea fits it. */
+/** The story's main clue: every idea fits it, and explains it (each idea is a reason for what happened). */
 function main(id: string, text: string, check: string, ideas: readonly string[]): Clue {
-  return { id, text, check, fits: Object.fromEntries(ideas.map((i) => [i, true])), why: {} };
+  return { id, text, check, fits: Object.fromEntries(ideas.map((i) => [i, true])), why: {}, explains: [...ideas] };
+}
+
+/** A story's neutral clue: every idea fits it, and none explains it (it is about something else). */
+function neutralClue(id: string, text: string, check: string, ideas: readonly string[]): Clue {
+  return { id, text, check, fits: Object.fromEntries(ideas.map((i) => [i, true])), why: {}, explains: [] };
 }
 
 interface StorySpec {
@@ -111,13 +129,17 @@ interface StorySpec {
   who: string;
   setting: string;
   main: [text: string, check: string];
-  /** The neutral clue: every idea fits it, and what it shows does not touch any idea. [text, check]. */
+  /**
+   * The neutral clue: every idea fits it, and it is about something no idea touches, so its check can never find any
+   * idea’s ruling-out clue (the test checks every story). [text, check].
+   */
   neutral: [text: string, check: string];
   /**
    * Each idea with its extra things and the clue that rules it out: [text, check, why it does not fit, and, when it
-   * helps, why the other ideas still fit it (idea id -> why)].
+   * helps, why the other ideas still fit it (idea id -> why)]. `explainedBy`: the other ideas whose story makes that
+   * clue happen.
    */
-  ideas: { id: string; text: string; name: string; short: string; extras: string[]; out: [text: string, check: string, why: string, others?: Record<string, string>] }[];
+  ideas: { id: string; text: string; name: string; short: string; extras: string[]; out: [text: string, check: string, why: string, others?: Record<string, string>]; explainedBy?: string[] }[];
 }
 
 function story(s: StorySpec): Story {
@@ -128,8 +150,8 @@ function story(s: StorySpec): Story {
     who: s.who,
     setting: s.setting,
     ideas: s.ideas.map(({ id, text, name, short, extras }) => ({ id, text, name, short, extras })),
-    clues: [main(`${s.id}-main`, s.main[0], s.main[1], ids), ...s.ideas.map((i) => ruleOut(`${s.id}-not-${i.id}`, i.out[0], i.out[1], i.id, i.out[2], ids, i.out[3]))],
-    neutral: main(`${s.id}-same`, s.neutral[0], s.neutral[1], ids),
+    clues: [main(`${s.id}-main`, s.main[0], s.main[1], ids), ...s.ideas.map((i) => ruleOut(`${s.id}-not-${i.id}`, i.out[0], i.out[1], i.id, i.out[2], ids, i.out[3], i.explainedBy))],
+    neutral: neutralClue(`${s.id}-same`, s.neutral[0], s.neutral[1], ids),
   };
 }
 
@@ -138,7 +160,8 @@ export const STORIES: readonly Story[] = [
     id: 'mud', skin: 'everyday', who: 'Omar',
     setting: 'Omar comes home and finds a mess in the hall.',
     main: ['Muddy paw prints lead in from the door.', 'Look for prints by the door.'],
-    neutral: ['Rex is asleep in his bed.', 'Look in Rex’s bed.'],
+    // Not “Look in Rex’s bed”: that could show whether Rex is wet, which rules the paint idea out.
+    neutral: ['Omar got home at four.', 'Ask when Omar got home.'],
     ideas: [
       { id: 'rain', text: 'Rex the dog came in from the rain', name: 'the rain idea', short: 'Rain', extras: [],
         out: ['It did not rain today.', 'Find out if it rained today.', 'Rex can’t come in from the rain on a day with no rain.'] },
@@ -147,7 +170,7 @@ export const STORIES: readonly Story[] = [
         out: ['The pond at the park was emptied for cleaning yesterday.', 'Ask if the pond was emptied.', 'Rex can’t jump into a pond with no water in it.',
           { rain: 'An emptied pond tells you nothing about the rain.', paint: 'Sam’s joke does not need the pond at all.' }] },
       { id: 'paint', text: 'Sam painted the prints as a joke', name: 'the paint idea', short: 'Paint', extras: ['Sam had brown paint'],
-        out: ['Rex is soaking wet.', 'Go and see if Rex is wet.', 'Painted prints on the floor would not make Rex wet.'] },
+        out: ['Rex is soaking wet.', 'Go and see if Rex is wet.', 'If the paint joke is the whole story, nothing made Rex wet.'], explainedBy: ['rain', 'pond'] },
     ],
   }),
   story({
@@ -159,7 +182,7 @@ export const STORIES: readonly Story[] = [
       { id: 'power', text: 'The power is out in the whole house', name: 'the power idea', short: 'Power out', extras: ['Hana did not notice the other lights were off'],
         out: ['The fridge is still humming.', 'Listen for the fridge.', 'A fridge can’t hum when the power is out.'] },
       { id: 'bulb', text: 'The lamp’s bulb burned out', name: 'the bulb idea', short: 'Bulb', extras: [],
-        out: ['A new bulb does not light up either.', 'Try a new bulb in the lamp.', 'If the old bulb were the problem, a new bulb would light up.'] },
+        out: ['A new bulb does not light up either.', 'Try a new bulb in the lamp.', 'If the old bulb were the problem, a new bulb would light up.'], explainedBy: ['power', 'plug'] },
       { id: 'plug', text: 'Someone unplugged the lamp', name: 'the plug idea', short: 'Plug', extras: ['someone came into Hana’s room', 'they did not tell her'],
         out: ['The lamp is still plugged in.', 'Look at the plug behind the lamp.', 'A lamp that is still plugged in was not unplugged.'] },
     ],
@@ -168,7 +191,7 @@ export const STORIES: readonly Story[] = [
     id: 'snow', skin: 'everyday', who: 'Kai',
     setting: 'Kai built a snowman yesterday. This morning he runs out to see it.',
     main: ['The snowman is now a lumpy pile of snow.', 'Look at the snowman.'],
-    neutral: ['The carrot nose is lying in the snow.', 'Look for the carrot nose.'],
+    neutral: ['School starts at nine today.', 'Ask when school starts.'],
     ideas: [
       { id: 'sun', text: 'The warm sun melted it', name: 'the sun idea', short: 'Sun', extras: [],
         out: ['It was cloudy all day yesterday.', 'Find out if the sun came out yesterday.', 'The sun can’t melt snow on a day it never came out.'] },
@@ -182,7 +205,7 @@ export const STORIES: readonly Story[] = [
     id: 'plant', skin: 'everyday', who: 'Fay',
     setting: 'On Monday, Fay checks on the class plant.',
     main: ['The plant’s leaves are droopy.', 'Look at the leaves.'],
-    neutral: ['A few leaves have dropped on the desk.', 'Look on the desk under the plant.'],
+    neutral: ['The class has art on Monday.', 'Look at the class schedule.'],
     ideas: [
       { id: 'dry', text: 'Nobody watered it', name: 'the water idea', short: 'No water', extras: [],
         out: ['The soil in the pot is still wet.', 'Feel the soil in the pot.', 'Wet soil means the plant has had water.'] },
@@ -217,7 +240,7 @@ export const STORIES: readonly Story[] = [
       { id: 'mice', text: 'The castle mice ate them', name: 'the mice idea', short: 'Mice', extras: ['mice got into the kitchen', 'the mice climbed up the table'],
         out: ['No mice live in the castle.', 'Look for mice in the castle.', 'Mice can’t eat the cakes if there are no mice.'] },
       { id: 'cook', text: 'A helper moved them to the cold room', name: 'the cold room idea', short: 'Cold room', extras: [],
-        out: ['Crumbs are all over the table.', 'Look for crumbs on the table.', 'Moving whole cakes would not leave crumbs all over.'] },
+        out: ['Crumbs are all over the table.', 'Look for crumbs on the table.', 'Moving whole cakes would not leave crumbs all over.'], explainedBy: ['dragon', 'mice'] },
     ],
   }),
   story({
@@ -238,7 +261,7 @@ export const STORIES: readonly Story[] = [
     id: 'egg', skin: 'fantasy', who: 'Lia',
     setting: 'Lia the dragon keeper checks the nest.',
     main: ['The dragon egg feels warm.', 'Feel the egg.'],
-    neutral: ['The egg has no cracks.', 'Look for cracks in the egg.'],
+    neutral: ['Lia’s lunch is a cheese sandwich.', 'Look in Lia’s lunch box.'],
     ideas: [
       { id: 'mom', text: 'The mother dragon sat on it', name: 'the mother idea', short: 'Mother', extras: [],
         out: ['The mother dragon is away over the sea this week.', 'Find out where the mother dragon is.', 'She can’t sit on the egg while she is far away.'] },
@@ -288,21 +311,25 @@ export const WORKED: Story = {
       id: 'grass', text: 'The grass is wet.', short: 'Grass wet', check: 'Look at the grass.',
       fits: { rain: true, sprinkler: true, truck: true },
       why: { rain: 'Rain wets the grass.', sprinkler: 'A sprinkler wets the grass.', truck: 'In this idea, the sprinkler wets the grass.' },
+      explains: ['rain', 'sprinkler', 'truck'],
     },
     {
       id: 'street', text: 'The street is wet too.', short: 'Street wet', check: 'Look at the street.',
       fits: { rain: true, sprinkler: false, truck: true },
-      why: { rain: 'Rain falls on the street as well as the grass.', sprinkler: 'A sprinkler waters only the grass. It does not reach the street.', truck: 'The truck sprays the street, so the street gets wet.' },
+      why: { rain: 'Rain falls on the street as well as the grass.', sprinkler: 'A sprinkler waters only the grass. If it was all that happened, the street would be dry.', truck: 'The truck sprays the street, so the street gets wet.' },
+      explains: ['rain', 'truck'],
     },
     {
       id: 'noRain', text: 'The weather report says no rain fell.', short: 'No rain fell', check: 'Read the weather report.',
       fits: { rain: false, sprinkler: true, truck: true },
       why: { rain: 'If no rain fell, it did not rain in the night.', sprinkler: 'A sprinkler works with no rain.', truck: 'A truck and a sprinkler work with no rain.' },
+      explains: [],
     },
     {
       id: 'roof', text: 'The roof of the house is dry.', short: 'Roof dry', check: 'Look at the roof.',
       fits: { rain: false, sprinkler: true, truck: true },
       why: { rain: 'Rain in the night would wet the roof too.', sprinkler: 'A sprinkler does not reach the roof, so the roof stays dry.', truck: 'A truck and a sprinkler do not reach the roof, so the roof stays dry.' },
+      explains: [],
     },
   ],
 };
@@ -347,10 +374,17 @@ function extrasPhrase(s: Story, i: Idea, list = true): string {
   return `${plural(n, 'extra thing')}${list && !s.letters ? `: ${joinAnd(i.extras)}` : ''}`;
 }
 
-/** What a clue says about an idea: its reason in a story, or the grid box in the abstract skin. */
+/** Does idea i explain clue c (its story makes the clue happen)? Fitting is weaker: the story only leaves it possible. */
+export const explains = (c: Clue, i: Idea) => !!c.explains?.includes(i.id);
+
+/**
+ * What a clue says about an idea: its reason in a story, or the grid box in the abstract skin. A fit with no reason
+ * of its own is never a bare “fits it”: the idea explains the clue, or its whole story leaves the clue possible.
+ */
 function clueWhy(s: Story, c: Clue, k: number, i: Idea): string {
   if (s.letters) return `${nm(i, true)} has a ${c.fits[i.id] ? '✓' : '✗'} under ${clueName(s, k)}.`;
-  return c.why[i.id] ?? `${nm(i, true)} fits it.`;
+  if (c.why[i.id]) return c.why[i.id];
+  return explains(c, i) ? `${nm(i, true)} explains it.` : `If ${nm(i)} is the whole story, this clue can still be true.`;
 }
 
 /** A clue by name with its words, ending a sentence: clue 2: “Rex is soaking wet.” In a grid, just clue B. */
@@ -408,14 +442,19 @@ function sceneOf(c: ExplainCase, o: { unseen?: Clue[]; firstBest?: Idea; nowBest
   return { kind: 'text', lines };
 }
 
-/** The opening of a prompt: the story's first line, or the grid. */
-const opening = (s: Story) => (s.letters ? 'The grid shows three ideas and the clues found.' : s.setting);
+/** The rule every story question rests on, said in its prompt and on the boards. */
+export const WHOLE_STORY = 'Each idea is the whole story.';
+
+/** The opening of a prompt: the story's first line (and, when the question checks fits, the whole-story rule), or the grid. */
+const opening = (s: Story, whole = false) => (s.letters ? 'The grid shows three ideas and the clues found.' : whole ? `${s.setting} ${WHOLE_STORY}` : s.setting);
 
 // ---------- teaching ----------
 
 const TERMS = [
   { word: 'An explanation', meaning: 'an idea that makes the clues make sense. We call each one an idea.' },
-  { word: 'Fits a clue', meaning: 'the clue makes sense if the idea is true.' },
+  { word: 'The whole story', meaning: 'all that happened, if the idea is true. Don’t add a second idea to save it.' },
+  { word: 'Fits a clue', meaning: 'the clue could still be true in the idea’s whole story. The idea does not have to explain it.' },
+  { word: 'Misses a clue', meaning: 'the idea’s story would make the clue different.' },
   { word: 'An extra thing', meaning: 'something more that must be true for the idea to work. No clue shows it.' },
   { word: 'A best guess', meaning: 'the idea that fits best so far. It is not a proof, so you still check it.' },
 ];
@@ -445,8 +484,8 @@ function bestSimpler(c: ExplainCase, clues: readonly Clue[]): string[] {
   const k0 = k >= 0 ? k : 0;
   return [
     `Take one idea: ${qEnd(s, i)}`,
-    `Read ${clueName(s, k0)}. Would it make sense if the idea were true? ${clueWhy(s, clues[k0], k0, i)}`,
-    'Do this for every idea and every clue. One clue that an idea does not fit, and that idea is out.',
+    `Read ${clueName(s, k0)}. If the idea is the whole story, could this clue still be true? ${clueWhy(s, clues[k0], k0, i)}`,
+    'Do this for every idea and every clue. If an idea misses even one clue, it is out.',
     'Of the ideas left, count the extra things each one needs. The fewest wins.',
   ];
 }
@@ -655,7 +694,7 @@ export function bestItem(rng: Rng, o: ExplainOptions): ExplainMade {
   const hintIdea = c.ideas.find((i) => i.id !== best.id && !fitsAll(i, c.shown)) ?? c.ideas.find((i) => i.id !== best.id)!;
   return done('explain-best', 'best', c, {
     kind: 'choose',
-    prompt: `${opening(s)} Which explanation is best?`,
+    prompt: `${opening(s, true)} Which explanation is best?`,
     scene: sceneOf(c),
     choices: ideaChoices(c),
     answer: best.id,
@@ -663,6 +702,7 @@ export function bestItem(rng: Rng, o: ExplainOptions): ExplainMade {
     feedback,
     hint: 'Here is one idea, checked on every clue. Check the other ideas the same way. Then count extra things.',
     hintCase: ideaCase(c, hintIdea, c.shown, true),
+    ...storyHelp(c),
     teach: bestTeach(c, c.shown, 'The best explanation fits every clue. If two ideas fit every clue, pick the one with the fewest extra things.', `There are ${c.shown.length} clues and 3 ideas. Test each idea on each clue. Then look at the extra things.`),
   });
 }
@@ -745,7 +785,7 @@ export function testItem(rng: Rng, o: ExplainOptions): ExplainMade {
   cases.push({ label: 'No check.', note: 'Nothing new is found, so both ideas stay in.' });
   return done('explain-test', 'test', c, {
     kind: 'choose',
-    prompt: `${opening(s)} Two explanations fit ${everyClue(c.shown.length)}: ${q(s, A)} and ${qEnd(s, B)} Which check could rule one of them out?`,
+    prompt: `${opening(s, true)} Two explanations fit ${everyClue(c.shown.length)}: ${q(s, A)} and ${qEnd(s, B)} Which check could rule one of them out?`,
     scene: sceneOf(c, s.letters ? { unseen: s.clues.slice(2) } : {}),
     choices,
     answer: 'split',
@@ -753,6 +793,7 @@ export function testItem(rng: Rng, o: ExplainOptions): ExplainMade {
     feedback,
     hint: 'Here is one check, worked out. Look for a check that one idea fits and the other does not.',
     hintCase: checkCase(c, again, againLabel),
+    ...storyHelp(c),
     teach: {
       rule: 'To test two ideas, look for a clue that one idea fits and the other does not. Finding it rules one idea out.',
       terms: TERMS,
@@ -807,7 +848,7 @@ export function newClueItem(rng: Rng, o: ExplainOptions): ExplainMade {
   const third = c.ideas.find((i) => i.id !== before.id && i.id !== now.id)!;
   const item: ItemCore = {
     kind: 'choose',
-    prompt: `${opening(s)} At first, ${q(s, before)} was the best guess. Then a new clue turned up. Which explanation is best now?`,
+    prompt: `${opening(s, true)} At first, ${q(s, before)} was the best guess. Then a new clue turned up. Which explanation is best now?`,
     scene: sceneOf(c),
     choices: ideaChoices(c),
     answer: now.id,
@@ -815,6 +856,7 @@ export function newClueItem(rng: Rng, o: ExplainOptions): ExplainMade {
     feedback,
     hint: 'Here is one idea, checked on every clue, the new one too. Check the other ideas the same way.',
     hintCase: ideaCase(c, third, clues, true),
+    ...storyHelp(c),
     teach: bestTeach(
       c,
       clues,
@@ -941,6 +983,9 @@ export const MAKERS: Record<ExplainKind, (rng: Rng, o: ExplainOptions) => Explai
 
 // ---------- See and Do: the worked example's boards ----------
 
+/** Where the lesson's cards sit: the contrast (fits is not explains) and the worked example. Boards open after them. */
+export const L2_CARDS = { contrast: 2, example: 4 } as const;
+
 const YES_NO = [{ id: 'yes', label: 'Yes' }, { id: 'no', label: 'No' }];
 const yn = (v: boolean) => (v ? 'yes' : 'no');
 const gridCols = (clues: readonly Clue[]) => clues.map((c) => ({ id: c.id, label: c.short ?? c.text, clue: c }));
@@ -948,7 +993,7 @@ const gridCols = (clues: readonly Clue[]) => clues.map((c) => ({ id: c.id, label
 /** The worked example (card 4): the wet grass, two clues, every box marked, the best named in the caption. */
 export function workedScene(): Extract<Scene, { kind: 'grid' }> {
   const best = bestOf(WORKED.ideas, WORKED_SHOWN)!;
-  return gridScene(WORKED.ideas, gridCols(WORKED_SHOWN), `✓ means the idea fits the clue. ✗ means it does not. Best guess: ${best.short}. It fits both clues and needs nothing extra.`);
+  return gridScene(WORKED.ideas, gridCols(WORKED_SHOWN), `${WHOLE_STORY} ✓ means the idea fits the clue. ✗ means it misses. Best guess: ${best.short}. It fits both clues and needs nothing extra.`);
 }
 
 /** The two ideas that fit the worked example's first two clues (rain and truck): the pair a check must tell apart. */
@@ -970,7 +1015,7 @@ export function newClueScene(): Extract<Scene, { kind: 'grid' }> {
   return gridScene(
     WORKED.ideas,
     cols,
-    `“${WORKED_NEW.short}?” is a check. ${out.short} has a ✗ there and ${kept.short} has a ✓, so it tells them apart. The report says no rain fell. Best guess now: ${best.short}.`,
+    `${WHOLE_STORY} “${WORKED_NEW.short}?” is a check. ${out.short} has a ✗ there and ${kept.short} has a ✓, so it tells them apart. The report says no rain fell. Best guess now: ${best.short}.`,
   );
 }
 
@@ -978,7 +1023,7 @@ export function newClueScene(): Extract<Scene, { kind: 'grid' }> {
 const fitWhy = (i: Idea, c: Clue) => `${c.why[i.id]} So ${i.name} ${c.fits[i.id] ? 'fits' : 'does not fit'} “${c.short}.”`;
 
 /** The worked grid with no best guess named, so the boards' "best guess" marks can't be copied from a caption. */
-const plainScene = (clues: readonly Clue[]) => gridScene(WORKED.ideas, gridCols(clues), '✓ means the idea fits the clue. ✗ means it does not.');
+const plainScene = (clues: readonly Clue[]) => gridScene(WORKED.ideas, gridCols(clues), `${WHOLE_STORY} ✓ means the idea fits the clue. ✗ means it misses.`);
 
 /**
  * Board 1: the worked grid with one more clue (the dry roof). The first two columns are shown; the learner marks the
@@ -999,6 +1044,11 @@ export function fitBoard(): DrillStep {
   const miss = WORKED.ideas.filter((i) => !WORKED_BOARD.fits[i.id]).map((i) => i.name);
   const split = splits(WORKED_PAIR, WORKED_BOARD);
   const { out, kept } = ruledBy(WORKED_BOARD);
+  // fits-as-explains on the grid: a ✗ on a box where the idea fits the new clue without explaining it (the sprinkler
+  // and the truck do not explain a dry roof; their stories only leave it possible). Any other wrong box is a plain slip.
+  const misconceptions: Misconception[] = WORKED.ideas
+    .filter((i) => WORKED_BOARD.fits[i.id] && !explains(WORKED_BOARD, i))
+    .map((i) => ({ id: 'fits-as-explains', when: 'picks' as const, picks: { [`${i.id}-${WORKED_BOARD.id}`]: 'no' }, text: FITS_AS_EXPLAINS }));
   return {
     id: 's7.l2-do1',
     title: 'Mark a new clue',
@@ -1008,10 +1058,13 @@ export function fitBoard(): DrillStep {
     ],
     scene: plainScene(WORKED_SHOWN),
     twin: 'The same grid as the example, but no best guess is named.',
-    afterCard: 3,
+    afterCard: L2_CARDS.example,
     rows,
     columns: clues.map((c) => c.short!),
-    caption: '✓ fits the clue. ✗ does not fit.',
+    caption: `${WHOLE_STORY} ✓ fits the clue. ✗ misses it.`,
+    misconceptions,
+    confused: [FITS_Q, wholeStoryQuestion()],
+    words: { closing: FITS_CLOSING },
     done: !miss.length
       ? 'Right. Every idea fits this clue. So this clue can’t tell the ideas apart.'
       : split
@@ -1111,10 +1164,235 @@ export function bestBoard(): DrillStep {
     ],
     scene: plainScene(clues),
     twin: `One clue is added: ${WORKED_BOARD.text.charAt(0).toLowerCase()}${WORKED_BOARD.text.slice(1)}`,
-    afterCard: 3,
+    afterCard: L2_CARDS.example,
     rows: [firstRow, checkRow, ...fitRows, bestRow],
     done: only
       ? `Right. ${nm(best, true)} is the only idea that fits every clue now, so it is the best guess. It needs ${extrasPhrase(WORKED, best, false)}, but an idea that misses a clue is out first.`
       : `Right. ${nm(best, true)} fits every clue and needs the fewest extra things. It is the best guess so far, but it is still a guess to check.`,
   };
+}
+
+// ---------- fits is not explains: each idea is the whole story ----------
+//
+// An idea fits a clue when the clue could still be true in the idea’s whole story; it misses a clue when its story
+// would make the clue different. Explaining is more: the idea’s story makes the clue happen. A learner who reads
+// “fits” as “explains” crosses out an idea for a clue it says nothing about; one who reads it as “could happen another
+// way” (Stop 6) saves an idea by adding a second idea to it. Every fit below comes from Clue.fits, every “explains”
+// from Clue.explains.
+
+/** The distinction the fit marks rest on. */
+export const FITS_VS_EXPLAINS: Distinction = {
+  id: 'fits-vs-explains',
+  a: 'The idea’s story would make the clue different.',
+  b: 'The idea’s story leaves the clue possible, even if it does not explain it.',
+};
+
+export const FITS_CLOSING = 'Those two ideas are apart now. Back to the board: picture each idea as the whole story, then check each clue.';
+export const FIT_OPTIONS = [{ id: 'fit', label: 'Fits' }, { id: 'miss', label: 'Misses' }];
+
+const storyById = (id: string) => STORIES.find((s) => s.id === id)!;
+const ideaIn = (s: Story, id: string) => s.ideas.find((i) => i.id === id)!;
+const clueIn = (s: Story, id: string) => (s === WORKED ? wclue(id) : s.clues.find((c) => c.id === id)!);
+
+interface FitCase {
+  idea: Idea;
+  clue: Clue;
+}
+
+/**
+ * The cases of the contrast and its board: the sprinkler and “Street wet” (its story would make the clue different),
+ * the cold room and “Soil still wet” (its story leaves the clue possible, without explaining it), then two more to
+ * mark: a fit that does not explain (“Nobody watered it” and the sunny window) and one that does (rain and the street).
+ */
+export function fitCases(): FitCase[] {
+  const plant = storyById('plant');
+  return [
+    { idea: ideaIn(WORKED, 'sprinkler'), clue: clueIn(WORKED, 'street') },
+    { idea: ideaIn(plant, 'cold'), clue: clueIn(plant, 'plant-not-dry') },
+    { idea: ideaIn(plant, 'dry'), clue: clueIn(plant, 'plant-not-dark') },
+    { idea: ideaIn(WORKED, 'rain'), clue: clueIn(WORKED, 'street') },
+  ];
+}
+
+/** The two panels: a miss next to a fit that does not explain. Same question, the whole story decides. */
+export function fitsContrast(): Extract<Scene, { kind: 'contrast' }> {
+  const [miss, fit] = fitCases();
+  if (miss.clue.fits[miss.idea.id] || !fit.clue.fits[fit.idea.id] || explains(fit.clue, fit.idea)) throw new Error('fitsContrast: a miss, then a fit the idea does not explain');
+  return {
+    kind: 'contrast',
+    pairs: [
+      {
+        world: `${miss.idea.text}.`,
+        who: 'The clue',
+        says: miss.clue.text,
+        truth: !!miss.clue.fits[miss.idea.id],
+        because: `${miss.clue.why[miss.idea.id]} The story would make the clue different.`,
+      },
+      {
+        world: `${fit.idea.text}.`,
+        who: 'The clue',
+        says: fit.clue.text,
+        truth: !!fit.clue.fits[fit.idea.id],
+        because: 'The cold story says nothing about the soil. In that story, the soil can still be wet.',
+        then: 'It fits, even though the cold does not explain the wet soil.',
+      },
+    ],
+    ask: {
+      q: 'Does an idea have to explain a clue to fit it?',
+      a: `No. ${cap(fit.idea.name)} does not explain the wet soil, but it still fits. An idea misses a clue only when its story would make the clue different.`,
+    },
+    words: { worldTag: 'Whole story', truth: 'Fits', untruth: 'Misses' },
+  };
+}
+
+/** The key-idea card that teaches it, right after “Fit every clue”. */
+export function fitsContrastCard(): IdeaCard {
+  return {
+    title: 'Fits is not the same as explains',
+    distinction: FITS_VS_EXPLAINS.id,
+    body: [
+      'An idea does not have to explain a clue to fit it.',
+      'Picture the idea as the whole story. Then ask: could the clue still be true in that story?',
+      'If yes, the idea fits, even when the clue is about something else. If the story would make the clue different, the idea misses it.',
+    ],
+    scene: fitsContrast(),
+  };
+}
+
+const FITS_AS_EXPLAINS =
+  'You may be treating “fits” and “explains” as the same thing. They are two different things. An idea fits a clue when its story leaves the clue possible, even if it does not explain it. It misses only when its story would make the clue different. So ask: could the clue still be true in that story?';
+const NOT_WHOLE_STORY =
+  'You may be treating “it could have happened another way” and “it fits the whole story” as the same thing. They are two different things. Each idea is the whole story: don’t add a second idea to save it. Ask: if this idea is all that happened, could the clue still be true?';
+
+/** The general fits question, for a board (it names no case, so it never gives the board’s answer). */
+const FITS_Q: ConfusedQuestion = {
+  q: 'An idea does not explain a clue. Does that mean the idea misses it?',
+  options: [{ label: 'No. It misses only if its story would make the clue different', right: true }, { label: 'Yes. An idea must explain every clue' }, { label: 'Not sure' }],
+  teach: 'No. Picture the idea as the whole story. If the clue could still be true in that story, the idea fits, even if it does not explain the clue. It misses only when its story would make the clue different.',
+};
+
+/**
+ * The fits question on a story item, asked about another story (so it never gives the item’s answer): an idea and a
+ * clue it fits without explaining. “Nobody watered it” and the sunny window first.
+ */
+export function fitsQuestion(avoid: string): ConfusedQuestion {
+  const order = [storyById('plant'), ...STORIES.filter((s) => s.id !== 'plant')].filter((s) => s.id !== avoid);
+  for (const s of order) {
+    for (const i of s.ideas) {
+      const c = s.clues.slice(1).find((cl) => cl.fits[i.id] && !explains(cl, i));
+      if (!c) continue;
+      return {
+        q: `Say “${i.text}” is the whole story. Could “${c.text.replace(/\.$/, '')}” still be true?`,
+        options: [{ label: 'Yes. Its story leaves the clue possible', right: true }, { label: 'No. The idea does not explain the clue' }, { label: 'Not sure' }],
+        teach: `Yes. “${i.text}” does not explain that clue, but in its story the clue can still be true. So the idea fits it. An idea misses a clue only when its story would make the clue different.`,
+      };
+    }
+  }
+  throw new Error('fitsQuestion: no fit without an explanation');
+}
+
+/** The whole-story question (Stop 6 asked “could it happen another way?”). The truck idea is the sprinkler idea plus more. */
+export function wholeStoryQuestion(): ConfusedQuestion {
+  const sprinkler = ideaIn(WORKED, 'sprinkler'), truck = ideaIn(WORKED, 'truck');
+  if (extraCount(truck) <= extraCount(sprinkler)) throw new Error('wholeStoryQuestion: the truck idea needs more extra things');
+  return {
+    q: 'In these puzzles, can you add something to an idea to make it fit a clue?',
+    options: [{ label: 'No. Each idea is the whole story', right: true }, { label: 'Yes. It could have happened another way' }, { label: 'Not sure' }],
+    teach: `No. In Stop 6, you asked if something could happen another way. Here, each idea is the whole story. “${truck.text}” is not the sprinkler idea fixed up. It is a new idea, with more extra things. Test each idea just as it is.`,
+  };
+}
+
+/** Why a fit or a miss: the clue’s own reason, or (a fit it does not explain) its story leaves the clue possible. */
+function fitReason(c: Clue, i: Idea): string {
+  if (!c.fits[i.id]) return `${c.why[i.id]} So ${i.name} misses it.`;
+  if (explains(c, i)) return `${c.why[i.id] ?? `${cap(i.name)} explains it.`} So ${i.name} fits it.`;
+  return `${cap(i.name)} does not explain this clue, but its story leaves it possible. Nothing in that story would make the clue different. So it fits.`;
+}
+
+/** Do, board 1: right after the contrast card. For each case: does the idea explain the clue? Then: fits or misses? */
+export function fitsBoard(): DrillStep {
+  const scene = fitsContrast();
+  const cases = fitCases();
+  const rows: DrillRow[] = cases.map(({ idea: i, clue: c }, k): DrillRow => {
+    const id = `case${k + 1}`;
+    const fits = !!c.fits[i.id];
+    const exp = explains(c, i);
+    return {
+      id,
+      label: `Whole story: ${i.text}. Clue: ${c.text}`,
+      marks: [
+        {
+          id: `${id}-explain`,
+          label: `Does ${i.name} explain the clue?`,
+          options: YES_NO,
+          answer: yn(exp),
+          why: exp
+            ? { no: `${c.why[i.id]} So ${i.name} explains it.` }
+            : { yes: fits ? `No. ${cap(i.name)} does not make this clue happen. In its story, the clue is only still possible.` : `No. ${c.why[i.id]} So ${i.name} does not explain it.` },
+        },
+        {
+          id: `${id}-fit`,
+          label: `Does ${i.name} fit the clue?`,
+          options: FIT_OPTIONS,
+          answer: fits ? 'fit' : 'miss',
+          why: { [fits ? 'miss' : 'fit']: fitReason(c, i) },
+          compare: { says: c.text, world: `${i.text}.` },
+        },
+      ],
+    };
+  });
+  const picks = (pred: (f: FitCase) => boolean, make: (id: string) => Record<string, string>) => cases.flatMap((f, k) => (pred(f) ? [make(`case${k + 1}`)] : []));
+  const fitNotExplained = (f: FitCase) => !!f.clue.fits[f.idea.id] && !explains(f.clue, f.idea);
+  const misconceptions: Misconception[] = [
+    ...picks(fitNotExplained, (id) => ({ [`${id}-explain`]: 'no', [`${id}-fit`]: 'miss' })).map((p) => ({ id: 'fits-as-explains', when: 'picks' as const, picks: p, text: FITS_AS_EXPLAINS })),
+    ...picks(fitNotExplained, (id) => ({ [`${id}-fit`]: 'miss' })).map((p) => ({ id: 'fits-as-explains', when: 'picks' as const, picks: p, text: FITS_AS_EXPLAINS })),
+    ...picks((f) => !f.clue.fits[f.idea.id], (id) => ({ [`${id}-fit`]: 'fit' })).map((p) => ({ id: 'not-whole-story', when: 'picks' as const, picks: p, text: NOT_WHOLE_STORY })),
+  ];
+  return {
+    id: 's7.l2-do-fits',
+    title: 'Fits or misses?',
+    body: [`${WHOLE_STORY} For each case, does the idea explain the clue?`, 'Then: does the idea fit the clue, or miss it?'],
+    scene,
+    rows,
+    afterCard: L2_CARDS.contrast,
+    scaffold: 'full',
+    words: { says: 'Clue', world: 'Whole story', so: 'So', ask: 'Could the clue still be true in that story?', closing: FITS_CLOSING },
+    misconceptions,
+    confused: [FITS_Q, wholeStoryQuestion()],
+    distinction: FITS_VS_EXPLAINS.id,
+    done: 'Right. An idea can fit a clue it does not explain. It misses a clue only when its story would make the clue different.',
+  };
+}
+
+/**
+ * The thinking board on a story item (Item.scratch, “the clue board”): each idea, with its extra things, marked Fits
+ * or Misses on every clue. The item’s story lines are hidden while it is open, so each row and mark says its words.
+ */
+export function clueScratch(c: ExplainCase): DrillStep {
+  const s = c.story;
+  const clues = allClues(c);
+  return {
+    id: 's7.l2-clue-board',
+    title: 'Check each idea',
+    body: [`${WHOLE_STORY} For each clue, ask: could it still be true in that story? Mark Fits or Misses.`, 'An idea that misses a clue is out. Then count the extra things of the ideas left.'],
+    rows: c.ideas.map((i) => ({
+      id: i.id,
+      label: `${qEnd(s, i)} It needs ${extrasPhrase(s, i, false)}.`,
+      marks: clues.map((cl, k): DrillMark => ({
+        id: `${i.id}-${cl.id}`,
+        label: `${c.added === cl ? 'New clue' : 'Clue'} ${k + 1}: ${cl.text}`,
+        options: FIT_OPTIONS,
+        answer: cl.fits[i.id] ? 'fit' : 'miss',
+        why: { [cl.fits[i.id] ? 'miss' : 'fit']: fitReason(cl, i) },
+      })),
+    })),
+    done: '',
+    words: { says: 'Clue', world: 'Whole story', so: 'So', ask: 'Could the clue still be true in that story?', closing: FITS_CLOSING },
+  };
+}
+
+/** The help a story item carries in lessons and practice: “I’m confused” and the clue board. Grids show their fits already. */
+function storyHelp(c: ExplainCase): Pick<ItemCore, 'confused' | 'scratch' | 'scratchLabel'> {
+  if (c.story.letters) return {};
+  return { confused: [fitsQuestion(c.story.id), wholeStoryQuestion()], scratch: clueScratch(c), scratchLabel: 'the clue board' };
 }

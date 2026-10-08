@@ -5,11 +5,11 @@ export const S3_WORLD: StopWorld = {
   stop: 'Schedules, seat plans and timelines of the past all put things in order. Clues that link in a chain show what is sure and what you can’t tell yet.',
   lessons: {
     's3.l1': {
-      why: 'Clues that link into a chain prove things no single clue says. When no chain compares two things, the honest answer is “can’t tell.”',
+      why: 'Clues that link into a chain prove things no single clue says. When no clue, and no chain of clues, links two things, the honest answer is “can’t tell.”',
       uses: [
         { who: 'You, in science class', kind: 'life', text: 'A balance shows the red block is heavier than the blue one, and blue is heavier than green. So red must be heavier than green. You don’t need to put those two on the balance.' },
         { who: 'Programmers', kind: 'work', text: 'A program finding the top score keeps the best one so far, and checks each new score only against it. The chain of “higher than” proves the one it ends with is the top, without comparing every pair.' },
-        { who: 'Historians', kind: 'work', text: 'Historians, who study the past, may know two old letters were written before a third one. No clue compares the two, so they can’t tell which came first. Guessing could put history in the wrong order.' },
+        { who: 'Historians', kind: 'work', text: 'Historians, who study the past, may know two old letters were written before a third one. No clue, and no chain of clues, links those two. So they can’t tell which came first.' },
       ],
     },
     's3.l2': {
