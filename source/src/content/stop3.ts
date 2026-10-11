@@ -52,6 +52,8 @@ import {
   whereMark,
   whoCanBeAt,
   whoMark,
+  whyChainItem,
+  WHY_SKILL,
   boardName,
   type ClueType,
   type LineBoard,
@@ -59,6 +61,7 @@ import {
   type SpotFocus,
   type Status,
 } from '../engine/puzzles/lineup';
+import { andOrWarmUp } from './stop2';
 import type { ConfusedQuestion, DrillRow, DrillStep, IdeaCard, Item, LessonDef, LineClue, Misconception, Rng, StopDef } from '../engine/types';
 
 const EVERYDAY: readonly SkinId[] = ['race', 'height', 'line'];
@@ -607,6 +610,15 @@ const lessons: LessonDef[] = [
         ],
       },
       {
+        // Names the rule the chain uses: kid words first, the grown-up word once.
+        title: 'A chain rule',
+        body: [
+          'Here is a rule that always works. If Ava is before Ben, and Ben is before Cal, then Ava is before Cal.',
+          'It works for “taller than,” “finished before” and “in front of” too.',
+          'Grown-ups call a rule like this transitive. It carries along the chain, one link at a time.',
+        ],
+      },
+      {
         title: 'Who is first or last?',
         body: [
           'To find the tallest, cross out anyone who is shorter than someone. If just one person is left, that person is the tallest.',
@@ -636,6 +648,10 @@ const lessons: LessonDef[] = [
     ],
     drill: [L1_DRILL],
     distinctions: [CHAIN_VS_FORK],
+    terms: [
+      { term: 'chain', means: 'Clues that link up, one person to the next. Follow it from one end to the other.' },
+      { term: 'transitive', also: 'a chain rule', means: 'A rule that carries along a chain. If Ava is before Ben, and Ben is before Cal, then Ava is before Cal.' },
+    ],
     /**
      * Quiz: chains and can't-tell only. Try 1 is a new chain in a new skin (three people, who is first). Try 2 is a
      * fork (three people, who is first: Can't tell), the shape of the board's last row and of the chain-or-fork card.
@@ -918,9 +934,10 @@ const lessons: LessonDef[] = [
 ];
 
 /**
- * Nine items: two per lesson for lessons 1-4 and one for lesson 5. The first two are conflict items.
- * The "which clue wasn't needed?" item uses three people so it fits the check's timer. Each item uses only the
- * clue kinds its lesson's quiz uses, so the check never tests a clue no lesson taught.
+ * Ten items: two per lesson for lessons 1-4, one for lesson 5, and last the closing why item (tag `why`): the clues prove
+ * that one person comes before another, and the reason to pick is the chain. The first two are conflict items. The
+ * "which clue wasn't needed?" item uses three people so it fits the check's timer. Each item uses only the clue kinds
+ * its lesson's quiz uses, so the check never tests a clue no lesson taught.
  */
 function check(rng: Rng): Item[] {
   const any = () => rng.pick(SKIN_IDS);
@@ -936,8 +953,15 @@ function check(rng: Rng): Item[] {
     () => buildPuzzle(rng, { id: 'c7', skin: any(), n: 4, types: TAUGHT_TYPES }).item,
     () => buildPuzzle(rng, { id: 'c8', skin: any(), n: 4, types: TAUGHT_TYPES }).item,
     () => extraCluePuzzle(rng, { id: 'c9', skin: any(), n: 3, types: TAUGHT_TYPES }).item,
+    () => whyChainItem(rng, { id: 'c10', skin: any() }).item,
   ]);
 }
+
+/**
+ * The warm-up on the stop page, from NOT, AND, OR: one card question with AND or OR. It is a Stop 2 item, so it never
+ * counts for this stop. Its prompt says it is a warm-up from NOT, AND, OR.
+ */
+const bridge = (rng: Rng): Item => andOrWarmUp(rng, 's3-warm');
 
 /** One Arcade item from anywhere in the stop, with the clue kinds of its lesson. */
 function arcade(rng: Rng): Item {
@@ -970,6 +994,10 @@ function fresh(missed: Item, rng: Rng): Item[] {
     return null;
   };
   const pair = (a: Item | null, b: Item): Item[] => (a ? rng.shuffle([a, b]) : []);
+  // The check's closing why item: a new chain to explain, and a fork whose answer is “Can’t tell” (chain vs fork).
+  if (missed.skill === WHY_SKILL) {
+    return rng.shuffle([whyChainItem(rng, { id, skin: rng.pick(SKIN_IDS) }).item, chainPuzzle(rng, { id: `${id}b`, skin: rng.pick(SKIN_IDS), cantTell: true }).item]);
+  }
   switch (missed.lesson) {
     case L1: {
       if (missed.kind !== 'choose') return [];
@@ -1025,4 +1053,6 @@ export const stop3: StopDef = {
   check,
   practice: arcade,
   fresh,
+  bridge,
+  skillNames: { [WHY_SKILL]: 'Why one must come before another: the chain' },
 };

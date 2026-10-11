@@ -375,6 +375,19 @@ function soundness(it: Item): string[] {
       }), 'pick');
       break;
     }
+    case 's2.why-not': {
+      // The closing why item: the card does not fit, and the right reason is worked out again from the labels. AND: the
+      // reason that names a part the card does not fit. OR: the reason that says no part is true, when neither part fits.
+      const rule = ruleIn(it.prompt);
+      if (things.length !== 1) fail('a why item shows one card');
+      const c = things[0];
+      if (c && evaluate(rule, c)) fail('the card fits the rule');
+      if (!it.tags?.includes('why')) fail('no why tag');
+      if (rule.op === 'and') one(byLabel((l) => { const m = /^The part “(.+?)” is false, and AND needs both parts/.exec(l); return !!m && !!c && !evaluate(parse(m[1]), c); }), 'why-not AND');
+      else if (rule.op === 'or') one(byLabel((l) => /^No part is true\./.test(l) && !!c && !evaluate(rule.a, c) && !evaluate(rule.b, c)), 'why-not OR');
+      else fail('a why item’s rule is AND or OR');
+      break;
+    }
     case 's2.not-means': {
       const rule = ruleIn(it.prompt);
       one(byLabel((l) => {
@@ -677,6 +690,16 @@ function mistakeKinds(it: ChooseItem, cid: string): string[] {
   const n = Number(label);
   const matching = (cands: [number, string][]) => [...new Set(cands.filter(([v]) => v === n).map(([, k]) => k))];
   switch (it.skill) {
+    case 's2.why-not': {
+      // The closing why item: the kind of misreading each wrong reason shows, read from its words.
+      if (/^The part “.+?” is false, and AND/.test(label)) return ['other-part'];
+      if (/^Both parts are false\./.test(label)) return ['both-false'];
+      if (/one true part makes AND false\.$/.test(label)) return ['true-breaks'];
+      if (/and OR needs both parts to be true\.$/.test(label)) return ['needs-both'];
+      if (/^Both parts are true, and OR/.test(label)) return ['not-both'];
+      if (/but OR needs its first part\.$/.test(label)) return ['first-part'];
+      return ['?'];
+    }
     case 's2.not-means': {
       const rule = ruleIn(it.prompt);
       if (rule.op !== 'not' || rule.a.op !== 'is') return ['?'];
@@ -888,6 +911,14 @@ describe('stop 2 wrong answers teach first', () => {
             expect(other.value, `${it.id} ${c.id}`).not.toBe(yours.value);
             break;
           }
+          case 's2.why-not':
+            // A reason that misreads AND or OR gets a card that fits the rule; any other wrong reason, the card shown.
+            if (/^(?:true-breaks|or-needs-both)-/.test(c.id)) expect(evaluate(rule!, card), `${it.id} ${c.id}`).toBe(true);
+            else {
+              expect(cardName(card), it.id).toBe(cardName(scene[0]));
+              expect(evaluate(rule!, card), it.id).toBe(false);
+            }
+            break;
           default:
             throw new Error(`no counterexample check for ${it.skill}`);
         }
@@ -931,12 +962,13 @@ describe('stop 2 wrong answers teach first', () => {
     expect(seen('s2.bracket-yesno')).toEqual(['s2.bracket-yesno:and', 's2.bracket-yesno:or']);
     expect(seen('s2.same-meaning').length).toBe(4);
     expect(seen('s2.guess-rule')).toEqual(['s2.guess-rule:says-no-to-a-yes', 's2.guess-rule:says-yes-to-a-no']);
+    expect(seen('s2.why-not')).toEqual(['s2.why-not:both-false', 's2.why-not:first-part', 's2.why-not:needs-both', 's2.why-not:not-both', 's2.why-not:other-part', 's2.why-not:true-breaks']);
     const templates = new Map<string, Set<string>>();
     for (const [tpl, k] of kindOf) {
       if (!templates.has(k)) templates.set(k, new Set());
       templates.get(k)!.add(tpl);
     }
-    expect(templates.size).toBe(26);
+    expect(templates.size).toBe(32);
   });
 
   it('choice ids come from the choice, never from its place, so a shuffle keeps each explanation with its choice', () => {
@@ -1811,7 +1843,7 @@ describe('stop 2: See -> Do -> Quiz (skill-drill handoff)', () => {
             // The question's rule is marked; no choice is.
             expect(hc.truths!.some((t) => /your answer|right answer/.test(t.who)), it.id).toBe(false);
             break;
-          case 's2.or-yesno': case 's2.bracket-yesno':
+          case 's2.or-yesno': case 's2.bracket-yesno': case 's2.why-not':
             expect(cardName(card), it.id).not.toBe(cardName(scene[0]));
             break;
           case 's2.and-pick': case 's2.or-pick':

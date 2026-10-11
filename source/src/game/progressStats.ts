@@ -4,7 +4,7 @@
  */
 import { addDays, daysBetween, type StopProgress, type StopStatus } from '../engine/journey/mastery';
 import type { Tally } from '../engine/save/save';
-import { STOPS } from '../content/stops';
+import { STOPS, stopLabelOf } from '../content/stops';
 
 /** Seconds of active play a day needs to count toward the streak. */
 export const STREAK_MIN_SECONDS = 60;
@@ -242,10 +242,13 @@ export function skillName(skill: string): string {
   return SKILL_NAMES[skill] ?? (m[2].replace(/^l\d+\./, '').replace(/[-_.]+/g, ' ').trim() || 'mixed');
 }
 
-/** 's2.or-both' -> 'Stop 2 · OR includes both'. Unknown tags fall back to their words. */
+/**
+ * 's2.or-both' -> 'Stop 3 · OR includes both': the id's number is the stored one, shown as the stop's place on the
+ * Journey (s2 is Stop 3 since Arguments came in), or "Ring k" for the Observatory. Unknown tags fall back to their words.
+ */
 export function skillLabel(skill: string): string {
   const m = /^s(\d{1,2})\./.exec(skill);
-  return m ? `Stop ${Number(m[1])} · ${skillName(skill)}` : skill;
+  return m ? `${stopLabelOf(Number(m[1]))} · ${skillName(skill)}` : skill;
 }
 
 /** When a Wrong-Answer Notebook card can be fixed: "Ready now", "Ready tomorrow" or "Ready in 3 days". */
@@ -290,7 +293,8 @@ export function pathDot(status: StopStatus): PathDot {
 
 /**
  * The stop a player is on, for the "Stop n" line on player cards: one past the run of passed stops
- * from stop 1, at most `total`.
+ * from stop 1, at most `total`. Pass the numbered stops in Journey order (STOPS.filter(isMainPath)), so the
+ * position is the shown number (stopNumber).
  */
 export function frontierStop(stopIds: readonly string[], progress: Readonly<Record<string, StopProgress>>): number {
   let n = 0;

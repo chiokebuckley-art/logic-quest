@@ -597,8 +597,8 @@ export function worksConfused(): ConfusedQuestion[] {
     },
     {
       q: 'In these puzzles, can two different things each make the effect happen?',
-      options: [{ label: 'No. One thing makes the effect', right: true }, { label: 'Yes. It could happen another way, like in Stop 6' }, { label: 'Not sure' }],
-      teach: 'No. In these puzzles, one thing makes the effect happen. In Stop 6, THEN without IF did not break an if-then rule. Here it does: if the effect comes without a thing, something else did it. So that thing is not the cause.',
+      options: [{ label: 'No. One thing makes the effect', right: true }, { label: 'Yes. It could happen another way, like in Stop 7' }, { label: 'Not sure' }],
+      teach: 'No. In these puzzles, one thing makes the effect happen. In Stop 7, THEN without IF did not break an if-then rule. Here it does: if the effect comes without a thing, something else did it. So that thing is not the cause.',
     },
   ];
 }
@@ -923,7 +923,7 @@ export function causeIdeas(): IdeaCard[] {
         'In these puzzles, one thing makes the effect happen. So a cause passes two checks.',
         'Check 1: when it happens, the effect happens. It works every time, unless the table names something that stopped it.',
         'Check 2: when it does not happen, the effect does not happen. Nothing else makes the effect.',
-        'When both checks pass, we say the lamp follows the switch. In Stop 6, THEN without IF did not break an if-then rule. “Follows” is stronger: it needs both checks.',
+        'When both checks pass, we say the lamp follows the switch. In Stop 7, THEN without IF did not break an if-then rule. “Follows” is stronger: it needs both checks.',
       ],
     },
     {
@@ -1292,7 +1292,7 @@ function testTeach(t: Table): Teach {
     cases: t.cands.map((_, c) => candCase(t, c)),
     remember: [
       'It passes both checks, and a fair test changes only it. Then it is the cause.',
-      'In Stop 6, THEN without IF did not break an if-then rule. Here, the effect without the thing rules it out.',
+      'In Stop 7, THEN without IF did not break an if-then rule. Here, the effect without the thing rules it out.',
       'Ask: “Did only this one thing change?”',
     ],
     simpler: [

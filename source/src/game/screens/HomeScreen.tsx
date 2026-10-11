@@ -4,7 +4,7 @@
  */
 import { nextStep, viewAll, type CheckKind, type NextStep } from '../../engine/journey/mastery';
 import { fixableCards } from '../../engine/notebook';
-import { STOPS, stopById } from '../../content/stops';
+import { STOPS, stopById, stopLabel } from '../../content/stops';
 import { dueEvidence, placeTitle } from '../observatory';
 import { DAILY_GOAL_MINUTES, minutesOn, streakDays } from '../progressStats';
 import { useStore, type Route } from '../store';
@@ -37,7 +37,7 @@ export function nextUpInfo(next: NextStep, views: ReturnType<typeof viewAll>, an
     const lesson = stop.lessons[k - 1];
     return {
       stopId: stop.id,
-      kicker: `Next up · Stop ${stop.n} · ${stop.title}`,
+      kicker: `Next up · ${stopLabel(stop)} · ${stop.title}`,
       title: `Lesson ${k} · ${lesson?.title ?? ''}`,
       text: redo ? 'Learn this idea again. Then you can try the check again, with new questions.' : k === stop.lessons.length ? 'Then the stop check opens.' : `${lesson?.ideas.length ?? 1} key ${lesson?.ideas.length === 1 ? 'idea' : 'ideas'}, ${lesson?.drill?.length ? 'then you do it yourself, then' : 'then'} a few tries.`,
       button: {
@@ -50,7 +50,7 @@ export function nextUpInfo(next: NextStep, views: ReturnType<typeof viewAll>, an
     const retry = view?.status === 'notYet';
     return {
       stopId: stop.id,
-      kicker: `Next up · Stop ${stop.n} · ${stop.title}`,
+      kicker: `Next up · ${stopLabel(stop)} · ${stop.title}`,
       title: retry ? 'Try the check again' : CHECK_NAME[next.kind],
       text: retry
         ? 'You redid the lessons you missed. The questions are new.'
@@ -70,7 +70,7 @@ export function nextUpInfo(next: NextStep, views: ReturnType<typeof viewAll>, an
     }
     return {
       stopId: stop.id,
-      kicker: `Stop ${stop.n} · ${stop.title}`,
+      kicker: `${stopLabel(stop)} · ${stop.title}`,
       title: 'Rest for today',
       text: 'You tried this check twice today. Rest now and try again tomorrow. Rest helps your brain keep what you learned.',
       button,
@@ -107,10 +107,10 @@ export function HomeScreen() {
   for (const { stop, view } of views) {
     const p = save.stops[stop.id];
     if (view.due && !(next.stopId === stop.id && next.action === 'check')) {
-      plan.push({ key: `due-${stop.id}`, title: `${CHECK_NAME[view.due]} · Stop ${stop.n}`, meta: 'today', state: 'later', route: { name: 'check', stopId: stop.id, kind: view.due } });
+      plan.push({ key: `due-${stop.id}`, title: `${CHECK_NAME[view.due]} · ${stopLabel(stop)}`, meta: 'today', state: 'later', route: { name: 'check', stopId: stop.id, kind: view.due } });
     }
     const doneToday = p?.weekDay === today ? 'week' : p?.lockDay === today ? 'lockin' : p?.passDay === today ? 'pass' : null;
-    if (doneToday) plan.push({ key: `done-${stop.id}`, title: `${CHECK_NAME[doneToday]} · Stop ${stop.n}`, meta: 'done', state: 'done' });
+    if (doneToday) plan.push({ key: `done-${stop.id}`, title: `${CHECK_NAME[doneToday]} · ${stopLabel(stop)}`, meta: 'done', state: 'done' });
   }
   // The Pattern Observatory: a delayed review or an independent check open today on a place.
   for (const d of dueEvidence(save, today)) {

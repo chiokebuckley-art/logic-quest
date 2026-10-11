@@ -1,7 +1,8 @@
 /**
  * The Pattern Observatory's sky map: ten places in four rings, drawn as stars. A lit star is a done place, a ringed
- * star is open, a dim one waits on a skill. Until the constellation art exists this is a small SVG; it is tappable
- * and every star has a name for screen readers.
+ * star is open, a dim one waits on a skill. A whole ring that is still locked (its required stops not passed) is
+ * dimmed. Until the constellation art exists this is a small SVG; it is tappable and every star has a name for
+ * screen readers.
  */
 import type { LessonDef, StopDef } from '../../engine/types';
 
@@ -10,6 +11,8 @@ export interface MapPlace {
   lesson: LessonDef;
   state: 'done' | 'open' | 'locked' | 'mastered';
   title: string;
+  /** Set while the place's whole ring is locked: the ring's lock label ("Opens after Stop 1"). The ring dims. */
+  ringLocked?: string;
 }
 
 /** Positions of the ten places (ring by ring, left to right), on a 200 × 130 canvas. */
@@ -31,8 +34,8 @@ export function ObservatoryMap({ places, onPick }: { places: MapPlace[]; onPick(
   return (
     <svg className="play-ob-map" viewBox="0 0 200 130" role="group" aria-label="The Pattern Observatory map: ten places in four rings">
       {STARS.map(([x, y], i) => <circle key={i} className="star" cx={x} cy={y} r={i % 3 === 0 ? 1.1 : 0.7} />)}
-      {RINGS.map((r) => (
-        <g key={r.label}>
+      {RINGS.map((r, k) => (
+        <g key={r.label} className={places.some((p) => p.stop.observatory?.ring === k + 1 && p.ringLocked) ? 'is-ring-locked' : undefined}>
           <circle className="ring" cx={r.cx} cy={r.cy} r={r.r} />
           <text x={r.x} y={r.y}>{r.label}</text>
         </g>
@@ -40,7 +43,7 @@ export function ObservatoryMap({ places, onPick }: { places: MapPlace[]; onPick(
       {places.slice(0, SPOTS.length).map((p, i) => {
         const [x, y] = SPOTS[i];
         return (
-          <g key={p.lesson.id} className="play-ob-map-place" role="button" tabIndex={0} aria-label={`${p.title}: ${p.state === 'locked' ? 'waits on a skill' : p.state}`} onClick={() => onPick(p.stop.id, p.lesson.id)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPick(p.stop.id, p.lesson.id); } }} style={{ cursor: 'pointer' }}>
+          <g key={p.lesson.id} className={`play-ob-map-place${p.ringLocked ? ' is-ring-locked' : ''}`} role="button" tabIndex={0} aria-label={`${p.title}: ${p.ringLocked ? `locked. ${p.ringLocked}` : p.state === 'locked' ? 'waits on a skill' : p.state}`} onClick={() => onPick(p.stop.id, p.lesson.id)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPick(p.stop.id, p.lesson.id); } }} style={{ cursor: 'pointer' }}>
             <circle className={`node is-${p.state}`} cx={x} cy={y} r="7" />
             <text x={x} y={y + 1.8} textAnchor="middle" style={{ fontSize: 5, fill: p.state === 'done' || p.state === 'mastered' ? '#0a0d2a' : undefined }}>{i + 1}</text>
             <text x={x} y={y + 13} textAnchor="middle">{p.title.length > 14 ? `${p.title.slice(0, 13)}…` : p.title}</text>

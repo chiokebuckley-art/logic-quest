@@ -74,8 +74,89 @@ export type Scene =
    * and its answer.
    */
   | { kind: 'contrast'; pairs: [ContrastPanel, ContrastPanel]; ask?: { q: string; a: string }; words?: ContrastWords }
+  /**
+   * An argument (Stop 2, Arguments): its givens, numbered, and its claim. `real`: whether each given is really true
+   * (a True or False tag beside it), and `realClaim` the same for the claim. `cases`: every way things could be, drawn
+   * as boxes, each crossed out when it breaks a given or, when left, showing whether the claim is true there.
+   * `caption`: one line under it all.
+   */
+  | { kind: 'argument'; givens: string[]; claim: string; real?: (boolean | null)[]; realClaim?: boolean; cases?: ArgumentCase[]; caption?: string }
+  /**
+   * Rings around shape cards (All, Some, None, id s8): one ring, or two that overlap, each named by its feature
+   * ("Circles", "Red"). Every card is drawn in its part: only in the first ring (`a`), in both rings (`both`), only in
+   * the second ring (`b`), or outside every ring (`out`). One ring: only `a` and `out` hold cards. `marked`: cards
+   * circled as breaking a sentence, by id. `loose`: cards not placed yet, drawn under the rings. A still frame.
+   */
+  | { kind: 'rings'; rings: [string] | [string, string]; a: Thing[]; both: Thing[]; b: Thing[]; out: Thing[]; marked?: string[]; loose?: Thing[]; caption?: string }
+  /**
+   * A truth table (Truth Tables, id s9): one row for each case, one column for each sentence. `heads`: the column
+   * headings in words ("A", "B", "A AND B"); the first `inputs` columns are the parts, drawn apart from the sentences.
+   * `cells`: each row's boxes, True or False, or null for a box left blank (to fill). `key`: what each letter stands
+   * for ("A: It rains."). `marked`: rows picked out (0-based), named by `markLabel` ("This row"). A still frame.
+   */
+  | { kind: 'table'; heads: string[]; inputs: number; cells: (boolean | null)[][]; key?: string[]; marked?: number[]; markLabel?: string; caption?: string }
+  /**
+   * A count picture (Clues & Chances, id s13): a whole group (`total` things, 100 in this game) split two ways and
+   * drawn as a 2-by-2 table of counts, with each row's and each column's count in all, and the group as dots. `title`:
+   * the group ("100 kids at a school"). `rows`: the two groups ("Needs glasses", "Sees fine"); `cols`: what the clue
+   * says ("Flagged", "Not flagged"). `cells[r][c]`: how many are in that row and that column, or null for a box left
+   * blank (its row and column totals are then blank too). `pick`: a row or a column picked out (the group a question
+   * counts out of), named by `pickLabel`. Never percentages and never a fraction with a slash: counts only. A still frame.
+   */
+  | { kind: 'counts'; title: string; total: number; rows: [string, string]; cols: [string, string]; cells: [[number | null, number | null], [number | null, number | null]]; pick?: { row?: 0 | 1; col?: 0 | 1 }; pickLabel?: string; caption?: string }
+  /**
+   * Circuits (Circuit Lab, id s10): one to three still frames, drawn one under the other. Each frame is one loop: a
+   * battery, the switches wired as `part` (in a line, side by side, or inside a flipper box), and a lamp. `closed`: each
+   * switch's state by name (closed lets power pass, open leaves a gap); `lamp`: on, off, or null for a lamp to work out.
+   * Both left out: a plain wiring picture. `table`: the cases in rows, each switch Closed or Open and each lamp On or Off
+   * (null for a box left blank). A still frame, read aloud in words (circuitSpeech).
+   */
+  | { kind: 'circuit'; circuits: CircuitFrame[]; table?: CircuitTable; caption?: string }
   /** The Pattern Observatory's pictures (src/engine/scenes): a chain, a staircase, a machine, a clock, a mirror, a matrix, a bridge, a lantern. */
   | ObservatoryScene;
+
+/** One way an argument’s story could go, drawn as a box (Scene 'argument'). */
+export interface ArgumentCase {
+  /** "Case 1". */
+  name: string;
+  /** What is true in this case, one short sentence each: "Tom is a cat." "Tom does not have whiskers." */
+  facts: string[];
+  /** Crossed out: the number of the first given it breaks (from 1). */
+  out?: number;
+  /** A case left: is the claim true here? Unset on a board the learner still marks. */
+  claim?: boolean;
+}
+
+/** How a circuit's switches are wired (Scene 'circuit'): one switch, parts in a line, parts side by side, or a flipper box around a part. */
+export type CircuitPart =
+  | { t: 'switch'; name: string }
+  | { t: 'line'; parts: CircuitPart[] }
+  | { t: 'side'; parts: CircuitPart[] }
+  | { t: 'flip'; part: CircuitPart };
+
+/** One circuit drawn as a still frame (Scene 'circuit'). */
+export interface CircuitFrame {
+  /** "Circuit 1", drawn over the frame. */
+  name?: string;
+  part: CircuitPart;
+  /** Switch name -> closed (true) or open (false). Left out: the switches are drawn with no state. */
+  closed?: Record<string, boolean>;
+  /** The lamp: on (true), off (false), or null for a lamp to work out. Left out: a plain lamp. */
+  lamp?: boolean | null;
+}
+
+/** The cases of a circuit as a table (Scene 'circuit'): the first `inputs` columns are switches (Closed or Open), the rest lamps (On or Off). */
+export interface CircuitTable {
+  heads: string[];
+  inputs: number;
+  /** Each row's boxes; null is a box left blank. */
+  cells: (boolean | null)[][];
+  /** The word before each row's number: "Row" (default) or "Case". */
+  rowWord?: string;
+  /** Rows picked out (0-based), named by `markLabel`. */
+  marked?: number[];
+  markLabel?: string;
+}
 
 /** The labels a contrast picture uses, so a card puzzle never says "sign" or "test world". All optional. */
 export interface ContrastWords {
@@ -248,7 +329,7 @@ export interface Teach {
 interface ItemBase {
   /** Unique within one generated set. */
   id: string;
-  /** Stop number, 1-13. */
+  /** The stop's stored number (StopDef.n), never the shown one. Show it with stopNumberOf. */
   stop: number;
   /** Lesson where this item's idea is taught, e.g. 's1.l2'. "Learn this again" sends the player there. */
   lesson: string;
@@ -730,6 +811,21 @@ export interface LessonDef {
   review?(rng: Rng, stage: 1 | 2 | 3): Item[];
   /** Six fresh items for the independent check, with a misconception item and an explain item. */
   independent?(rng: Rng): Item[];
+  /**
+   * The words this lesson names for the first time (the glossary). Each is listed in the Library's Words tab once
+   * the lesson is done. Put a term on the lesson whose card introduces it, never on a later one.
+   */
+  terms?: GlossaryTerm[];
+}
+
+/**
+ * One glossary word. `term` is the word as the lesson uses it (the kid word or the grown-up word), `means` is its
+ * meaning in one plain sentence, and `also` is the other name for the same idea ("premise" and "a given").
+ */
+export interface GlossaryTerm {
+  term: string;
+  means: string;
+  also?: string;
 }
 
 /** Two ideas that are easy to merge, named apart. */
@@ -767,6 +863,22 @@ export interface StopDef {
    * stop): the stop before it in the list, as before.
    */
   requires?: string[];
+  /**
+   * A side-track stop: it opens off the main path (after its `requires`) and shows on the Journey's Side track tab.
+   * It still gets a shown number in Journey order.
+   */
+  sideTrack?: true;
+  /**
+   * One warm-up item that reuses the idea of the stop before it, shown on the stop page while the stop is open and
+   * not yet warmed up (StopProgress.warm). Answering it right sets `warm`. It never counts toward passing and a
+   * miss never goes to the Notebook.
+   */
+  bridge?(rng: Rng): Item;
+  /**
+   * The stop whose idea the warm-up reuses, by id, when it is not the stop before this one in the list (or, on the side
+   * track, the stop this one requires): the warm-up card says "from" that stop.
+   */
+  bridgeFrom?: string;
   /** 'sequence' (default): a lesson opens after the one before it. 'free': each place opens on its own `requires`. */
   lessonOrder?: 'sequence' | 'free';
   /** Plain names for this stop's skill tags (merged into the Grown-ups view and the CSV reader). */

@@ -1103,6 +1103,110 @@ export function supposeItem(rng: Rng, o: SupposeOpts): Built<ChooseItem> & { ids
   throw new Error('supposeItem: no item found');
 }
 
+// ---------- the closing why item: why must this islander be a knave? (suppose and crash) ----------
+//
+// docs/CURRICULUM-PLAN.md, "the closing why item": the stop check ends with one item whose choices are reasons. Here
+// exactly one case fits, and it makes one islander a knave; the learner picks why. Each reason is a claim the engine
+// checks by listing the cases: which cases break the rule when that islander is supposed a knight (or a knave), and how
+// many cases a guess has. Exactly one reason holds.
+
+/** The tag of the stop check's closing item (its choices are reasons), and its skill. */
+export const WHY_TAG = 'why';
+export const WHY_SKILL = 's5.why-crash';
+
+/** A reason on the why item: its words, and whether the cases make it true and enough. */
+export interface KnightReason {
+  id: string;
+  label: string;
+  holds: boolean;
+}
+
+/**
+ * “Ava must be a knave. Which reason shows why?” Two islanders speak, and one case fits. The right reason is suppose and
+ * crash: with Ava as a knight, Ben as a knight breaks the rule and so does Ben as a knave. The wrong reasons: one case
+ * that breaks (not every case was tried), the knave guess crashing (it does not), and both cases working (that would
+ * be “can’t tell”, not a crash).
+ */
+export function whyCrashItem(rng: Rng, o: { id: string; skin: SkinId }): Built<ChooseItem> & { ids: string[]; claims: Claims; who: string; other: string; reasons: KnightReason[] } {
+  for (let attempt = 0; attempt < 5000; attempt++) {
+    const cast = makeCast(rng, o.skin, 2);
+    const { ids, nm } = cast;
+    const claims: Claims = {};
+    for (const sp of ids) claims[sp] = weighted(rng, candidates(sp, ids, 'plain'));
+    const sols = solutions(ids, claims);
+    if (sols.length !== 1) continue;
+    const [t0, t1] = ids.map((id) => claimText(claims[id], id, nm, 2));
+    if (t0 === t1) continue;
+    const knaves = ids.filter((id) => sols[0][id] === 'knave');
+    if (!knaves.length) continue;
+    const who = rng.pick(knaves);
+    const other = ids.find((x) => x !== who)!;
+    const X = nm(who), Y = nm(other);
+    const caseOf = (k: Kind, v: Kind): KindMap => ({ [who]: k, [other]: v });
+    const works = (k: Kind, v: Kind) => fitsAll(ids, claims, caseOf(k, v));
+    const v1 = rng.pick(KINDS);
+    const reasons: KnightReason[] = [
+      { id: 'crash', label: `Suppose ${X} is a knight. With ${Y} as a knight, someone breaks the rule. With ${Y} as a knave, someone breaks it too.`, holds: KINDS.every((v) => !works('knight', v)) },
+      // One case is a fact, but a guess has a case for each kind the other islander could be: it crashes only if all do.
+      { id: 'one-case', label: `Suppose ${X} is a knight and ${Y} is ${a(v1)}. That one case breaks the rule.`, holds: !works('knight', v1) && KINDS.filter((v) => v !== v1).length === 0 },
+      { id: 'knave-crash', label: `Suppose ${X} is a knave. Every case breaks the rule.`, holds: KINDS.every((v) => !works('knave', v)) },
+      { id: 'both-work', label: `Suppose ${X} is a knight. Both cases for ${Y} work, so ${X} can’t be a knight.`, holds: KINDS.every((v) => works('knight', v)) },
+    ];
+    const right = reasons.filter((r) => r.holds);
+    if (right.length !== 1 || right[0].id !== 'crash') continue;
+    const breaker = (k: Kind, v: Kind) => breakers(ids, claims, caseOf(k, v))[0];
+    const broken = (v: Kind) => withWords(breaker('knight', v), claims, caseOf('knight', v), nm);
+    const card = (k: Kind, v: Kind) => kindsCase(ids, claims, caseOf(k, v), nm);
+    const caseLine = (v: Kind) => `If ${Y} is ${a(v)}, ${breakText(breaker('knight', v), caseOf('knight', v), nm)}.`;
+    const feedback: Record<string, ChoiceFeedback> = {
+      'one-case': {
+        headline: `One case is not enough. ${Y} could be ${a(flip(v1))} too.`,
+        detail: [`With ${X} as a knight, there are two cases: ${Y} as a knight, and ${Y} as a knave.`, `A guess crashes only when every case breaks the rule. So check ${Y} as ${a(flip(v1))} too. There, ${broken(flip(v1))}.`],
+        example: card('knight', flip(v1)),
+      },
+      'knave-crash': {
+        headline: `With ${X} as a knave, one case works.`,
+        detail: [`Take the case where ${lowerLead(kindsText(ids, sols[0], nm))}. Everyone fits the rule there.`, `So the guess that ${X} is a knave holds. The guess that ${X} is a knight is the one that crashes.`],
+        example: kindsCase(ids, claims, sols[0], nm),
+      },
+      'both-work': {
+        headline: `With ${X} as a knight, no case works.`,
+        detail: [`With ${Y} as a knight, ${broken('knight')}. With ${Y} as a knave, ${broken('knave')}.`, 'If every case worked, you could not tell. Here every case breaks the rule, so the guess crashes.'],
+        example: card('knight', 'knight'),
+      },
+    };
+    const hintV = flip(v1);
+    const item: ChooseItem = {
+      kind: 'choose',
+      id: o.id,
+      stop: STOP,
+      lesson: 's5.l3',
+      skill: WHY_SKILL,
+      prompt: `${cast.setting} ${X} must be a knave. Which reason shows why?`,
+      scene: speakersScene(ids, claims, nm, { rule: PUZZLE_RULE }),
+      choices: rng.shuffle(reasons.map((r) => ({ id: r.id, label: r.label }))),
+      answer: 'crash',
+      explain: `Suppose ${X} is a knight. ${caseLine('knight')} ${caseLine('knave')} So that guess crashes, and ${X} must be a knave.`,
+      feedback,
+      hint: `Here is one case, checked for you. Keep ${X} as a knight, and check ${Y} as ${a(flip(hintV))} the same way.`,
+      hintCase: rowCase(caseRow({ ids, claims, kinds: caseOf('knight', hintV), nm })),
+      teach: {
+        rule: `${PUZZLE_RULE} Suppose one islander is a knight. If every case breaks the rule, the guess crashes, so that islander is a knave.`,
+        terms: [caseTerm(kindsText(ids, caseOf('knight', 'knave'), nm)), guessTerm(X, 'knight'), ...claimTerms(ids.map((id) => claims[id]), 2)],
+        meaning: `${ids.map((id) => wordsMeaning(claims[id], id, nm, ids)).join(' ')} In the guess, ${X} is a knight, so ${X}’s words must be true.`,
+        casesTitle: `Keep ${X} as a knight. Try each case for ${Y}.`,
+        cases: [card('knight', 'knight'), card('knight', 'knave')],
+        remember: ['No case works: the guess crashes, so the islander you picked is the other kind.', `Ask: “Did I try ${Y} as a knight and as a knave?”`],
+        simpler: supposeSimpler(who, other, 'knight', 'crash', nm),
+      },
+      tags: [WHY_TAG],
+    };
+    syncWhyWrong(item);
+    return { item, cast, ids, claims, who, other, reasons };
+  }
+  throw new Error('whyCrashItem: no item found');
+}
+
 // ---------- lesson 1: what the words tell you ----------
 
 export type WordsType = 'fact' | 'kindFromFact' | 'other' | 'speakerFromOther';

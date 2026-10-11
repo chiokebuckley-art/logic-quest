@@ -36,6 +36,8 @@ export interface StopProgress {
    * the next load settles it like pressing Leave (see settleOpenCheck), so a reload cannot redraw questions.
    */
   openCheck?: { kind: CheckKind; day: string; answered: { lesson: string; correct: boolean }[] };
+  /** The stop page's warm-up item (StopDef.bridge) was answered right, so the page shows it as one line. */
+  warm?: true;
 }
 
 export type StopStatus =
@@ -101,7 +103,7 @@ export function weekDue(p: StopProgress): string | null {
 
 export function viewStop(stop: StopDef, prog: StopProgress | undefined, prevPassed: boolean, today: string, opensAfter?: string): StopView {
   if (!stop.ready) return { status: 'soon', due: null, nextLesson: null, label: 'Coming soon' };
-  if (!prevPassed) return { status: 'locked', due: null, nextLesson: null, label: `Opens after ${opensAfter ?? `Stop ${stop.n - 1}`}` };
+  if (!prevPassed) return { status: 'locked', due: null, nextLesson: null, label: `Opens after ${opensAfter ?? 'the stop before it'}` };
   const p = prog ?? emptyProgress();
   const lessonIds = stop.lessons.map((l) => l.id);
   const firstUndone = lessonIds.find((id) => !p.lessonsDone.includes(id)) ?? null;
@@ -233,10 +235,11 @@ export interface NextStep {
  */
 export function nextStep(stops: readonly StopDef[], progress: Readonly<Record<string, StopProgress>>, today: string): NextStep {
   const views = viewAll(stops, progress, today);
+  const name = (stop: StopDef) => shownLabel(stops, stop);
   for (const { stop, view } of views) {
     if (view.due === 'lockin' || view.due === 'week') {
       if (view.status === 'passed' || view.status === 'lockedIn') {
-        return { stopId: stop.id, action: 'check', kind: view.due, label: `Stop ${stop.n} · ${view.due === 'lockin' ? 'lock-in check' : 'week check'}` };
+        return { stopId: stop.id, action: 'check', kind: view.due, label: `${name(stop)} · ${view.due === 'lockin' ? 'lock-in check' : 'week check'}` };
       }
     }
   }
@@ -245,12 +248,12 @@ export function nextStep(stops: readonly StopDef[], progress: Readonly<Record<st
     if (view.status === 'learning' || view.status === 'notYet' || view.status === 'ready') {
       if (view.nextLesson) {
         const idx = stop.lessons.findIndex((l) => l.id === view.nextLesson);
-        return { stopId: stop.id, action: 'lesson', lessonId: view.nextLesson, label: `Stop ${stop.n} · ${stop.lessons[idx]?.title ?? 'lesson'}` };
+        return { stopId: stop.id, action: 'lesson', lessonId: view.nextLesson, label: `${name(stop)} · ${stop.lessons[idx]?.title ?? 'lesson'}` };
       }
-      if (view.due) return { stopId: stop.id, action: 'check', kind: view.due, label: `Stop ${stop.n} · ${view.due === 'pass' ? 'stop check' : 'try again'}` };
+      if (view.due) return { stopId: stop.id, action: 'check', kind: view.due, label: `${name(stop)} · ${view.due === 'pass' ? 'stop check' : 'try again'}` };
     }
     // A resting stop only wins when nothing else is open (a later stop may still have lessons to do).
-    if (view.status === 'resting') rest ??= { stopId: stop.id, action: 'rest', label: `Stop ${stop.n} · rest today` };
+    if (view.status === 'resting') rest ??= { stopId: stop.id, action: 'rest', label: `${name(stop)} · rest today` };
   }
   if (rest) return rest;
   const last = views[views.length - 1];
@@ -267,15 +270,37 @@ export function requiredStops(stops: readonly StopDef[], stop: StopDef): StopDef
   return i > 0 ? [stops[i - 1]] : [];
 }
 
-/** Whether every stop `stop` needs is passed, and the words for the lock label ("Stop 3", or two titles). */
+/**
+ * How the learner sees a stop's place in this list: "Stop N", where N is its position among the stops that are not
+ * Observatory rings (the same rule as stopNumber in content/stops.ts), or "Ring k" for a ring. Worked out from the
+ * list passed in, so a test can use its own list.
+ */
+export function shownLabel(stops: readonly StopDef[], stop: StopDef): string {
+  if (stop.observatory) return `Ring ${stop.observatory.ring}`;
+  const i = stops.filter((s) => !s.observatory).indexOf(stop);
+  return `Stop ${i >= 0 ? i + 1 : stop.n}`;
+}
+
+/**
+ * Whether the stop is open (every stop it needs is passed, or the learner already started it), and the words for the
+ * lock label. One required stop that sits right before this one in the list reads "Stop 3" (or "Ring 1"); so does
+ * the one stop a ring needs. Anything else names each stop with its title: "Stop 11 (Circuit Lab) and Ring 4
+ * (Proof Lantern)", or for three, "Stop 6 (Knights & Knaves), Stop 8 (Ways to Think) and Ring 2 (Rule Rise)".
+ */
 export function stopOpening(stops: readonly StopDef[], progress: Readonly<Record<string, StopProgress>>, stop: StopDef): { open: boolean; after: string } {
   const need = requiredStops(stops, stop);
-  const open = need.every((s) => !!progress[s.id]?.passDay);
-  const after = need.length === 1 && need[0].n === stop.n - 1 ? `Stop ${need[0].n}` : need.map((s) => `Stop ${s.n} (${s.title})`).join(' and ');
+  // A stop the learner already worked on stays open, so a save from before a stop was put ahead of it (Arguments
+  // before NOT, AND, OR) keeps every stop it had open.
+  const mine = progress[stop.id];
+  const started = !!mine && (!!mine.passDay || mine.lessonsDone.length > 0 || mine.attempts > 0);
+  const open = started || need.every((s) => !!progress[s.id]?.passDay);
+  const short = need.length === 1 && (stops[stops.indexOf(stop) - 1] === need[0] || !!stop.observatory);
+  const named = need.map((s) => `${shownLabel(stops, s)} (${s.title})`);
+  const after = short ? shownLabel(stops, need[0]) : named.length > 1 ? `${named.slice(0, -1).join(', ')} and ${named[named.length - 1]}` : named.join('');
   return { open, after };
 }
 
-/** Every stop with its view, in order. A stop opens once every stop it requires has a passDay (see requiredStops). */
+/** Every stop with its view, in order. A stop opens once every stop it requires has a passDay (see stopOpening). */
 export function viewAll(stops: readonly StopDef[], progress: Readonly<Record<string, StopProgress>>, today: string) {
   return stops.map((stop) => {
     const { open, after } = stopOpening(stops, progress, stop);

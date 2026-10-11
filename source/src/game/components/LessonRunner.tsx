@@ -10,6 +10,7 @@ import { extraQuizItem, passGoal, passState, practiceFor, type QuizResult } from
 import { createRng } from '../../engine/rng';
 import { MAX_RUN } from '../../engine/save/save';
 import type { Item, LessonDef, StopDef } from '../../engine/types';
+import { stopLabel } from '../../content/stops';
 import type { AnswerRecord, LessonRunnerProps } from './contracts';
 import { DrillBoard } from './DrillBoard';
 import { IdeaCards } from './IdeaCards';
@@ -135,7 +136,7 @@ export function LessonRecap({ stop, lesson, tries, firstTry, passed = true, onDo
               Next: <strong>Lesson {k + 2} · {nextLesson.title}</strong>
             </>
           ) : (
-            <>That was the last lesson in Stop {stop.n}. When every lesson is done, the stop check opens.</>
+            <>That was the last lesson in {stopLabel(stop)}. When every lesson is done, the stop check opens.</>
           )}
         </p>
       )}
@@ -209,7 +210,7 @@ export function LessonRunner({ stop, lesson, seed, level, readAloud, onAnswer, o
   }, [stepKey]);
 
   const k = stop.lessons.findIndex((l) => l.id === lesson.id);
-  const over = `Stop ${stop.n} · Lesson ${k >= 0 ? k + 1 : 1} of ${Math.max(1, stop.lessons.length)}`;
+  const over = `${stopLabel(stop)} · Lesson ${k >= 0 ? k + 1 : 1} of ${Math.max(1, stop.lessons.length)}`;
   const pass = passState(lesson.pass, results);
   const passed = drilled && pass.met;
 

@@ -24,6 +24,7 @@ import {
   notItem,
   rowItem,
   verdictDrillRow,
+  whyRowItem,
   type Desc,
   type Frame,
   type ItemCore,
@@ -1054,6 +1055,11 @@ const lessons: LessonDef[] = [
     ],
     drill: [L1_DRILL],
     practice: practiceOf('s1.l1', lesson1Practice),
+    terms: [
+      { term: 'statement', means: 'A sentence that is either true or false.' },
+      { term: 'true', means: 'A true statement says how things really are. “A week has seven days” is true.' },
+      { term: 'false', means: 'A false statement does not say how things really are. “Cats can fly” is false, and it is still a statement.' },
+    ],
     // Three right in a row on new sentences, with a false one and one that is not a statement.
     pass: {
       firstTry: 3,
@@ -1107,6 +1113,7 @@ const lessons: LessonDef[] = [
     ],
     drill: L2_DRILL,
     practice: practiceOf('s1.l2', lesson2Practice),
+    terms: [{ term: 'can’t tell', means: 'The face-down cards could make it true, and they could also make it false. You need more clues.' }],
     // Three right on the first try, one of them a right “Can’t tell.”
     pass: { firstTry: 3, include: [{ tag: 'cant-tell', label: 'a right “Can’t tell”' }] },
   },
@@ -1170,6 +1177,7 @@ const lessons: LessonDef[] = [
     ],
     drill: L3_DRILL,
     practice: practiceOf('s1.l3', lesson3Practice),
+    terms: [{ term: 'NOT', means: 'NOT means the original statement is false. The NOT of a statement is true whenever the statement is false.' }],
     // Three right on the first try, one of them a counting trap.
     pass: { firstTry: 3, include: [{ tag: 'counting-trap', label: 'a counting trap (every, more, exactly or at least)' }] },
   },
@@ -1221,9 +1229,10 @@ const ANY: Record<string, Maker> = {
 const unlike = (keys: readonly NotKey[], used: NotKey[]) => keys.filter((k) => !used.some((u) => NOT_TAGS[u] === NOT_TAGS[k]));
 
 /**
- * 9-10 items: 2 on statements, 3 on cards (one a "can't tell" trap), 2 NOT flips, 2 sign puzzles. Every item is of a
- * kind its lesson taught. No sentence from the bank shows twice (nor one the lesson 1 cards showed), the NOT flips
- * flip different kinds of sentence, and no two items share a prompt and scene.
+ * 10 items: 2 on statements, a card row that is a "can't tell" trap, 2 NOT flips, one sign puzzle per sign lesson, and
+ * last the closing why item (tag `why`): a card row whose verdict is given (false, or can't tell yet), and four reasons to
+ * pick from. Every item is of a kind its lesson taught. No sentence from the bank shows twice (nor one the lesson 1
+ * cards showed), the NOT flips flip different kinds of sentence, and no two items share a prompt and scene.
  */
 function check(rng: Rng): Item[] {
   const frames = (): Frame => rng.pick(FRAMES);
@@ -1231,25 +1240,25 @@ function check(rng: Rng): Item[] {
   const used = shownL1();
   const templates = L2_TEMPLATES;
   const [s1, s2] = rng.shuffle(SKINS);
-  const settled = rng.pick(['true', 'false'] as const);
+  const why = rng.pick(['false', 'cant'] as const);
   const findStatement = rng.chance(0.5);
   // First an every trap, then a comparison (a tie or an exact count decides it).
   const nots: NotKey[] = [rng.pick(L3_CONFLICT)];
   nots.push(rng.pick(unlike(L3_COMPARE, nots)));
   const [k1, k2, k3, k4] = rng.shuffle(SIGN_SKINS);
-  // Ten items, every lesson: 2 statements, 2 card rows (one a can't-tell trap), 2 NOT flips, then one sign puzzle per
-  // sign lesson, each with that lesson's rule and a different kind of box.
+  // Ten items, every lesson: 2 statements, a can't-tell card row (the trap), 2 NOT flips, one sign puzzle per sign
+  // lesson (each with that lesson's rule and a different kind of box), then the closing why item on a card row.
   const planned: [string, Made][] = [
     ['s1.l1', one(() => isThisItem(rng, s1, used))],
     ['s1.l1', one(() => whichItem(rng, s2, used, findStatement))],
     ['s1.l2', one(() => rowItem(rng, { frame: frames(), target: 'cant', conflict: true, templates }))],
-    ['s1.l2', one(() => rowItem(rng, { frame: frames(), target: settled, templates }))],
     ['s1.l3', one(() => notItem(rng, { frame: frames(), key: nots[0] }))],
     ['s1.l3', one(() => notItem(rng, { frame: frames(), key: nots[1] }))],
     ['s1.l4', one(() => newSign(rng, { skin: k1, rule: 'one' }))],
     ['s1.l5', one(() => newSign(rng, { skin: k2, rule: 'none' }))],
     ['s1.l6', one(() => newSign(rng, { skin: k3, rule: 'two' }))],
     ['s1.l7', one(() => newSign(rng, { skin: k4, rule: 'owner' }))],
+    ['s1.l2', one(() => whyRowItem(rng, { frame: frames(), target: why }))],
   ];
   return planned.map(([lesson, m], i) => finish(m, `s1-c${i + 1}`, lesson));
 }
@@ -1308,7 +1317,8 @@ function freshL2(missed: Item, rng: Rng): Item[] {
   if (missed.skill === 's1.cant-tell') {
     return [make({ frame: f1, target: 'cant', conflict: !!missed.conflict }), make({ frame: f2, target: rng.pick(['true', 'false'] as const) })];
   }
-  const v: Verdict = missed.kind === 'choose' && missed.answer === 'false' ? 'false' : 'true';
+  // The check's closing why item on a settled row is always a false sentence (its answer is a reason, not a verdict).
+  const v: Verdict = missed.kind === 'choose' && (missed.answer === 'false' || missed.tags?.includes('why')) ? 'false' : 'true';
   return [make({ frame: f1, target: v }), make({ frame: f2, target: 'cant', conflict: true })];
 }
 

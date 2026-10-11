@@ -2,13 +2,25 @@
  * Contract for every built stop. Run one stop with STOP=2 npx vitest run src/engine/__tests__/stops.test.ts
  */
 import { describe, expect, it } from 'vitest';
-import { STOPS } from '../../content/stops';
+import { STOPS, stopById, stopByN, stopNumber, stopNumberOf } from '../../content/stops';
 import { checkDrill, marksToTap } from '../drill';
 import { claimTrue, clueHolds, gridClueHolds } from '../grade';
 import { READING, fkGrade, longestSentence } from '../readability';
 import { createRng } from '../rng';
 import { feedbackText, teachStrings } from '../teach';
 import type { AssignItem, DrillStep, Item, LessonDef, Scene, StopDef, TeachCase } from '../types';
+
+/**
+ * Stops whose check does not end with its why item yet (docs/CURRICULUM-PLAN.md §2, "Check rule"). Each builder
+ * removes its stop from this set when it adds the item; the closing-why test then holds for that stop.
+ */
+const WHY_PENDING = new Set<string>();
+
+/**
+ * Main stops after Stop 1 that have no bridge item yet (StopDef.bridge, the stop page's warm-up). Each builder removes
+ * its stop from this set when it adds the bridge; the bridge test then holds for that stop.
+ */
+const BRIDGE_PENDING = new Set<string>();
 
 /**
  * Every wrong-answer route meets the wrong-answer handoff (v1.0): each item has Item.teach, and each wrong choice of
@@ -127,6 +139,16 @@ function observatorySceneText(scene: Scene | undefined): string[] {
       for (const f of scene.frames ?? []) out.push(f.filledText ?? '', f.trial?.text ?? '');
       break;
     case 'bridge': out.push(scene.a, scene.b, scene.c, scene.d ?? '', scene.relation, ...(scene.options ?? []), ...(scene.frames ?? []).flatMap((f) => [f.d ?? '', f.look ?? ''])); break;
+    // An argument (Stop 2): its givens, its claim, every case box's facts and the caption.
+    case 'argument': out.push(...scene.givens, scene.claim, ...(scene.cases ?? []).flatMap((c) => [c.name, ...c.facts]), scene.caption ?? ''); break;
+    // Rings around cards (All, Some, None): the ring names and the caption.
+    case 'rings': out.push(...scene.rings, scene.caption ?? ''); break;
+    // A truth table (Truth Tables): its column headings, the key lines, the picked-out row's label and the caption.
+    case 'table': out.push(...scene.heads, ...(scene.key ?? []), scene.markLabel ?? '', scene.caption ?? ''); break;
+    // Circuits (Circuit Lab): each frame's name, the table's headings and picked-out label, and the caption.
+    case 'circuit': out.push(...scene.circuits.map((f) => f.name ?? ''), ...(scene.table?.heads ?? []), scene.table?.markLabel ?? '', scene.caption ?? ''); break;
+    // A count picture (Clues & Chances): the group, the row and column names, the picked part's label and the caption.
+    case 'counts': out.push(scene.title, ...scene.rows, ...scene.cols, scene.pickLabel ?? '', scene.caption ?? ''); break;
     case 'lantern':
       out.push(scene.stated ?? '');
       for (const f of [scene, ...(scene.frames ?? [])]) {
@@ -380,6 +402,35 @@ describe.each(built.map((s) => [s.n, s] as const))('stop %i', (_n, stop) => {
     const check = prose([1, 2, 3].flatMap((s) => stop.check!(createRng(s))));
     expect(fkGrade(check), 'check grade').toBeLessThanOrEqual(READING.maxGrade);
   });
+
+  stopWide('the check ends with a why item: its last item is tagged why, is a choose item, and its choices are reasons (each longer than 12 characters)', () => {
+    if (WHY_PENDING.has(stop.id)) return;
+    for (let seed = 1; seed <= 30; seed++) {
+      const items = stop.check!(createRng(seed));
+      const last = items[items.length - 1];
+      expect(last.tags ?? [], `seed ${seed}: the last item is tagged why`).toContain('why');
+      expect(last.kind, `seed ${seed}: the why item is a choose item`).toBe('choose');
+      if (last.kind !== 'choose') continue;
+      for (const c of last.choices) expect(c.label.trim().length, `seed ${seed}: “${c.label}” is a reason`).toBeGreaterThan(12);
+    }
+  });
+
+  stopWide('every main stop after the first has a bridge item that is a valid item (the shared item checks) and is new on most seeds', () => {
+    if (stop.observatory || STOPS.filter((s) => !s.observatory)[0] === stop || BRIDGE_PENDING.has(stop.id)) return;
+    expect(stop.bridge, `${stop.id} has a bridge`).toBeTypeOf('function');
+    // The warm-up reuses the idea of the stop before it (a side-track stop: the stop it requires).
+    const from = stop.bridgeFrom ? stopById(stop.bridgeFrom) : stop.sideTrack && stop.requires?.length ? stopById(stop.requires[0]) : STOPS[STOPS.indexOf(stop) - 1];
+    const seen = new Set<string>();
+    for (let seed = 1; seed <= 100; seed++) {
+      const item = stop.bridge!(createRng(seed));
+      const owner = stopByN(item.stop);
+      expect([stop.id, from?.id], `seed ${seed}: the item belongs to this stop or the one it bridges from`).toContain(owner?.id);
+      expect(problems(owner!, item), `seed ${seed} ${item.id}`).toEqual([]);
+      expect(stop.bridge!(createRng(seed))).toEqual(item);
+      seen.add(looks(item));
+    }
+    expect(seen.size, 'new on most seeds').toBeGreaterThan(50);
+  });
 });
 
 describe.each(built.map((s) => [s.n, s] as const))('stop %i: See -> Do -> Quiz', (_n, stop) => {
@@ -421,17 +472,33 @@ describe.each(built.map((s) => [s.n, s] as const))('stop %i: See -> Do -> Quiz',
   });
 });
 
-it('the Journey lists 13 stops in order, then the four Observatory rings; stops 1-7 are built, 8-13 are coming', () => {
-  expect(STOPS.map((s) => s.n)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]);
+it('the Journey lists Stop 1, Arguments, then stops 2-13 and the four Observatory rings; shown numbers follow the list', () => {
+  expect(STOPS.map((s) => s.n)).toEqual([1, 18, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]);
   expect(STOPS.map((s) => s.id)).toEqual(STOPS.map((s) => `s${s.n}`));
-  expect(STOPS.slice(0, 7).every((s) => s.ready) || only !== null || process.env.ALLOW_PLACEHOLDERS === '1').toBe(true);
-  expect(STOPS.filter((s) => s.n >= 8 && s.n <= 13).some((s) => s.ready)).toBe(false);
-  // The Observatory rings open from the start and open their places on skills, never on the stop before them.
-  for (const s of STOPS.filter((x) => x.n >= 14)) {
-    expect(s.observatory, s.id).toBeTruthy();
-    expect(s.requires, s.id).toEqual([]);
-    expect(s.lessonOrder, s.id).toBe('free');
-  }
+  // Ready: every stop that is not a placeholder (a placeholder has no lessons yet).
+  const placeholders = STOPS.filter((s) => !s.lessons.length).map((s) => s.id);
+  expect(STOPS.filter((s) => s.ready).map((s) => s.id)).toEqual(STOPS.filter((s) => !placeholders.includes(s.id)).map((s) => s.id));
+  expect(STOPS.filter((s) => !s.observatory && s.n <= 7).every((s) => s.ready) || only !== null || process.env.ALLOW_PLACEHOLDERS === '1').toBe(true);
+  // Shown numbers: the place among the numbered stops (main path and side track), never the id.
+  expect(STOPS.filter((s) => !s.observatory).map((s) => [s.id, stopNumber(s)])).toEqual(
+    ['s1', 's18', 's2', 's3', 's4', 's5', 's6', 's7', 's8', 's9', 's10', 's11', 's12', 's13'].map((id, i) => [id, i + 1]),
+  );
+  expect(stopNumberOf(2)).toBe(3);
+  expect(stopNumberOf(18)).toBe(2);
+  expect(stopNumberOf(99)).toBe(99);
+  // The side track: Spot the Trick after All, Some, None, then Clues & Chances.
+  expect(STOPS.filter((s) => s.sideTrack).map((s) => [s.id, s.requires])).toEqual([['s12', ['s8']], ['s13', ['s12']]]);
+  expect(stopById('s11')!.requires).toEqual(['s10', 's17']);
+  // The Observatory: the rings, by their own flag (never by n), each opening after the stops the plan names, its
+  // places opening on skills.
+  const rings = STOPS.filter((s) => s.observatory);
+  expect(rings.map((s) => [s.id, s.observatory!.ring, s.requires])).toEqual([
+    ['s14', 1, ['s1']],
+    ['s15', 2, ['s14']],
+    ['s16', 3, ['s14']],
+    ['s17', 4, ['s5', 's7', 's15']],
+  ]);
+  for (const s of rings) expect(s.lessonOrder, s.id).toBe('free');
 });
 
 

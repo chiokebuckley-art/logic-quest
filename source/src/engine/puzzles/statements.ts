@@ -1019,6 +1019,187 @@ export function rowItem(rng: Rng, opts: RowItemOptions): Made {
   throw new Error('rowItem: no item found');
 }
 
+// ---------- the closing why item: why is it false, or why can't you tell? ----------
+//
+// Stop 1's closing why item (docs/CURRICULUM-PLAN.md, "the closing why item"): the verdict is given, and the learner
+// picks the reason. Each reason is a claim about this row, and the engine checks it: a visible card "alone makes it
+// false" when, with every other card face down, judge() still says false; a face-down card can "make it false" only if
+// every filling does; "can't tell" holds only when judge() says so. Exactly one reason holds.
+
+/** The tag every closing why item carries (the stop check's last item). */
+export const WHY_TAG = 'why';
+
+export interface WhyRowOptions {
+  frame: Frame;
+  /** The verdict the item gives: false (a card you can see breaks it), or can't tell (one card is face down). */
+  target: 'false' | 'cant';
+}
+
+/** One reason on a why item: its words, and whether the engine finds it true and enough for the given verdict. */
+export interface RowReason {
+  id: string;
+  label: string;
+  holds: boolean;
+}
+
+/** A why item, with the reasons and the row, for the tests. */
+export interface WhyRowMade extends Made {
+  reasons: RowReason[];
+  row: Thing[];
+  verdict: Verdict;
+}
+
+/** The row with only card i face up (every other card face down). */
+export function onlyShown(row: readonly Thing[], i: number): Thing[] {
+  return row.map((t, j) => (j === i ? { id: t.id, shape: t.shape, color: t.color, size: t.size } : { ...t, hidden: true }));
+}
+
+/** What card i decides on its own: judge() with every other card face down. */
+export const aloneVerdict = (s: Stmt, row: readonly Thing[], i: number): Verdict => judge(s, onlyShown(row, i));
+
+/** Only the sentences lesson 2 teaches: “There is …” and “Every card is …”. A false one is an “every” sentence a card breaks. */
+const WHY_FALSE_TEMPLATES: readonly RowTemplate[] = ['allColor', 'allShape'];
+const WHY_CANT_TEMPLATES: readonly RowTemplate[] = ['hasColor', 'hasShape', 'allColor', 'allShape'];
+
+/** The prompt of a why item: the sentence, its verdict, and the question. */
+function whyPrompt(rng: Rng, frame: Frame, text: string, verdict: 'false' | 'cant'): { prompt: string; whose: string } {
+  const told = verdict === 'false' ? 'This sentence is false.' : 'You can’t tell yet if this sentence is true.';
+  const ask = 'Which reason shows why?';
+  switch (frame) {
+    case 'abstract':
+      return { prompt: `Look at the cards. “${text}” ${told} ${ask}`, whose: 'the sentence' };
+    case 'everyday': {
+      const name = rng.pick(NAMES);
+      return { prompt: `${name} set out these cards and turned some face down. ${name} says, “${text}” ${told} ${ask}`, whose: `${name}’s sentence` };
+    }
+    case 'fantasy': {
+      const who = rng.pick(CREATURES);
+      return { prompt: `${cap(withA(who))} used magic to turn some cards face down. The ${who} says, “${text}” ${told} ${ask}`, whose: `the ${who}’s sentence` };
+    }
+  }
+}
+
+/**
+ * Stop 1's closing why item: a row of cards, a sentence and its verdict (false, or can't tell yet), and four reasons to
+ * pick from. False: the right reason is the card you can see that breaks the sentence; the others name a card that
+ * fits it, a face-down card, or "can't tell". Can't tell (one face-down card): the right reason is that the face-down
+ * card could go either way; the others say the cards you can see decide it, that the sentence is not a statement, or
+ * that one card you can see decides it. Every reason's truth comes from judge().
+ */
+export function whyRowItem(rng: Rng, o: WhyRowOptions): WhyRowMade {
+  for (let attempt = 0; attempt < 8000; attempt++) {
+    // Four cards, so judging a card on its own (every other card face down) lists every way quickly.
+    const row = randomRow(rng);
+    if (row.length !== 4) continue;
+    const hidden = row.flatMap((t, i) => (t.hidden ? [i] : []));
+    if (o.target === 'cant' && hidden.length !== 1) continue;
+    const s = rowStatement(rng, rng.pick(o.target === 'false' ? WHY_FALSE_TEMPLATES : WHY_CANT_TEMPLATES), row);
+    if (!s || (s.t !== 'every' && s.t !== 'some')) continue;
+    const { table } = truthTable(s, row);
+    const verdict = verdictOf(table);
+    if (verdict !== o.target) continue;
+    const shown = row.flatMap((t, i) => (t.hidden ? [] : [i]));
+    const d = s.d;
+    const k = hidden[0];
+    const looks = holds(s, row.filter((t) => !t.hidden));
+    const what = (i: number) => adj(restrict(row[i], d));
+    let reasons: RowReason[];
+    let cant: ReturnType<typeof cantTellCases> = null;
+    let reason: string | null = null;
+    let b = -1;
+    let f = -1;
+    if (verdict === 'false') {
+      // b: the first card you can see that breaks the sentence on its own; f: a card you can see that agrees with it.
+      b = shown.find((i) => aloneVerdict(s, row, i) === 'false') ?? -1;
+      f = shown.find((i) => aloneVerdict(s, row, i) !== 'false') ?? -1;
+      reason = settledReason(s, row, false);
+      if (b < 0 || f < 0 || !reason) continue;
+      reasons = [
+        { id: 'breaks', label: `Card ${b + 1} is ${what(b)}. That one card makes it false.`, holds: aloneVerdict(s, row, b) === 'false' },
+        { id: 'fits', label: `Card ${f + 1} is ${what(f)}, and that card makes it false.`, holds: aloneVerdict(s, row, f) === 'false' },
+        // A face-down card on its own (a row of just that card) makes the sentence false only if every card it could be does.
+        { id: 'hidden', label: `Card ${k + 1} is face down, and a face-down card makes it false.`, holds: judge(s, [row[k]]) === 'false' },
+        { id: 'cant', label: `Card ${k + 1} is face down, so you can’t tell yet.`, holds: judge(s, row) === 'cant' },
+      ];
+    } else {
+      cant = cantTellCases(hidden, table, !looks);
+      if (!cant || !shown.length) continue;
+      f = rng.pick(shown);
+      reasons = [
+        { id: 'either', label: `Card ${k + 1} is face down. It could make the sentence true, and it could make it false.`, holds: judge(s, row) === 'cant' },
+        { id: 'looks', label: `The cards you can see make it ${looks ? 'true' : 'false'}, so it is ${looks ? 'true' : 'false'}.`, holds: judge(s, row) === (looks ? 'true' : 'false') },
+        // A sentence is a statement when every way the cards could be makes it true or false.
+        { id: 'not-statement', label: `Card ${k + 1} is face down, so the sentence is not a statement.`, holds: !table.every((v) => v === 0 || v === 1) },
+        { id: 'seen', label: `Card ${f + 1} is ${what(f)}. That one card decides it.`, holds: aloneVerdict(s, row, f) !== 'cant' },
+      ];
+    }
+    const right = reasons.filter((r) => r.holds);
+    if (right.length !== 1) throw new Error('whyRowItem: exactly one reason must hold');
+    const text = say(s);
+    const { prompt, whose } = whyPrompt(rng, o.frame, text, o.target);
+    const { teach } = rowTeach(s, row, verdict, whose, looks, cant, reason);
+    const cases = teach.cases!;
+    const Whose = cap(whose);
+    const feedback: Record<string, ChoiceFeedback> = {};
+    let explain: string;
+    if (verdict === 'false') {
+      const breaks = `Card ${b + 1} is ${what(b)}, not ${adj(d)}.`;
+      explain = `${breaks} That one card makes it false, whatever the face-down cards are.`;
+      feedback.fits = {
+        headline: `Card ${f + 1} agrees with the sentence, so it can’t be what makes it false.`,
+        detail: [`Card ${f + 1} is ${what(f)}. That is just what “${bare(s)}” allows.`, `${breaks} That is the card that makes it false.`],
+        example: cases[0],
+      };
+      feedback.hidden = {
+        headline: 'A face-down card can’t make the sentence false. It could be any card.',
+        detail: [`Card ${k + 1} could even be a card that fits the sentence.`, `${breaks} That card you can see is what makes it false.`],
+        example: cases[0],
+      };
+      feedback.cant = {
+        headline: '“Can’t tell” is not right here. A card you can see already decides it.',
+        detail: [breaks, `Whatever the face-down cards are, ${whose} is still false.`],
+        example: cases[0],
+      };
+    } else {
+      const tv = looks ? 'true' : 'false';
+      const other = cases[looks ? 1 : 0];
+      explain = cant!.explain;
+      feedback.looks = {
+        headline: `The cards you can see make it look ${tv}, but card ${k + 1} counts too.`,
+        detail: [looks ? cant!.whenFalse : cant!.whenTrue, 'It could go either way. So you can’t tell yet.'],
+        example: other,
+      };
+      feedback['not-statement'] = {
+        headline: 'A face-down card does not stop a sentence from being a statement.',
+        detail: [`${Whose} is still true or false. You just can’t see which yet.`, cant!.whenTrue, cant!.whenFalse],
+        example: cases[0],
+      };
+      feedback.seen = {
+        headline: `Card ${f + 1} alone can’t decide it. Card ${k + 1} still matters.`,
+        detail: [`Card ${f + 1} is ${what(f)}.`, cant!.whenTrue, cant!.whenFalse],
+        example: other,
+      };
+    }
+    const item: ItemCore = {
+      kind: 'choose',
+      prompt,
+      scene: { kind: 'things', things: row },
+      choices: rng.shuffle(reasons.map((r) => ({ id: r.id, label: r.label }))),
+      answer: right[0].id,
+      explain,
+      feedback,
+      hint: ROW_HINT,
+      hintCase: cases[0],
+      teach,
+      tags: [WHY_TAG],
+    };
+    syncWhyWrong(item);
+    if (verdict === 'cant') item.conflict = true;
+    return { tag: verdict === 'cant' ? 'cant-tell' : 'check-cards', item, stmt: s, reasons, row, verdict };
+  }
+  throw new Error('whyRowItem: no item found');
+}
+
 // ---------- the NOT flip ----------
 //
 // NOT means the original statement is false. Its NOT is true whenever the statement is false, and false whenever

@@ -1,15 +1,20 @@
 /**
  * Stop page (1d): one page per stop. Its lessons in order, its check, practice, Pattern Lab events and the
  * repair cards that came from it. The gold row is the thing to do now. Coming-soon stops show the idea and
- * any Pattern Lab preview events.
+ * any Pattern Lab preview events. An open stop with a bridge item shows a warm-up card above its lessons until the
+ * learner answers it right.
  */
-import { MAX_NOT_YETS_PER_DAY, stopOpening, viewStop, type CheckKind } from '../../engine/journey/mastery';
+import { useMemo, useState } from 'react';
+import { MAX_NOT_YETS_PER_DAY, seedFor, stopOpening, viewStop, type CheckKind } from '../../engine/journey/mastery';
+import { createRng } from '../../engine/rng';
+import type { StopDef } from '../../engine/types';
+import { ItemView } from '../components/ItemView';
 import { profileOf } from '../../engine/evidence';
 import { EvidenceProfile } from '../components/EvidenceProfile';
 import { placeNeeds, placeTitle, profileWords, ringTitle } from '../observatory';
 import { lessonWaitsFor } from '../../engine/drill';
 import { canFix } from '../../engine/notebook';
-import { STOPS, stopById } from '../../content/stops';
+import { STOPS, stopById, stopLabel } from '../../content/stops';
 import { DESTINATIONS } from '../pattern/bridges';
 import { useStore, type Route } from '../store';
 import { Icon } from '../components/Icon';
@@ -73,7 +78,7 @@ export function StopScreen({ route }: { route: Extract<Route, { name: 'stop' }> 
         <img src={place.art} alt="" />
         <button type="button" className="sl-back on-art" onClick={() => actions.navigate(ob ? { name: 'journey', track: 'observatory' } : { name: 'journey' })}>‹ {ob ? 'Observatory' : 'Journey'}</button>
         <div className="sl-hero-text">
-          <Eyebrow>{ob ? `Pattern Observatory · Ring ${ob.ring} · Track ${ob.track}` : `Stop ${stop.n}${place.name ? ` · ${place.name}` : ''}`}</Eyebrow>
+          <Eyebrow>{ob ? `Pattern Observatory · Ring ${ob.ring} · Track ${ob.track}` : `${stopLabel(stop)}${place.name ? ` · ${place.name}` : ''}`}</Eyebrow>
           <h2 className="sl-title">{ob ? ringTitle(stop, plain) : stop.title}</h2>
           <p className="sl-sub">{stop.idea}</p>
         </div>
@@ -95,6 +100,8 @@ export function StopScreen({ route }: { route: Extract<Route, { name: 'stop' }> 
 
       {view.status === 'locked' && <p className="sl-note"><Icon name="lock" size={14} /> {view.label}.{events.length ? ' You can still look at the Pattern Lab events below.' : ''}</p>}
       {view.status === 'soon' && <p className="sl-note">This stop is coming in a later version.{events.length ? ' Its Pattern Lab events are open now as a preview.' : ''}</p>}
+
+      {open && stop.bridge && <WarmUp stop={stop} />}
 
       <div className="sl-list">
         {open && ob && !save.evidence.diagnostic && (
@@ -211,7 +218,7 @@ export function StopScreen({ route }: { route: Extract<Route, { name: 'stop' }> 
         {cards.length > 0 && (
           <Row
             lead={<KindTag kind="fix" />}
-            title={`Repair quests from Stop ${stop.n}`}
+            title={`Repair quests from ${stopLabel(stop)}`}
             sub={fixable ? `${fixable} ready now` : 'waiting for a later day'}
             meta={`${cards.length}`}
             metaTone="orange"
@@ -221,6 +228,55 @@ export function StopScreen({ route }: { route: Extract<Route, { name: 'stop' }> 
         )}
       </div>
     </div>
+  );
+}
+
+/** The stop whose idea a stop's warm-up reuses: the one before it in the list, or a side-track stop's required stop. */
+export function warmUpFrom(stop: StopDef, stops: readonly StopDef[] = STOPS): StopDef | undefined {
+  if (stop.bridgeFrom) return stops.find((s) => s.id === stop.bridgeFrom);
+  if (stop.sideTrack && stop.requires?.length) return stops.find((s) => s.id === stop.requires![0]);
+  const i = stops.findIndex((s) => s.id === stop.id);
+  return i > 0 ? stops[i - 1] : undefined;
+}
+
+/**
+ * The warm-up card: one item from the stop's bridge(rng), answered in learn mode with no timer. A wrong answer shows
+ * its explanation like any lesson answer. Finishing it right marks the stop warm and the card folds to one line.
+ * Giving up draws a new warm-up item. It never counts toward passing and never adds a Notebook card.
+ */
+function WarmUp({ stop }: { stop: StopDef }) {
+  const { save, player, actions } = useStore();
+  const [round, setRound] = useState(0);
+  // One item per round, drawn once (a new round after giving up draws a new one).
+  const item = useMemo(() => stop.bridge?.(createRng(seedFor(player?.id ?? 'guest', stop.id, 'warm', round))) ?? null, [stop, player?.id, round]);
+  if (!save || !item) return null;
+  if (save.stops[stop.id]?.warm) {
+    return (
+      <p className="sl-warm-done" role="status">
+        <Icon name="check" size={16} strokeWidth={3} /> Warmed up
+      </p>
+    );
+  }
+  const from = warmUpFrom(stop);
+  return (
+    <section className="sl-warm" aria-labelledby={`warm-${stop.id}`}>
+      <h3 id={`warm-${stop.id}`} className="sl-label t-gold">Warm up{from ? ` · from ${stopLabel(from)}` : ''}</h3>
+      <ItemView
+        key={`${item.id}-${round}`}
+        item={item}
+        mode="learn"
+        readAloud={save.settings.readAloud}
+        kicker="Warm up"
+        nextLabel="Done"
+        afterHelpLabel="Done"
+        autoFocus={false}
+        onDone={(r) => {
+          actions.recordAnswer(r, { fromWarmUp: true });
+          if (r.correct) actions.markWarm(stop.id);
+          else setRound((n) => n + 1);
+        }}
+      />
+    </section>
   );
 }
 

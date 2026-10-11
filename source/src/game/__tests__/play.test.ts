@@ -529,7 +529,8 @@ describe('IdeaCards', () => {
 describe('LessonRunner', () => {
   it('starts with the key ideas under a lesson header', () => {
     const { html, text } = render(h(LessonRunner, { stop, lesson: lesson1, seed: 7, readAloud: false, onAnswer: noop, onComplete: noop, onExit: noop }));
-    expect(text).toContain('Stop 9 · Lesson 1 of 2');
+    // The sample stop has id s9, shown as Stop 10 (Arguments is Stop 2).
+    expect(text).toContain('Stop 10 · Lesson 1 of 2');
     expect(html).toContain('<h1');
     expect(text).toContain('What is a statement?');
     expect(text).toContain('A statement is true or false');
@@ -540,7 +541,7 @@ describe('LessonRunner', () => {
   it('goes straight to the tries when a lesson has no key ideas', () => {
     const bare: LessonDef = { ...lesson2, ideas: [] };
     const { text } = render(h(LessonRunner, { stop, lesson: bare, seed: 1, readAloud: false, onAnswer: noop, onComplete: noop, onExit: noop }));
-    expect(text).toContain('Stop 9 · Lesson 2 of 2');
+    expect(text).toContain('Stop 10 · Lesson 2 of 2');
     expect(text).toContain('Try 1 of 3');
     expect(text).toContain(chooseBoxes.prompt);
   });
@@ -554,7 +555,7 @@ describe('LessonRunner', () => {
     expect(text).toContain('Next: Lesson 2 · Signs and lines');
     expect(text).toContain('Done');
     const last = render(h(LessonRecap, { stop, lesson: lesson2, tries: 3, firstTry: 3, onDone: noop })).text;
-    expect(last).toContain('That was the last lesson in Stop 9.');
+    expect(last).toContain('That was the last lesson in Stop 10.');
   });
 });
 
@@ -827,9 +828,9 @@ describe('CheckResult', () => {
   const items = [chooseText, chooseBoxes, tapall, orderItem];
 
   it.each([
-    ['pass', 'Stop 9 is passed'],
-    ['lockin', 'Stop 9 is locked in'],
-    ['week', 'Stop 9 is mastered'],
+    ['pass', 'Stop 10 is passed'],
+    ['lockin', 'Stop 10 is locked in'],
+    ['week', 'Stop 10 is mastered'],
   ] as const)('passed %s check says what comes next', (kind, next) => {
     const { text } = render(
       h(CheckResult, { stop, kind, items, records: items.map((it) => rec(it, true)), passed: true, missed: [], onLearnAgain: noop, onDone: noop }),
@@ -1437,9 +1438,10 @@ describe('Wrong-Answer Notebook', () => {
     expect(text).toContain(NOTEBOOK_INTRO[0]);
     expect(text).toContain('Repair quests: 1 ready');
     expect(html).toContain('aria-label="Fix the ready ones"');
-    expect(text).toContain('STOP 2');
-    expect(text).toContain('STOP 9 · SAMPLE STOP');
-    expect(text.indexOf('STOP 2')).toBeLessThan(text.indexOf('STOP 9'));
+    // Groups show the shown numbers: stored 2 (NOT, AND, OR) is Stop 3, stored 9 is Stop 10.
+    expect(text).toContain('STOP 3');
+    expect(text).toContain('STOP 10 · SAMPLE STOP');
+    expect(text.indexOf('STOP 3')).toBeLessThan(text.indexOf('STOP 10'));
     expect(text).toContain('OR includes both');
     expect(text).toContain('Lesson 2 · Signs and lines');
     expect(text).toContain('Ready now');

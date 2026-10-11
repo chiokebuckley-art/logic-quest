@@ -62,6 +62,10 @@ export const lesson: LessonModule['lesson'] = {
   drill: [colorBoard(`${ID}-do`), twinBoard(`${ID}-do2`)],
   practice: practiceOf(ID, pack),
   pass: { firstTry: 3, include: [CAN_FAIL] },
+  terms: [
+    { term: 'good guess', means: 'What is most likely from what you saw. It can still be wrong, so check it before you are sure.' },
+    { term: 'proof', means: 'A proof shows something must be true, with no other way. Many same examples are never a proof.' },
+  ],
 };
 
 /** Two items for the stop check: the “due” trap (a conflict item) and one other kind, in different skins. */

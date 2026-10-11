@@ -86,6 +86,11 @@ export const S2_WORLD: StopWorld = {
     's2.or-count': [
       'Your school makes one badge for each kid in the chess club OR the garden club. A kid in both clubs gets just one badge, so she counts once.',
     ],
+    // The check's closing why item: why a card does not fit an AND or an OR rule.
+    's2.why-not': [
+      'A library card form needs a parent’s name AND a home address. A form with only the name comes back. The missing address is the reason, since AND needs both parts.',
+      'A pool lets in kids who can swim OR who came with a grown-up. A kid who can’t swim and came alone fits no part, so that kid waits outside.',
+    ],
     // s2.l4 Brackets
     's2.not-both': [
       'A coupon that “can’t be used with other deals” means NOT (coupon AND sale price). You may use the coupon, or get the sale price. Just not both on one thing.',

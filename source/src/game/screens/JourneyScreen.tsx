@@ -1,10 +1,11 @@
 /**
- * Journey (1c): the 13 stops on one rail. Main track (1–11), side track (12–13) and a Pattern Lab chip.
+ * Journey (1c): the stops on one rail. Main track, side track (the stops marked sideTrack), the Pattern Observatory
+ * and a Pattern Lab chip. Every number shown is the stop's place on the Journey (stopNumber), never its id.
  * Tapping a stop opens its Stop page, which holds everything about that stop.
  */
 import { nextStep, viewAll, type StopView } from '../../engine/journey/mastery';
 import type { StopDef } from '../../engine/types';
-import { STOPS } from '../../content/stops';
+import { STOPS, stopNumber } from '../../content/stops';
 import { DESTINATIONS } from '../pattern/bridges';
 import { ObservatoryMap, type MapPlace } from '../components/ObservatoryMap';
 import { OBSERVATORY, placeNeeds, placeTitle, ringTitle } from '../observatory';
@@ -74,16 +75,21 @@ export function JourneyScreen({ route }: { route?: Extract<Route, { name: 'journ
   if (!save) return null;
   const track = route?.track ?? 'main';
   const all = viewAll(STOPS, save.stops, today);
-  const views = all.filter(({ stop }) => (track === 'side' ? stop.n >= 12 && !stop.observatory : track === 'observatory' ? !!stop.observatory : stop.n <= 11 && !stop.observatory));
+  const views = all.filter(({ stop }) => (track === 'side' ? !!stop.sideTrack : track === 'observatory' ? !!stop.observatory : !stop.observatory && !stop.sideTrack));
+  const sideNumbers = STOPS.filter((s) => s.sideTrack).map(stopNumber).join(', ');
   const plain = save.evidence.plain;
   const diag = save.evidence.diagnostic;
+  // A ring that is still locked (its required stops not passed) dims on the map, with its "Opens after" line.
+  const ringLock = new Map(all.filter(({ stop, view }) => stop.observatory && view.status === 'locked').map(({ stop, view }) => [stop.id, view.label]));
   const places: MapPlace[] = OBSERVATORY.flatMap((stop) =>
     stop.lessons.map((lesson) => {
       const done = (save.stops[stop.id]?.lessonsDone ?? []).includes(lesson.id);
-      const state: MapPlace['state'] = done ? (save.stops[stop.id]?.weekDay ? 'mastered' : 'done') : placeNeeds(lesson, save).length ? 'locked' : 'open';
-      return { stop, lesson, state, title: placeTitle(lesson, plain) };
+      const closed = ringLock.get(stop.id);
+      const state: MapPlace['state'] = done ? (save.stops[stop.id]?.weekDay ? 'mastered' : 'done') : closed || placeNeeds(lesson, save).length ? 'locked' : 'open';
+      return { stop, lesson, state, title: placeTitle(lesson, plain), ringLocked: closed };
     }),
   );
+  const lockedRings = OBSERVATORY.filter((s) => ringLock.has(s.id));
   const next = nextStep(STOPS, save.stops, today);
   const counts = stopCounts(save.stops);
 
@@ -97,7 +103,7 @@ export function JourneyScreen({ route }: { route?: Extract<Route, { name: 'journ
       </div>
       <div className="sl-chips" role="tablist" aria-label="Track">
         <button type="button" role="tab" aria-selected={track === 'main'} className="sl-chip c-gold" onClick={() => actions.navigate({ name: 'journey' })}>Main track</button>
-        <button type="button" role="tab" aria-selected={track === 'side'} className="sl-chip c-gold" onClick={() => actions.navigate({ name: 'journey', track: 'side' })}>Side track · 12, 13</button>
+        <button type="button" role="tab" aria-selected={track === 'side'} className="sl-chip c-gold" onClick={() => actions.navigate({ name: 'journey', track: 'side' })}>Side track · {sideNumbers}</button>
         <button type="button" role="tab" aria-selected={track === 'observatory'} className="sl-chip c-gold" onClick={() => actions.navigate({ name: 'journey', track: 'observatory' })}>Observatory</button>
         <button type="button" className="sl-chip c-violet" onClick={() => actions.navigate({ name: 'library', kind: 'lab' })}>Pattern Lab</button>
       </div>
@@ -108,8 +114,20 @@ export function JourneyScreen({ route }: { route?: Extract<Route, { name: 'journ
             <h3 id="ob-title" className="sl-label">Pattern Observatory</h3>
             <span className="sl-section-meta t-gold">{places.filter((p) => p.state === 'done' || p.state === 'mastered').length} of {places.length} places lit</span>
           </div>
-          <p className="sl-sub">Ten places in four rings. Notice, describe, compare, test, predict, explain. It never blocks the main track.</p>
-          {places.length > 0 && <ObservatoryMap places={places} onPick={(stopId, lessonId) => actions.navigate({ name: 'lesson', stopId, lessonId, from: 'journey' })} />}
+          <p className="sl-sub">Twelve places in four rings. Notice, describe, compare, test, predict, explain. Each ring opens after the stops it builds on.</p>
+          {places.length > 0 && (
+            <ObservatoryMap
+              places={places}
+              onPick={(stopId, lessonId) => actions.navigate(ringLock.has(stopId) ? { name: 'stop', stopId } : { name: 'lesson', stopId, lessonId, from: 'journey' })}
+            />
+          )}
+          {lockedRings.length > 0 && (
+            <ul className="sl-note sl-ring-locks">
+              {lockedRings.map((s) => (
+                <li key={s.id}><Icon name="lock" size={13} /> Ring {s.observatory!.ring} · {ringTitle(s, plain)}: {ringLock.get(s.id)}.</li>
+              ))}
+            </ul>
+          )}
           <button type="button" className="sl-row" onClick={() => actions.navigate({ name: 'diagnostic' })}>
             <span className="sl-row-main">
               <span className="sl-row-title">{diag ? 'Your starting levels' : 'Find your level'}</span>
@@ -142,7 +160,7 @@ export function JourneyScreen({ route }: { route?: Extract<Route, { name: 'journ
           return (
             <li key={stop.id} className={`sl-stop n-${node}`} style={closed ? { opacity: fade } : undefined}>
               <div className="sl-stop-rail" aria-hidden="true">
-                <span className="sl-node">{done ? <Icon name="check" size={16} strokeWidth={3} /> : stop.n}</span>
+                <span className="sl-node">{done ? <Icon name="check" size={16} strokeWidth={3} /> : stop.observatory ? stop.observatory.ring : stopNumber(stop)}</span>
                 {i < views.length - 1 && <span className="sl-link-line" />}
               </div>
               <button
@@ -153,7 +171,7 @@ export function JourneyScreen({ route }: { route?: Extract<Route, { name: 'journ
                 onClick={() => actions.navigate({ name: 'stop', stopId: stop.id })}
               >
                 <span className="sl-row-main">
-                  <span className="sl-row-title">{stop.observatory ? `Ring ${stop.observatory.ring}. ${ringTitle(stop, plain)}` : `${stop.n}. ${stop.title}`}</span>
+                  <span className="sl-row-title">{stop.observatory ? `Ring ${stop.observatory.ring}. ${ringTitle(stop, plain)}` : `${stopNumber(stop)}. ${stop.title}`}</span>
                   <span className="sl-row-sub">{view.label}</span>
                 </span>
                 {view.status === 'locked' ? <Icon name="lock" size={15} color="var(--muted)" label="Locked" /> : cta && <span className={`sl-row-meta t-${cta.tone}`}>{cta.text}</span>}

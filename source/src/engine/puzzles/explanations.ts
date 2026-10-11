@@ -1291,14 +1291,14 @@ export function fitsQuestion(avoid: string): ConfusedQuestion {
   throw new Error('fitsQuestion: no fit without an explanation');
 }
 
-/** The whole-story question (Stop 6 asked “could it happen another way?”). The truck idea is the sprinkler idea plus more. */
+/** The whole-story question (Stop 7, If… then, asked “could it happen another way?”). The truck idea is the sprinkler idea plus more. */
 export function wholeStoryQuestion(): ConfusedQuestion {
   const sprinkler = ideaIn(WORKED, 'sprinkler'), truck = ideaIn(WORKED, 'truck');
   if (extraCount(truck) <= extraCount(sprinkler)) throw new Error('wholeStoryQuestion: the truck idea needs more extra things');
   return {
     q: 'In these puzzles, can you add something to an idea to make it fit a clue?',
     options: [{ label: 'No. Each idea is the whole story', right: true }, { label: 'Yes. It could have happened another way' }, { label: 'Not sure' }],
-    teach: `No. In Stop 6, you asked if something could happen another way. Here, each idea is the whole story. “${truck.text}” is not the sprinkler idea fixed up. It is a new idea, with more extra things. Test each idea just as it is.`,
+    teach: `No. In Stop 7, you asked if something could happen another way. Here, each idea is the whole story. “${truck.text}” is not the sprinkler idea fixed up. It is a new idea, with more extra things. Test each idea just as it is.`,
   };
 }
 

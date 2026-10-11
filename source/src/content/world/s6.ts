@@ -44,6 +44,22 @@ export const S6_WORLD: StopWorld = {
         { who: 'You, at a bake sale', kind: 'life', text: 'A bake sale rule: “If a treat has nuts, then it has a blue sticker.” Check the recipe of each treat with no blue sticker: could it have nuts? A treat with a blue sticker can’t break the rule.' },
       ],
     },
+    's6.l6': {
+      why: '“Only if” names what is needed, not what is enough. Say a rule with if before you act on it, so you never turn it around.',
+      uses: [
+        { who: 'You, at a sleepover', kind: 'life', text: 'Mom says, “You can go to the sleepover only if your room is clean.” A clean room is needed. It does not promise the sleepover, so still ask first.' },
+        { who: 'Crossing guards', kind: 'work', text: 'A crossing guard tells kids, “Cross the street only if I hold up my stop sign.” The sign is needed. It does not mean you must cross, so a kid can still wait.' },
+        { who: 'Coaches', kind: 'work', text: 'A coach says, “Practice is on unless there is lightning.” On a clear day, the team practices. When lightning comes, the words make no promise, so everyone waits for the coach’s call.' },
+      ],
+    },
+    's6.l7': {
+      why: 'Needed is not the same as enough. Ask which part is needed, which part is enough, and if the rule works each way.',
+      uses: [
+        { who: 'Photographers', kind: 'work', text: 'Photographers know light is needed for a clear photo. But light is not enough: a shaky camera still makes a blurry photo. So they hold the camera steady too.' },
+        { who: 'You, playing musical chairs', kind: 'life', text: 'In musical chairs, you stay in the game if and only if you find a chair when the music stops. Find a chair, and you stay in. No chair, and you are out.' },
+        { who: 'Firefighters', kind: 'work', text: 'Firefighters teach that a fire needs air, heat and fuel. Air is needed, but air alone is not enough: a room is full of air, and nothing burns.' },
+      ],
+    },
   },
   skills: {
     // s6.l1 When is a rule broken?
@@ -69,5 +85,11 @@ export const S6_WORLD: StopWorld = {
     // s6.l5 Rule checker
     's6.checker': ['Your home rule: “If it goes in the recycling bin, then it is rinsed.” Check what is in the bin, and where each dirty jar went. A rinsed jar can’t break the rule.'],
     's6.checker-card': ['A mover’s rule: “If a box holds dishes, then it says Kitchen.” A box that says Kitchen can’t break the rule, so she skips it. She peeks inside each box that doesn’t.'],
+    // s6.l6 Only if, and unless
+    's6.only-if': ['A teacher says, “You may go out to recess only if your work is done.” Done work is needed for recess. It does not make recess start early.'],
+    's6.unless': ['A park sign says, “The gate stays open unless it is after dark.” Before dark, the gate is open. After dark, the sign makes no promise.'],
+    // s6.l7 Both ways: needed and enough
+    's6.iff': ['A year has 366 days if and only if it is a leap year. So a 366-day year is a leap year, and a leap year has 366 days.'],
+    's6.need-enough': ['A phone needs a charge to turn on, but a charge is not enough if the phone is broken. So a repair worker checks the screen and the battery.'],
   },
 };

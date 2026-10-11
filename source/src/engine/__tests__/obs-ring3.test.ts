@@ -738,8 +738,11 @@ describe('Deep Sky: the diagnostic serves Track 3 at L1 to L3', () => {
   it('the Ring Check covers every place with a conflict item, and the Arcade and new examples stay in the ring', () => {
     for (const seed of SEEDS) {
       const items = stop16.check!(createRng(seed));
-      expect(items.length).toBe(9);
-      for (const l of stop16.lessons) expect(items.filter((x) => x.lesson === l.id).length).toBe(3);
+      expect(items.length).toBe(10);
+      // The closing why item: Mirror Pool's or Analogy Bridge's Explain item (its choices are reasons), tag why.
+      expect(items[9].tags).toContain('why');
+      expect(['s16.fold-why', 's16.link-why']).toContain(items[9].skill);
+      for (const l of stop16.lessons) expect(items.slice(0, 9).filter((x) => x.lesson === l.id).length).toBe(3);
       expect(items.some((x) => x.conflict)).toBe(true);
       const a = stop16.practice!(createRng(seed));
       expect(a.stop).toBe(16);

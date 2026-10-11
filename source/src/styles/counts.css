@@ -1,0 +1,131 @@
+/* ---------- a count picture (Clues & Chances): 100 dots, then a 2-by-2 table of counts; fits a 320 px phone ---------- */
+.play-counts {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.play-counts-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.35;
+  color: var(--text, #f1f3ff);
+}
+.play-counts-dots {
+  display: block;
+  width: 100%;
+  max-width: 230px;
+  height: auto;
+  margin: 0 auto;
+}
+.play-counts-dot.is-a {
+  fill: #ff8fa3;
+}
+.play-counts-dot.is-b {
+  fill: rgba(154, 163, 209, 0.45);
+}
+.play-counts-ring {
+  fill: none;
+  stroke: var(--gold, #ffc93c);
+  stroke-width: 2;
+}
+.play-counts-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: auto;
+  font-size: 14px;
+}
+.play-counts-cap {
+  caption-side: bottom;
+  text-align: left;
+  padding-top: 6px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--text-2, #c9cff0);
+}
+.play-counts-table th,
+.play-counts-table td {
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--line-soft, rgba(154, 163, 209, 0.2));
+  text-align: center;
+  vertical-align: middle;
+}
+.play-counts-table thead th {
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.25;
+  color: var(--gold-soft, #ffe08a);
+  overflow-wrap: anywhere;
+  border-bottom: 2px solid var(--line, rgba(154, 163, 209, 0.25));
+}
+.play-counts-table tbody th {
+  text-align: left;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--text, #f1f3ff);
+  overflow-wrap: anywhere;
+}
+.play-counts-table .is-total,
+.play-counts-table tr.is-total th,
+.play-counts-table tr.is-total td {
+  color: var(--muted, #9aa3d1);
+  font-weight: 700;
+}
+.play-counts-table tr.is-total th,
+.play-counts-table tr.is-total td {
+  border-top: 2px solid var(--line, rgba(154, 163, 209, 0.25));
+  border-bottom: none;
+}
+.play-counts-table td.is-total {
+  border-left: 2px solid var(--line, rgba(154, 163, 209, 0.25));
+}
+.play-counts-box {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.play-counts-n {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--text, #f1f3ff);
+}
+.play-counts-key {
+  flex: none;
+}
+.play-counts-blank {
+  display: inline-block;
+  width: 2.4em;
+  height: 1.4em;
+  border: 2px dashed var(--line, rgba(154, 163, 209, 0.35));
+  border-radius: 6px;
+  vertical-align: middle;
+}
+.play-counts-table tr.is-picked,
+.play-counts-table th.is-picked,
+.play-counts-table td.is-picked {
+  background: rgba(255, 201, 60, 0.12);
+}
+.play-counts-table tr.is-picked th:first-child {
+  box-shadow: inset 3px 0 0 var(--gold, #ffc93c);
+}
+.play-counts-table thead th.is-picked {
+  box-shadow: inset 0 3px 0 var(--gold, #ffc93c);
+}
+.play-counts-pick {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.35;
+  color: var(--gold, #ffc93c);
+}
+@media (max-width: 360px) {
+  .play-counts-table th,
+  .play-counts-table td {
+    padding: 5px 2px;
+  }
+  .play-counts-n {
+    font-size: 15px;
+  }
+}

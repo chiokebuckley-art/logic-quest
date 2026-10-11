@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createRng } from '../../engine/rng';
 import type { PracticeRunnerProps } from './contracts';
+import { stopLabel } from '../../content/stops';
 import { PlayHeader } from './ItemView';
 import { LearnItem } from './LearnItem';
 
@@ -25,7 +26,7 @@ export function PracticeRunner({ stop, seed, readAloud, onAnswer, onExit }: Prac
 
   return (
     <div className="play-root" ref={rootRef}>
-      <PlayHeader over="Arcade · Practice" title={`Stop ${stop.n} · ${stop.title}`} onBack={onExit} backLabel="Back to the Arcade" />
+      <PlayHeader over="Arcade · Practice" title={`${stopLabel(stop)} · ${stop.title}`} onBack={onExit} backLabel="Back to the Arcade" />
 
       <div className="play-progress">
         <div className="play-progress-text">

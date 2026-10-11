@@ -6,6 +6,7 @@
 import { useEffect, useRef } from 'react';
 import type { CheckKind } from '../../engine/journey/mastery';
 import type { Answer, Item, Thing } from '../../engine/types';
+import { stopLabel } from '../../content/stops';
 import { describeAnswer, describeAssignLines, describeRight, rightAnswer } from '../describe';
 import { explanationFor } from '../explanation';
 import { CHECK_LABEL } from './CheckRunner';
@@ -15,10 +16,11 @@ import { PlayHeader } from './ItemView';
 import { SceneView } from './SceneView';
 import { PlayIcon, ThingCard } from './ThingCard';
 
-const NEXT_AFTER_PASS: Record<CheckKind, (n: number) => string> = {
-  pass: (n) => `Every answer was right, so Stop ${n} is passed. Next comes the lock-in check. It opens on a later day and uses new questions about the same ideas.`,
-  lockin: (n) => `Every answer was right again, so Stop ${n} is locked in. The last step is the week check. It opens about a week after you first passed.`,
-  week: (n) => `Every answer was right for the third time. Stop ${n} is mastered. That means you showed you know it on three different days.`,
+/** What comes next after a passed check. `name` is how the stop is shown: "Stop 3" or "Ring 1". */
+const NEXT_AFTER_PASS: Record<CheckKind, (name: string) => string> = {
+  pass: (name) => `Every answer was right, so ${name} is passed. Next comes the lock-in check. It opens on a later day and uses new questions about the same ideas.`,
+  lockin: (name) => `Every answer was right again, so ${name} is locked in. The last step is the week check. It opens about a week after you first passed.`,
+  week: (name) => `Every answer was right for the third time. ${name} is mastered. That means you showed you know it on three different days.`,
 };
 
 type StepState = 'done' | 'now' | 'later';
@@ -153,10 +155,10 @@ export function CheckResult({ stop, kind, items, records, passed, missed, onLear
 
   return (
     <div className="play-root">
-      <PlayHeader over={`Stop ${stop.n} · ${stop.title}`} title={label} onBack={onDone} backLabel="Back to the stop" />
+      <PlayHeader over={`${stopLabel(stop)} · ${stop.title}`} title={label} onBack={onDone} backLabel="Back to the stop" />
 
       <div className={`play-result-hero ${passed ? 'is-pass' : 'is-notyet'}`}>
-        <span className="play-result-eyebrow">{passed ? `Passed · Stop ${stop.n} · ${stop.title}` : `Stop ${stop.n} · ${stop.title}`}</span>
+        <span className="play-result-eyebrow">{passed ? `Passed · ${stopLabel(stop)} · ${stop.title}` : `${stopLabel(stop)} · ${stop.title}`}</span>
         <h2 className={`play-score-head ${passed ? 'is-pass' : 'is-notyet'}`} ref={headRef} tabIndex={-1}>
           {passed ? 'Passed' : `Not yet · ${right} of ${total}`}
         </h2>
@@ -175,7 +177,7 @@ export function CheckResult({ stop, kind, items, records, passed, missed, onLear
       {passed && (
         <>
           <div className="play-feedback play-feedback--right">
-            <p>{NEXT_AFTER_PASS[kind](stop.n)}</p>
+            <p>{NEXT_AFTER_PASS[kind](stopLabel(stop))}</p>
           </div>
           <button type="button" className="play-btn play-btn--primary play-btn--block" onClick={onDone}>
             Back to the stop ▸

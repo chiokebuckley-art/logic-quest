@@ -72,6 +72,13 @@ export interface LessonRun {
   plan?: string;
 }
 
+/** The stop page's warm-up item was answered right: mark the stop warm (StopProgress.warm). Other progress is kept. */
+export function markWarm(save: SaveData, stopId: string): SaveData {
+  const p = save.stops[stopId];
+  if (p?.warm) return save;
+  return { ...save, stops: { ...save.stops, [stopId]: { ...(p ?? { lessonsDone: [], attempts: 0 }), warm: true } } };
+}
+
 /** The learner marked a lesson's guided boards right. */
 export function markDrilled(save: SaveData, lessonId: string): SaveData {
   return save.drilled.includes(lessonId) ? save : { ...save, drilled: [...save.drilled, lessonId] };
@@ -145,6 +152,7 @@ function parseProgress(x: unknown): StopProgress | null {
   if (isDay(x.passDay)) p.passDay = x.passDay;
   if (isDay(x.lockDay)) p.lockDay = x.lockDay;
   if (isDay(x.weekDay)) p.weekDay = x.weekDay;
+  if (x.warm === true) p.warm = true;
   const ny = x.notYet;
   if (isObj(ny) && (ny.kind === 'pass' || ny.kind === 'lockin' || ny.kind === 'week') && isDay(ny.day)) {
     p.notYet = { kind: ny.kind, day: ny.day, missed: strs(ny.missed), redone: strs(ny.redone) };

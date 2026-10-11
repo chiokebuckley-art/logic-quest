@@ -13,22 +13,30 @@
  * ../engine/puzzles/. Every lesson is See -> Do -> Quiz, and every quiz pack has one question on when its way of
  * thinking fails (tag `can-fail`, which the pass rule asks for).
  */
+import { MOVES, SKIN_IDS as COND_SKINS, moveItem } from '../engine/puzzles/conditionals';
 import type { Item, Rng, StopDef } from '../engine/types';
 import * as causes from './stop7/causes';
 import { distinctItems, finish, STOP, type LessonModule } from './stop7/common';
 import * as explanations from './stop7/explanations';
 import * as fairness from './stop7/fairness';
+import { WHY_TAG } from './stop7/fairness';
 import * as gutfeel from './stop7/gutfeel';
 import * as patterns from './stop7/patterns';
 
 const MODULES: readonly LessonModule[] = [patterns, explanations, causes, fairness, gutfeel];
 const lessons = MODULES.map((m) => m.lesson);
 
-/** 10 items: two from each lesson, in lesson order. Each lesson's pair holds at least one conflict item. */
+/**
+ * 10 items: two from each lesson, in lesson order, except that the closing why item comes last (docs/CURRICULUM-PLAN.md):
+ * lesson 4's “Which reason should decide it?” (tag `why`), whose choices are reasons. Each lesson's pair holds at least
+ * one conflict item.
+ */
 function check(rng: Rng): Item[] {
   const one = distinctItems();
   const plan = MODULES.flatMap((m) => m.checkItems(rng).map((made) => [m.lesson.id, made] as const));
-  return plan.map(([lesson, made], i) => finish(one(() => made), `s${STOP}-c${i + 1}`, lesson));
+  const isWhy = ([, made]: (typeof plan)[number]) => !!made.item.tags?.includes(WHY_TAG);
+  const ordered = [...plan.filter((x) => !isWhy(x)), ...plan.filter(isWhy)];
+  return ordered.map(([lesson, made], i) => finish(one(() => made), `s${STOP}-c${i + 1}`, lesson));
 }
 
 /** One Arcade item from any lesson. */
@@ -43,6 +51,23 @@ function fresh(missed: Item, rng: Rng): Item[] {
   return m ? m.freshItems(missed, rng).map((made) => finish(made, 'new', missed.lesson)) : [];
 }
 
+/**
+ * The warm-up on the stop page, from If… then (Stop 6, lesson 3): a rule and one fact, and what follows, if anything. It
+ * is a Stop 6 item, so it never counts for this stop. Its prompt says it is a warm-up from If… then.
+ */
+function bridge(rng: Rng): Item {
+  const m = moveItem(rng, { skin: rng.pick(COND_SKINS), move: rng.pick(MOVES) });
+  return {
+    ...m.item,
+    id: `s${STOP}-warm`,
+    stop: 6,
+    lesson: 's6.l3',
+    skill: `s6.${m.tag}`,
+    prompt: `A warm-up from “If… then.” ${m.item.prompt}`,
+    tags: [...new Set([m.tag, ...(m.item.tags ?? [])])],
+  } as Item;
+}
+
 export const stop7: StopDef = {
   n: STOP,
   id: 's7',
@@ -53,4 +78,5 @@ export const stop7: StopDef = {
   check,
   practice: arcade,
   fresh,
+  bridge,
 };

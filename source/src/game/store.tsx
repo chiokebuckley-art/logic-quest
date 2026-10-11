@@ -28,7 +28,7 @@ import type { AnswerRecord } from './components/contracts';
 export type LessonFrom = 'journey' | 'learn' | 'check' | 'stop' | 'library' | 'home';
 
 /** The Library's kind filter. */
-export type LibraryKind = 'all' | 'ideas' | 'real' | 'practice' | 'lab' | 'soon';
+export type LibraryKind = 'all' | 'ideas' | 'real' | 'words' | 'practice' | 'lab' | 'soon';
 
 export type Route =
   | { name: 'players'; mode?: 'list' | 'new' | 'import' | 'link'; pinFor?: string }
@@ -215,8 +215,12 @@ export interface Actions {
    * Count one answered item. A miss (wrong in a check, timed out, or a lesson item not passed on its own after the explanation) also goes
    * into the Wrong-Answer Notebook,
    * unless `fromNotebook` (a fix attempt; use fixNote for those).
+   * `fromWarmUp`: the stop page's warm-up item. It is not a lesson answer, so it counts nowhere: no stats, no help
+   * tally and never a Notebook card.
    */
-  recordAnswer(record: Pick<AnswerRecord, 'skill' | 'firstTry' | 'correct' | 'stop' | 'lesson' | 'help'>, opts?: { fromNotebook?: boolean }): void;
+  recordAnswer(record: Pick<AnswerRecord, 'skill' | 'firstTry' | 'correct' | 'stop' | 'lesson' | 'help'>, opts?: { fromNotebook?: boolean; fromWarmUp?: boolean }): void;
+  /** The stop page's warm-up item was answered right: the page shows it as done (StopProgress.warm). */
+  markWarm(stopId: string): void;
   /** A Wrong-Answer Notebook fix attempt on a skill. Returns true when that card is now cleared. */
   fixNote(skill: string, correct: boolean): boolean;
   addActive(seconds: number): void;
@@ -550,17 +554,15 @@ export function StoreProvider({ children, kv: kvProp, fetchFn = browserFetch }: 
         dispatch({ type: 'save', fn: (d) => ({ ...d, stops: { ...d.stops, [stopId]: { ...(d.stops[stopId] ?? mastery.emptyProgress()), openCheck } } }) });
       },
 
-      recordAnswer: ({ skill, firstTry, correct, stop, lesson, help }, opts) => {
+      recordAnswer: (record, opts) => {
+        // A warm-up answer is never a lesson answer: nothing to count and nothing for the Notebook.
+        if (opts?.fromWarmUp) return;
         const day = todayNow();
-        dispatch({
-          type: 'save',
-          fn: (d) => {
-            let counted = saves.recordAnswer(d, day, skill, firstTry);
-            if (help) counted = saves.recordHelp(counted, day, skill, help);
-            if (help?.gap) counted = saves.recordGap(counted, help.gap);
-            return correct || opts?.fromNotebook ? counted : { ...counted, notebook: notebook.addMiss(counted.notebook, { skill, stop, lesson }, day) };
-          },
-        });
+        dispatch({ type: 'save', fn: (d) => answerInto(d, record, day, opts) });
+      },
+
+      markWarm: (stopId) => {
+        dispatch({ type: 'save', fn: (d) => saves.markWarm(d, stopId) });
       },
 
       fixNote: (skill, correct) => {
@@ -909,6 +911,24 @@ export function StoreProvider({ children, kv: kvProp, fetchFn = browserFetch }: 
   const syncInfo = useMemo<SyncInfo>(() => ({ available: !!syncCfg, loading: syncCfg === undefined, busy: syncBusy, note: syncNote, link: player?.sync ?? null, checkedAt }), [syncCfg, syncBusy, syncNote, player, checkedAt]);
   const value = useMemo<Store>(() => ({ state, today, player, save: state.save, actions, kv, sync: syncInfo, notice }), [state, today, player, actions, kv, syncInfo, notice]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+}
+
+/**
+ * What one answered item does to a save (the store's recordAnswer): it counts in the day's stats and help tallies,
+ * and a miss adds a Notebook card. A Notebook fix attempt (`fromNotebook`) never adds a card; a warm-up answer
+ * (`fromWarmUp`) changes nothing at all.
+ */
+export function answerInto(
+  d: SaveData,
+  { skill, firstTry, correct, stop, lesson, help }: Pick<AnswerRecord, 'skill' | 'firstTry' | 'correct' | 'stop' | 'lesson' | 'help'>,
+  day: string,
+  opts?: { fromNotebook?: boolean; fromWarmUp?: boolean },
+): SaveData {
+  if (opts?.fromWarmUp) return d;
+  let counted = saves.recordAnswer(d, day, skill, firstTry);
+  if (help) counted = saves.recordHelp(counted, day, skill, help);
+  if (help?.gap) counted = saves.recordGap(counted, help.gap);
+  return correct || opts?.fromNotebook ? counted : { ...counted, notebook: notebook.addMiss(counted.notebook, { skill, stop, lesson }, day) };
 }
 
 export function useStore(): Store {

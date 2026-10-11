@@ -678,6 +678,7 @@ const mirrorPool: LessonDef = {
   requires: [],
   ideas: MIRROR_IDEAS,
   drill: [checkBoard(), finishBoard()],
+  terms: [{ term: 'reflection', means: 'Fold a picture along a line, and the new half is a reflection. Each dot has a partner across the line, in the same row, at the same step.' }],
   practice: (rng) => ids(mirrorPack(rng), `${L1}-p`),
   practiceAt: (rng, level) => ids(mirrorPack(rng, level >= 2 ? 2 : 1), `${L1}-p`),
   pass: { firstTry: 3, include: [{ tag: 'reflection-vs-rotation', label: 'a turn that looks like a reflection' }] },
@@ -713,6 +714,7 @@ const analogyBridge: LessonDef = {
   requires: [],
   ideas: BRIDGE_IDEAS,
   drill: [cardBoard(), partBoard()],
+  terms: [{ term: 'analogy', means: 'An analogy says A is to B as C is to D. The link that joins the first pair must join the new pair too.' }],
   practice: (rng) => ids(bridgePack(rng), `${L3}-p`),
   practiceAt: (rng, level) => ids(bridgePack(rng, level <= 1 ? 1 : level === 2 ? 2 : 3), `${L3}-p`),
   pass: { firstTry: 3, include: [{ tag: 'appearance-match', label: 'a look-alike that does not keep the link' }] },
@@ -742,8 +744,16 @@ const BY_SKILL: Record<string, (rng: Rng) => Item> = {
   's16.link-transfer': (rng) => linkTransferItem(rng),
 };
 
-/** The Ring Check: 9 fresh items, three per place; the trap items are conflict items. */
+/** A place's Explain item as the check's closing why item: its choices are reasons, one right (tag `why`). */
+const asWhy = (it: Item): Item => ({ ...it, tags: [...(it.tags ?? []), 'why'] });
+
+/**
+ * The Ring Check: 9 fresh items, three per place (the trap items are conflict items), then the closing why item (docs/CURRICULUM-PLAN.md): Mirror Pool's or
+ * Analogy Bridge's Explain item, whose choices are reasons (why a fold is a reflection or a turn, or why an answer keeps
+ * the link). Matrix Gate's Explain item asks which rule a tile breaks, so its choices are rules, not reasons.
+ */
 function check(rng: Rng): Item[] {
+  const why = rng.pick(['fold', 'link'] as const);
   return ids(
     distinctSet([
       () => matchHalfItem(rng),
@@ -755,6 +765,7 @@ function check(rng: Rng): Item[] {
       () => cardLinkItem(rng),
       () => oppositeItem(rng),
       () => (rng.chance(0.5) ? wordLinkItem(rng) : linkTransferItem(rng)),
+      () => asWhy(why === 'fold' ? foldWhyItem(rng) : linkWhyItem(rng)),
     ]),
     's16-c',
   );
@@ -801,7 +812,7 @@ export const stop16: StopDef = {
   check,
   practice: arcade,
   fresh,
-  requires: [],
+  requires: ['s14'],
   lessonOrder: 'free',
   observatory: { ring: 3, track: 3, plain: 'Spatial rules', diagnostic },
   skillNames: {

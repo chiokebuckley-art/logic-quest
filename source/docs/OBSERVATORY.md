@@ -72,7 +72,8 @@ lessons are its three levels: L2 proved vs tentative vs false, with circle regio
 separating tests and a sampling item; L4 why a stated construction guarantees its pattern, the reason chain.)
 
 Unlocks (skills, never stop numbers):
-- s14–s17 all have `requires: []` at the stop level: the Observatory is reachable from the start and never blocks
+- Since v0.11.0 the rings open after the stops they build on: s14 needs s1; s15 and s16 need s14; s17 needs s5, s7 and
+  s15; and Proof (s11) needs s17. Before that, s14–s17 had `requires: []`: the Observatory was reachable from the start and never blocked
   the main path. The Journey gets a third chip, "Observatory", listing these four stops (and a small star map).
 - Places open on skills: `LessonDef.requires` lists lesson ids anywhere in the game (e.g. `['s14.l1']`,
   `['s2.l5']`), plus an optional 3-item `primer` the learner can take instead. A place opens when every required

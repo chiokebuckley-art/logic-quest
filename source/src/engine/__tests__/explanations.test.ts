@@ -524,10 +524,10 @@ describe('fits is not explains: each idea is the whole story (s7-l2-fits-vs-expl
   const sprinkler = WORKED.ideas.find((i) => i.id === 'sprinkler')!;
   const street = WORKED.clues.find((c) => c.short === 'Street wet')!;
 
-  it('card 2 states the whole-story rule and the Stop 6 bridge; the terms say it too', () => {
+  it('card 2 states the whole-story rule and the If… then bridge (shown as Stop 7); the terms say it too', () => {
     const card = lesson.ideas.find((c) => c.title === 'Fit every clue')!.body.join(' ');
     expect(card).toContain('Picture the idea as the whole story of what happened. It fits a clue if the clue could still be true in that story. It misses a clue if the story would make the clue different.');
-    expect(card).toContain('In Stop 6, you asked: could it happen another way? Here, each idea is the whole story.');
+    expect(card).toContain('In Stop 7, you asked: could it happen another way? Here, each idea is the whole story.');
     expect(card).toContain('If it was all that happened, the street would be dry.');
     expect(card).not.toContain('makes sense if the idea is true');
     const it = choose(made('best', 'everyday', 1));

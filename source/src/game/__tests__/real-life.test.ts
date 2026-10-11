@@ -70,9 +70,9 @@ describe('real life on the pages', () => {
     expect(page).toContain(stopWorld('s1')!);
     expect(page).toContain('Why each lesson matters');
     expect(page).toContain(w1.why);
-    // A coming stop shows its line too.
-    const soon = STOPS.find((s) => !s.ready)!;
-    expect(text(h(StoreProvider, { kv: store(), children: h(StopScreen, { route: { name: 'stop', stopId: soon.id } }) }))).toContain(stopWorld(soon.id)!);
+    // A coming stop shows its line too (every stop is built today, so this runs only if one is marked not ready).
+    const soon = STOPS.find((s) => !s.ready);
+    if (soon) expect(text(h(StoreProvider, { kv: store(), children: h(StopScreen, { route: { name: 'stop', stopId: soon.id } }) }))).toContain(stopWorld(soon.id)!);
   });
 
   it('the Library’s Real life view lists every stop, and All points to it', () => {

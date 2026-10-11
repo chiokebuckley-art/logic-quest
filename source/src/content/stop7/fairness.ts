@@ -62,19 +62,24 @@ export const lesson: LessonModule['lesson'] = {
   pass: { firstTry: 3, include: [CAN_FAIL] },
 };
 
+/** The tag of the stop check's closing item: its choices are reasons, one right (docs/CURRICULUM-PLAN.md). */
+export const WHY_TAG = 'why';
+
 /**
- * Two items for the stop check, in two different stories: a choice or reason item, then the wish question or the
- * other kind with a temptation line. The second one is always a conflict item.
+ * Two items for the stop check, in two different stories: a choice item or the wish question, then always “Which reason
+ * should decide it?” (fair-reason, tag `why`), whose choices are reasons. The stop check puts the reason item last, as its
+ * closing why item. At least one of the two is a conflict item: the wish question always is, and a choice with no
+ * temptation line is followed by a reason item with one.
  */
 export function checkItems(rng: Rng): Made[] {
   const [k1, k2] = rng.shuffle(FAIR_KINDS);
-  const first = rng.chance(0.5) ? MAKERS.choice : MAKERS.reason;
-  const other = first === MAKERS.choice ? MAKERS.reason : MAKERS.choice;
-  const second = rng.chance(0.5) ? MAKERS.pressure : other;
-  return [
-    first(rng, { kind: k1, skin: rng.pick(FAIR_SKINS), side: rng.chance(0.3) }),
-    second(rng, { kind: k2, skin: rng.pick(FAIR_SKINS), side: second !== MAKERS.pressure }),
-  ];
+  const pressure = rng.chance(0.5);
+  const firstSide = !pressure && rng.chance(0.3);
+  const first = pressure
+    ? MAKERS.pressure(rng, { kind: k1, skin: rng.pick(FAIR_SKINS), side: false })
+    : MAKERS.choice(rng, { kind: k1, skin: rng.pick(FAIR_SKINS), side: firstSide });
+  const reason = MAKERS.reason(rng, { kind: k2, skin: rng.pick(FAIR_SKINS), side: !first.item.conflict || rng.chance(0.4) });
+  return [first, { ...reason, item: { ...reason.item, tags: [...(reason.item.tags ?? []), WHY_TAG] } }];
 }
 
 /** One item of any kind, story and skin. */

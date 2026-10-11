@@ -3,7 +3,7 @@ import { BridgeProgressCard } from '../pattern/PatternBridge';
 import { useState } from 'react';
 import { viewAll } from '../../engine/journey/mastery';
 import { statsCsv } from '../../engine/save/save';
-import { STOPS, stopById } from '../../content/stops';
+import { STOPS, stopById, stopNumber } from '../../content/stops';
 import {
   DAILY_GOAL_MINUTES, firstTryWinsThisWeek, fileSlug, helpTotals, minutesByDay, minutesOn, needsPractice, pathDot, percent,
   shortDay, skillLabel, skillRows, stopCounts, strongSkills, totalMinutes, totals, type DayMinutes, type PathDot, type SkillRow,
@@ -79,7 +79,7 @@ function MyProgress() {
   const here = dots.find((d) => d.dot === 'current');
   const minutes = minutesOn(save.active, today);
   const open = Object.keys(save.notebook ?? {}).length;
-  const summary = `${counts.mastered ? `${counts.mastered} mastered, ` : ''}${counts.lockedIn} ${counts.lockedIn === 1 ? 'stop' : 'stops'} locked in, ${counts.passed} passed${here ? `, you are on Stop ${here.stop.n}` : ''}, out of ${main.length}`;
+  const summary = `${counts.mastered ? `${counts.mastered} mastered, ` : ''}${counts.lockedIn} ${counts.lockedIn === 1 ? 'stop' : 'stops'} locked in, ${counts.passed} passed${here ? `, you are on Stop ${stopNumber(here.stop)}` : ''}, out of ${main.length}`;
 
   return (
     <div className="stack" style={{ gap: 14 }}>
@@ -109,7 +109,7 @@ function MyProgress() {
       <section className="panel soft" aria-labelledby="path-title" style={{ gap: 10 }}>
         <h3 id="path-title" className="section-title">YOUR JOURNEY</h3>
         <div className="path-strip" role="img" aria-label={summary}>
-          {dots.map(({ stop, dot }) => <div key={stop.id} className={`path-dot ${dot}`} title={`Stop ${stop.n}: ${DOT_WORD[dot]}`} />)}
+          {dots.map(({ stop, dot }) => <div key={stop.id} className={`path-dot ${dot}`} title={`Stop ${stopNumber(stop)}: ${DOT_WORD[dot]}`} />)}
         </div>
         <div className="legend" aria-hidden="true">
           <span><i style={{ background: 'var(--brass)' }} />Locked in</span>
@@ -120,7 +120,7 @@ function MyProgress() {
         </div>
         {here ? (
           <p className="soft-text" style={{ fontSize: 14 }}>
-            You are here: <strong style={{ color: 'var(--text)' }}>Stop {here.stop.n} · {here.stop.title}</strong>{/[.?!]$/.test(here.stop.title) ? '' : '.'}
+            You are here: <strong style={{ color: 'var(--text)' }}>Stop {stopNumber(here.stop)} · {here.stop.title}</strong>{/[.?!]$/.test(here.stop.title) ? '' : '.'}
           </p>
         ) : (
           <p className="soft-text" style={{ fontSize: 14 }}>You have done every open stop. New stops are coming soon.</p>

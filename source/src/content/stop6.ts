@@ -7,6 +7,9 @@
  *  l3 The four moves           IF happened, THEN didn’t happen (these follow); THEN happened, IF didn’t (traps)
  *  l4 Flip and NOT             flip and NOT means the same; flip only and NOT only do not (truth table)
  *  l5 Rule checker             which cards must you turn over? The IF card and the NOT-THEN card
+ *  l6 Only if, and unless      “P only if Q” is “If P, then Q”; “P unless Q” is “If not Q, then P” (trap: “only if” turned around)
+ *  l7 Both ways                “if and only if” breaks in two boxes; the IF part is enough, the THEN part is needed
+ *                              (trap: “needed” read as “enough”); lesson 5's cards again, in those words
  *
  * Every answer, explanation and tip comes from ../engine/puzzles/conditionals.ts, which works each one out
  * from the four-row truth table. Skins: everyday, fantasy and abstract (letters and numbers, P and Q).
@@ -31,10 +34,71 @@
  *    “Broken, or can’t happen?”, then the four boxes marked can happen or can't. Every lesson 2 and 3 rule card and
  *    case says “Always true here: …”; lessons 4 and 5 say their own frame. The first lesson 2 and 3 question is
  *    marked on its own cases first.
+ *  - only-if-vs-if (lesson 6): the part after “only if” is needed; after plain “if” it is enough. Contrast card “Only if
+ *    is not plain if” (Kai with a card and no book), then the only-if rule against its if–then sentence and plain “if”.
+ *  - needed-vs-enough (lesson 7): Dee ate all the veggies and got no dessert, under “needed” and under “enough”, then
+ *    the two sentences against the rule.
+ *
+ * The check ends with a closing why item (tag `why`, reasons as choices): why “only if” points the way it does (lesson
+ * 6) or why the THEN card need not be turned (lesson 7). The warm-up on the stop page (`bridge`) is a Stop 5 “suppose it
+ * and test it” question.
  */
 import {
   BROKEN_VS_CANT,
   CARD_SKINS,
+  FORMS,
+  FORM_CONDS,
+  FORM_STORIES,
+  IFF_STORIES,
+  MISREAD,
+  NEEDED_VS_ENOUGH,
+  NEED_CLOSING,
+  NEED_IDS,
+  NEED_SKINS,
+  NEED_TRAP,
+  NEED_WORDS,
+  ONLY_IF_CLOSING,
+  ONLY_IF_STORIES,
+  ONLY_IF_TRAP,
+  ONLY_IF_VS_IF,
+  RULE,
+  UNLESS_STORIES,
+  WHY_CARD_SKINS,
+  WHY_TAG,
+  cap,
+  condColumn,
+  condHolds,
+  formBoxDrill,
+  formBroken,
+  formDidItem,
+  formHolds,
+  formNote,
+  formPickItem,
+  formScene,
+  formText,
+  formWhoItem,
+  formWhy,
+  iffConfused,
+  iffWhoItem,
+  misreadMatters,
+  needColumn,
+  needCond,
+  needConfused,
+  needContrast,
+  needPickItem,
+  needYesNoItem,
+  onlyIfConfused,
+  onlyIfContrast,
+  plainIfText,
+  rowId,
+  sameMeaning,
+  sentenceGridDrill,
+  storyGroup,
+  storyIf,
+  storyOf,
+  unlessConfused,
+  whyCardItem,
+  whyOnlyIfItem,
   CONTRA,
   CONVERSE,
   HAT_BOXES,
@@ -88,12 +152,18 @@ import {
   turnItem,
   whoBrokeItem,
   type CondMade,
+  type FormMade,
+  type Group,
   type Lit,
+  type NeedId,
+  type NeedSkin,
   type Move,
   type Rewrite,
   type Row,
   type SkinId,
+  type StoryId,
 } from '../engine/puzzles/conditionals';
+import { SKIN_IDS as KNIGHT_SKINS, supposeItem } from '../engine/puzzles/knights';
 import type { DrillStep, IdeaCard, Item, LessonDef, LessonPass, Rng, Scene, StopDef } from '../engine/types';
 
 const STOP = 6;
@@ -102,12 +172,14 @@ const L2 = 's6.l2';
 const L3 = 's6.l3';
 const L4 = 's6.l4';
 const L5 = 's6.l5';
+const L6 = 's6.l6';
+const L7 = 's6.l7';
 
 /**
  * A made item, placed in its lesson. Its tags are the generator's skill tag plus any the generator set ('pq' on a P and
  * Q question), so a lesson's pass rule can ask for them (LessonPass.include).
  */
-const finish = (m: CondMade, id: string, lesson: string): Item =>
+const finish = (m: Pick<CondMade, 'tag' | 'item'>, id: string, lesson: string): Item =>
   ({ id, stop: STOP, lesson, skill: `s${STOP}.${m.tag}`, ...m.item, tags: [...new Set([m.tag, ...(m.item.tags ?? [])])] }) as Item;
 
 /** Lessons 2 to 4 pass only with a P and Q question right on the first try: the letters were taught in lesson 1. */
@@ -120,10 +192,10 @@ const withWork = (it: Item, work?: DrillStep): Item => (work ? { ...it, workFirs
  * Makes the items of one set. No two items in a set share a prompt and scene: a repeat is thrown away
  * and made again from the same rng, so the same seed still gives the same set.
  */
-function distinctItems(): (make: () => CondMade) => CondMade {
+function distinctItems(): <M extends Pick<CondMade, 'item'>>(make: () => M) => M {
   const seen = new Set<string>();
-  const key = (m: CondMade) => JSON.stringify([m.item.prompt, m.item.scene ?? null]);
-  return (make) => {
+  const key = (m: Pick<CondMade, 'item'>) => JSON.stringify([m.item.prompt, m.item.scene ?? null]);
+  return <M extends Pick<CondMade, 'item'>>(make: () => M): M => {
     let m = make();
     for (let tries = 0; tries < 50 && seen.has(key(m)); tries++) m = make();
     seen.add(key(m));
@@ -473,6 +545,403 @@ export const L5_LETTERS: DrillStep = cardDrill(
   ['notQ', 'Q'],
 );
 
+// ---------- lessons 6 and 7: only if, unless, if and only if, needed and enough ----------
+//
+// Every board below is built by an engine helper (conditionals.ts, "lessons 6 and 7"), so every mark comes from the
+// rule said as if–then rules. Each board is the board of a key-idea card (the same rule card), right after it.
+
+/** Lesson 6's stories: the library rule with “only if”, and recess with “unless”. Lesson 7: dessert with “if and only if”. */
+const ONLY = storyOf('library', 'only-if');
+const UNLESS = storyOf('recess', 'unless');
+const IFF = storyOf('dessert', 'iff');
+const [TT, TF, FT, FF] = [rowAt(true, true), rowAt(true, false), rowAt(false, true), rowAt(false, false)];
+const bare = (s: string) => s.replace(/\.$/, '');
+const kaseOf = (w: { kase: Record<string, string> }, r: Row) => w.kase[`${r.p ? 'T' : 'F'}${r.q ? 'T' : 'F'}`];
+
+/** Lesson 6, See: the library rule card with “only if”, and the recess rule card with “unless”. */
+export const L6_ONLY_RULE = formScene(ONLY, 'only-if');
+export const L6_UNLESS_RULE = formScene(UNLESS, 'unless');
+/** Lesson 7, See: the dessert rule with “if and only if”, and the plain dessert rule to compare needed and enough. */
+export const L7_IFF_RULE = formScene(IFF, 'iff');
+export const L7_NEED_RULE = ruleScene('dessert', 'compare');
+export const L7_CARDS_RULE = ruleScene('letters', 'check');
+
+const UNLESS_CLOSING = 'Those two ideas are apart now. “Unless” makes one promise only: when the part after it does not happen, the part before it does.';
+
+/** Lesson 6, Do: the four boxes of the only-if rule, right after the card that marks Kai's box in words. */
+export const L6_ONLY_BOXES: DrillStep = {
+  ...formBoxDrill(ONLY, 'only-if', {
+    id: 's6.l6-do-only',
+    title: 'Mark the four boxes',
+    body: ['These are the four boxes of the only-if rule.', 'Mark each box. Put a ✓ if a kid in that box keeps the rule. Put a ✗ if the kid breaks it.'],
+  }),
+  afterCard: 0,
+  confused: onlyIfConfused(),
+  words: { closing: ONLY_IF_CLOSING },
+};
+
+/** The plain-if column of lesson 6's grid, marked as if it said “only if”: the misreading the contrast card names. */
+const plainCopied = ROWS.filter((r) => condHolds(MISREAD['only-if'], r) !== formHolds('only-if', r));
+
+/**
+ * Lesson 6, right after the contrast card: the four cases with the only-if rule marked. The learner marks the rule said
+ * with if–then, and the same words with plain “if”. Only the first breaks in the same box.
+ */
+export const L6_ONLY_VS_IF: DrillStep = {
+  ...sentenceGridDrill(ONLY.kase, L6_ONLY_RULE, {
+    id: 's6.l6-do-only-vs-if',
+    title: 'Only if, or plain if?',
+    body: [
+      'The only-if rule is marked. Now mark the other two sentences.',
+      `If, then: “${storyIf(ONLY, FORM_CONDS['only-if'][0])}”`,
+      `Plain if: “${plainIfText(ONLY)}”`,
+      'Put a ✓ if a case keeps the sentence. Put a ✗ if it breaks it.',
+    ],
+  }, [
+    { id: 'only', label: 'Only if', name: 'the only-if rule', holds: (r) => formHolds('only-if', r), given: true },
+    condColumn(ONLY, 'if-then', 'If, then', 'the if–then sentence', FORM_CONDS['only-if'][0]),
+    condColumn(ONLY, 'plain', 'Plain if', 'the plain-if rule', MISREAD['only-if']),
+  ]),
+  afterCard: 2,
+  distinction: ONLY_IF_VS_IF.id,
+  misconceptions: [
+    {
+      id: 'plain-as-only-if',
+      when: 'picks',
+      picks: Object.fromEntries(plainCopied.map((r) => [`${r.p ? 'T' : 'F'}${r.q ? 'T' : 'F'}-plain`, formHolds('only-if', r) ? 'yes' : 'no'])),
+      text: `You may be treating “only if” and plain “if” as the same thing. They are two different things: with “only if,” the card is needed. With plain “if,” the card is enough. ${cap(kaseOf(ONLY, FT))} keeps one and breaks the other.`,
+    },
+  ],
+  confused: onlyIfConfused(),
+  words: { closing: ONLY_IF_CLOSING },
+};
+
+/** Lesson 6, Do: the four boxes of the unless rule, right after the card that marks a dry day in words. */
+export const L6_UNLESS_BOXES: DrillStep = {
+  ...formBoxDrill(UNLESS, 'unless', {
+    id: 's6.l6-do-unless',
+    title: 'Mark the four boxes again',
+    body: ['These are the four boxes of the unless rule.', 'Mark each box. Put a ✓ if a day in that box keeps the rule. Put a ✗ if the day breaks it.'],
+  }),
+  afterCard: 3,
+  confused: unlessConfused(),
+  words: { closing: UNLESS_CLOSING },
+};
+
+/** Lesson 6, Do: the unless rule marked; the learner marks it said with if, and its everyday reading. */
+export const L6_UNLESS_IF: DrillStep = {
+  ...sentenceGridDrill(UNLESS.kase, L6_UNLESS_RULE, {
+    id: 's6.l6-do-unless-if',
+    title: 'Say “unless” with if',
+    body: [
+      'The unless rule is marked. Now mark two if–then sentences.',
+      `Sentence A: “${storyIf(UNLESS, FORM_CONDS.unless[0])}”`,
+      `Sentence B: “${storyIf(UNLESS, MISREAD.unless)}”`,
+      'Put a ✓ if a case keeps the sentence. Put a ✗ if it breaks it.',
+    ],
+  }, [
+    { id: 'unless', label: 'Unless', name: 'the unless rule', holds: (r) => formHolds('unless', r), given: true },
+    condColumn(UNLESS, 'a', 'Sentence A', 'sentence A', FORM_CONDS.unless[0]),
+    condColumn(UNLESS, 'b', 'Sentence B', 'sentence B', MISREAD.unless),
+  ]),
+  afterCard: 4,
+  confused: unlessConfused(),
+  words: { closing: UNLESS_CLOSING },
+};
+
+/** Lesson 7, Do: the four boxes of the rule with “if and only if”, right after the card that marks Dee's box. */
+export const L7_IFF_BOXES: DrillStep = {
+  ...formBoxDrill(IFF, 'iff', {
+    id: 's6.l7-do-iff',
+    title: 'Mark the four boxes',
+    body: ['These are the four boxes of the rule with “if and only if.”', 'Mark each box. Put a ✓ if a kid in that box keeps the rule. Put a ✗ if the kid breaks it.'],
+  }),
+  afterCard: 0,
+  confused: iffConfused(),
+  words: { closing: 'Those two ideas are apart now. “If and only if” works each way, so a part alone breaks it.' },
+};
+
+/**
+ * Lesson 7, right after the contrast card: the four cases with the plain dessert rule marked. The learner marks the
+ * needed sentence and the enough sentence. The needed one breaks in the same box as the rule; the enough one does not.
+ */
+export const L7_NEED: DrillStep = {
+  ...sentenceGridDrill(SKINS.dessert.kase, L7_NEED_RULE, {
+    id: 's6.l7-do-need',
+    title: 'Needed, or enough?',
+    body: [
+      'The rule is marked. Now mark the two sentences.',
+      `Needed: “${NEED_WORDS.dessert['needed-Q']}”`,
+      `Enough: “${NEED_WORDS.dessert['enough-Q']}”`,
+      'Put a ✓ if a case keeps the sentence. Put a ✗ if it breaks it.',
+    ],
+  }, [
+    { id: 'rule', label: 'The rule', name: 'the rule', holds: (r) => condHolds(RULE, r), given: true },
+    needColumn('needed-Q', 'Needed', 'the needed sentence'),
+    needColumn('enough-Q', 'Enough', 'the enough sentence'),
+  ]),
+  afterCard: 2,
+  distinction: NEEDED_VS_ENOUGH.id,
+  misconceptions: [
+    {
+      id: 'needed-as-enough',
+      when: 'picks',
+      picks: { [`FT-enough-Q`]: condHolds(needCond('enough-Q'), FT) ? 'no' : 'yes' },
+      text: `You may be treating “needed” and “enough” as the same thing. They are two different things: the veggies are needed for dessert, but they do not make dessert happen. ${cap(kaseOf(SKINS.dessert, FT))} breaks the enough sentence.`,
+    },
+  ],
+  confused: needConfused(),
+  words: { closing: NEED_CLOSING },
+};
+
+/** Lesson 7, Do: lesson 5's letter cards again. E and 7 are shown checked; the learner checks 4 and K. */
+const L7_CARDS_BOARD: DrillStep = cardDrill(
+  'letters',
+  {
+    id: 's6.l7-do-cards',
+    title: 'The cards again',
+    body: [
+      `The ${face('letters', 'P')} card and the ${face('letters', 'notQ')} card are checked: turn them over.`,
+      `Mark the ${face('letters', 'Q')} card and the ${face('letters', 'notP')} card the same way. Is the rule kept or broken with each back?`,
+    ],
+  },
+  ['P', 'notQ'],
+  ['Q', 'notP'],
+);
+/** The THEN card's “Turn it over?” mark: turning it over reads “needed” as “enough” (lesson 7's trap). */
+const L7_THEN_TURN = L7_CARDS_BOARD.rows.flatMap((r) => r.marks).find((m) => m.id === 'q-turn')!;
+export const L7_CARDS: DrillStep = {
+  ...L7_CARDS_BOARD,
+  afterCard: 3,
+  misconceptions: [
+    {
+      id: 'needed-as-enough',
+      when: 'picks',
+      picks: { [L7_THEN_TURN.id]: L7_THEN_TURN.options.find((o) => o.id !== L7_THEN_TURN.answer)!.id },
+      text: `You may be treating “needed” and “enough” as the same thing. They are two different things: an even number is needed for a vowel, but it is not enough for one. The ${face('letters', 'Q')} card can have any letter on its back.`,
+    },
+  ],
+};
+
+// ---------- lessons 6 and 7: the quiz makers ----------
+
+/** Lesson 6's trap (“only if” turned around) and lesson 7's (“needed” read as “enough”): every pack holds one. */
+const L6_PASS: LessonPass = { firstTry: 3, include: [{ tag: ONLY_IF_TRAP, label: 'a question where “only if” is easy to turn around' }] };
+const L7_PASS: LessonPass = { firstTry: 3, include: [{ tag: NEED_TRAP, label: 'a question where “needed” is easy to read as “enough”' }] };
+
+/** A story from `from` in group `g` when it has one, never one in `not`. */
+function storyIn<T extends StoryId>(rng: Rng, from: readonly T[], g?: Group, not: readonly StoryId[] = []): T {
+  const left = from.filter((s) => !not.includes(s));
+  const inGroup = g ? left.filter((s) => storyGroup(s) === g) : [];
+  return rng.pick(inGroup.length ? inGroup : left.length ? left : from);
+}
+
+/** A lesson 6 question about “only if” or “unless” on the four boxes: which case breaks it, or did this case. */
+const formBoxItem = (rng: Rng, form: 'only-if' | 'unless', story: StoryId): FormMade =>
+  rng.chance(0.5) ? formWhoItem(rng, { form, story }) : formDidItem(rng, { form, story, row: rng.pick(form === 'only-if' ? [FT, FT, TF, TT, FF] : [TT, TT, FF, FT, TF]) });
+
+/** A lesson 7 question about “if and only if”: pick every case that breaks it, or did this case. */
+const iffItem = (rng: Rng, story: StoryId, who: boolean): FormMade =>
+  who ? iffWhoItem(rng, { story }) : formDidItem(rng, { form: 'iff', story, row: rng.pick([FT, FT, TF, TT, FF]) });
+
+/**
+ * Lesson 6's quiz: an “only if” question on the four boxes, “say it with if” for “only if” (the trap), the same two
+ * for “unless”, in other stories, then why “only if” points the way it does. The first two are in different groups of
+ * story, so every pack has two kinds.
+ */
+function l6Practice(rng: Rng): FormMade[] {
+  const [g1, g2, g3] = rng.shuffle<Group>(['everyday', 'fantasy', 'abstract']);
+  const a = storyIn(rng, ONLY_IF_STORIES, g1);
+  const b = storyIn(rng, ONLY_IF_STORIES, g2, [a]);
+  const c = storyIn(rng, UNLESS_STORIES, g3);
+  const d = storyIn(rng, UNLESS_STORIES, undefined, [c]);
+  const e = storyIn(rng, ONLY_IF_STORIES, undefined, [a, b]);
+  const firstFour = rng.shuffle([
+    () => formBoxItem(rng, 'only-if', a),
+    () => formPickItem(rng, { form: 'only-if', story: b }),
+    () => formBoxItem(rng, 'unless', c),
+    () => formPickItem(rng, { form: 'unless', story: d }),
+  ]);
+  return [...firstFour.map((make) => make()), whyOnlyIfItem(rng, { story: e as SkinId })];
+}
+
+/**
+ * Lesson 7's quiz: “if and only if” on the four boxes (did this case, and pick every case), “needed” or “enough” (the
+ * pick holds the trap), and why the THEN card need not be turned. Different groups of story in the first two.
+ */
+function l7Practice(rng: Rng): FormMade[] {
+  const [g1, g2, g3, g4] = rng.shuffle<Group>(['everyday', 'fantasy', 'abstract', 'everyday']);
+  const a = storyIn(rng, IFF_STORIES, g1);
+  const b = storyIn(rng, IFF_STORIES, g2, [a]);
+  const c = storyIn(rng, NEED_SKINS, g3);
+  const d = storyIn(rng, NEED_SKINS, g4, [c]);
+  const e = storyIn(rng, WHY_CARD_SKINS, undefined, [c, d]);
+  const firstFour = rng.shuffle([
+    () => iffItem(rng, a, false),
+    () => iffItem(rng, b, true),
+    () => needPickItem(rng, { skin: c }),
+    () => needYesNoItem(rng, { skin: d }),
+  ]);
+  return [...firstFour.map((make) => make()), whyCardItem(rng, { skin: e })];
+}
+
+/** Any lesson 6 question (the check's lesson 6 slot, the Arcade), in any story. */
+function anyL6(rng: Rng): FormMade {
+  const form = rng.pick(['only-if', 'unless'] as const);
+  const story = rng.pick(FORM_STORIES[form]);
+  return rng.chance(0.4) ? formPickItem(rng, { form, story }) : formBoxItem(rng, form, story);
+}
+
+/** Any lesson 7 question but the why item. */
+function anyL7(rng: Rng): FormMade {
+  const k = rng.pick(['did', 'who', 'pick', 'yesno'] as const);
+  if (k === 'did' || k === 'who') return iffItem(rng, rng.pick(IFF_STORIES), k === 'who');
+  const skin = rng.pick(NEED_SKINS);
+  return k === 'pick' ? needPickItem(rng, { skin }) : needYesNoItem(rng, { skin });
+}
+
+/** The closing why item: why “only if” points the way it does (lesson 6), or why the THEN card is skipped (lesson 7). */
+const whyItem = (rng: Rng, lesson: typeof L6 | typeof L7): FormMade =>
+  lesson === L6 ? whyOnlyIfItem(rng, { story: rng.pick(ONLY_IF_STORIES) }) : whyCardItem(rng, { skin: rng.pick(WHY_CARD_SKINS) });
+
+const L6_LESSON: LessonDef = {
+  id: L6,
+  title: 'Only if, and unless',
+  ideas: [
+    {
+      // See: Kai's box marked in words on the rule card. The four boxes open right after it.
+      title: 'Only if',
+      scene: L6_ONLY_RULE,
+      body: [
+        `Here is a rule with “only if”: “${formText(ONLY, 'only-if')}”`,
+        'The part after “only if” is needed. No library card, no book home.',
+        `${ONLY.says('Kai', FT, { vowel: 'E', consonant: 'K', even: '4', odd: '7' })}. ${formNote('only-if', FT)}`,
+        'A card is needed to take a book. It does not make you take one.',
+      ],
+    },
+    {
+      title: 'Say it with if',
+      body: [
+        'To read “only if,” say the rule with if. The part before “only if” becomes the IF part. The part after it becomes the THEN part.',
+        `So the rule means “${storyIf(ONLY, FORM_CONDS['only-if'][0])}”`,
+        `The same one case breaks the rule and that sentence: ${kaseOf(ONLY, formBroken('only-if')[0])}.`,
+      ],
+    },
+    {
+      // The distinction, taught apart before any quiz: the same case under “only if” and under plain “if”.
+      title: '“Only if” is not plain “if”',
+      distinction: ONLY_IF_VS_IF.id,
+      body: [
+        '“Only if” and plain “if” look alike. But they put the need on different parts.',
+        'With “only if,” the library card is needed.',
+        `Plain “if” is different. In “${bare(plainIfText(ONLY))},” the card would be enough.`,
+        'Below is the same case under the two rules.',
+      ],
+      scene: onlyIfContrast(),
+    },
+    {
+      // See: a dry day with recess inside, marked in words on the rule card. Its four boxes open right after it.
+      title: 'Unless',
+      scene: L6_UNLESS_RULE,
+      body: [
+        `Here is a rule with “unless”: “${formText(UNLESS, 'unless')}”`,
+        'The part after “unless” names the one thing that can stop the part before it.',
+        `${UNLESS.says('Monday', FF, { vowel: 'E', consonant: 'K', even: '4', odd: '7' })}. ${formWhy(UNLESS, 'unless', 'Monday', FF)}`,
+      ],
+    },
+    {
+      title: 'Rain makes no promise',
+      scene: L6_UNLESS_RULE,
+      body: [
+        `Say it with if: “${storyIf(UNLESS, FORM_CONDS.unless[0])}” The part after “unless” gets a NOT and becomes the IF part.`,
+        `${UNLESS.says('Tuesday', TT, { vowel: 'E', consonant: 'K', even: '4', odd: '7' })}. ${formNote('unless', TT)}`,
+        'In everyday talk, people may mean more. But the words make one promise only.',
+        `Only ${kaseOf(UNLESS, formBroken('unless')[0])} breaks the rule.`,
+      ],
+    },
+  ],
+  // Do: the only-if boxes after the first card; after the contrast, the only-if rule against its if–then sentence and
+  // plain “if”; the unless boxes after its card; then the unless rule said with if, and its everyday reading.
+  drill: [L6_ONLY_BOXES, L6_ONLY_VS_IF, L6_UNLESS_BOXES, L6_UNLESS_IF],
+  distinctions: [ONLY_IF_VS_IF],
+  terms: [
+    { term: 'only if', means: 'The part after it is needed. So “P only if Q” says the same as “If P, then Q” does.' },
+    { term: 'unless', means: 'It names the one thing that can stop the part before it. So “P unless Q” says the same as “If not Q, then P” does.' },
+  ],
+  practice: (rng) => l6Practice(rng).map((m, i) => finish(m, `s6-l6-${i + 1}`, L6)),
+  pass: L6_PASS,
+};
+
+const L7_LESSON: LessonDef = {
+  id: L7,
+  title: 'Both ways: needed and enough',
+  ideas: [
+    {
+      // See: Dee's box marked in words on the rule card. The four boxes open right after it.
+      title: 'Each way',
+      scene: L7_IFF_RULE,
+      body: [
+        `Here is a rule: “${formText(IFF, 'iff')}”`,
+        '“If and only if” puts two rules together, one each way.',
+        `One: “${storyIf(IFF, FORM_CONDS.iff[0])}” Two: “${storyIf(IFF, FORM_CONDS.iff[1])}”`,
+        `${SKINS.dessert.says('Dee', FT)}. ${formWhy(IFF, 'iff', 'Dee', FT)}`,
+        `So ${formBroken('iff').length === 2 ? 'two boxes break' : 'more boxes break'} this rule, not one.`,
+      ],
+    },
+    {
+      title: 'Enough and needed',
+      scene: L7_NEED_RULE,
+      body: [
+        `Now look at a plain if–then rule: “${ruleText('dessert')}”`,
+        'The IF part is enough for the THEN part. When a kid gets dessert, you know for sure the veggies are eaten.',
+        'The THEN part is needed for the IF part. No kid gets dessert without eating all the veggies.',
+        'Grown-ups say “sufficient” for enough. They say “necessary” for needed.',
+      ],
+    },
+    {
+      // The distinction, taught apart before any quiz: the same case under “needed” and under “enough”.
+      title: 'Needed is not enough',
+      distinction: NEEDED_VS_ENOUGH.id,
+      body: [
+        'Eating all your veggies is needed for dessert. But is it enough?',
+        `Think of Dee. ${SKINS.dessert.says('Dee', FT)}. That keeps the rule.`,
+        'Below is the same case, with each word.',
+      ],
+      scene: needContrast(),
+    },
+    {
+      // Lesson 5's cards, in needed and enough words. The cards board opens right after it.
+      title: 'Back to the cards',
+      scene: L7_CARDS_RULE,
+      body: [
+        `Remember the cards ${face('letters', 'P')}, ${face('letters', 'notP')}, ${face('letters', 'Q')} and ${face('letters', 'notQ')}? The rule is “${ruleText('letters')}”`,
+        `A vowel is enough for an even number. So turn over ${face('letters', 'P')}: its back must be even, or the rule is broken.`,
+        `An even number is needed for a vowel. So turn over ${face('letters', 'notQ')}: with a vowel on its back, the rule is broken.`,
+        `But an even number is not enough for a vowel. The ${face('letters', 'Q')} can have any letter on its back. Skip it.`,
+      ],
+    },
+    {
+      title: 'The trap',
+      body: [
+        'Every if–then rule can be said with needed and enough.',
+        '“If P, then Q” means P is enough for Q. It also means Q is needed for P.',
+        'Reading “needed” as “enough” turns the rule around. That is the trap.',
+      ],
+    },
+  ],
+  // Do: the four boxes of the rule with “if and only if” after the first card; after the contrast, the needed and enough
+  // sentences against the rule; then lesson 5's letter cards again.
+  drill: [L7_IFF_BOXES, L7_NEED, L7_CARDS],
+  distinctions: [NEEDED_VS_ENOUGH],
+  terms: [
+    { term: 'if and only if', means: 'Two rules at once, one each way. It says “If P, then Q” and “If Q, then P” at the same time.' },
+    { term: 'sufficient', also: 'enough', means: 'When this part happens, the other part happens for sure. In “If P, then Q,” P is sufficient for Q.' },
+    { term: 'necessary', also: 'needed', means: 'The other part can’t happen without this part. In “If P, then Q,” Q is necessary for P.' },
+  ],
+  practice: (rng) => l7Practice(rng).map((m, i) => finish(m, `s6-l7-${i + 1}`, L7)),
+  pass: L7_PASS,
+};
+
 // ---------- lessons ----------
 
 const lessons: LessonDef[] = [
@@ -597,12 +1066,22 @@ const lessons: LessonDef[] = [
           '“Can’t tell” is a real answer. Use it when the facts do not decide.',
         ],
       },
+      {
+        // The grown-up word for a rule turned around (the glossary's “converse”).
+        title: 'A grown-up word',
+        body: [
+          'Grown-ups have a name for a rule turned around. They call it the converse. Lesson 4 calls it Flip only.',
+          `The converse of “${bare(ruleText('pets'))}” is “${condText('pets', CONVERSE)}”`,
+          'A rule can be true while its converse is false.',
+        ],
+      },
     ],
     // Do: the pet rule's four boxes, all marked by hand (the converse trap comes only after them), right after the
     // first card; the same boxes marked can happen or can't happen, right after the contrast card; then the two cases
     // that fit "Rex has four legs" (backward), then the two that fit "Max is a dog" (forward).
     drill: [L2_BOXES, L2_CAN, L2_BACK, L2_FWD],
     distinctions: [BROKEN_VS_CANT, { ...LETTER_VS_TRUTH, taughtIn: L1 }],
+    terms: [{ term: 'converse', also: 'Flip only', means: 'A rule turned around: its IF part and its THEN part swap places. A rule can be true while its converse is false.' }],
     // Quiz: the same two methods in other stories. Each sentence the quiz can ask (the IF part or NOT the IF part,
     // the THEN part or NOT the THEN part) is one the boards mark. The first question is marked on its own cases first.
     // Every pack has one P and Q question, and the pass rule asks for it.
@@ -724,11 +1203,25 @@ const lessons: LessonDef[] = [
           `With letters, “${pqFact('P')}” means the IF part happened. And “not P” is true when ${pqFact('notP')}.`,
         ],
       },
+      {
+        // The grown-up names for the three sentences (the glossary's “inverse” and “contrapositive”).
+        title: 'Grown-up names',
+        body: [
+          'Grown-ups have names for these sentences.',
+          'Flip only is the converse. You met it in Lesson 2, as the rule turned around.',
+          'NOT only is the inverse.',
+          'Flip and NOT is the contrapositive. It always means the same as the rule.',
+        ],
+      },
     ],
     // Do: the example's four cases. Mark the flip and NOT sentence, then flip only and NOT only; then the same test with
     // letters, before any P and Q question.
     drill: [L4_SAME, L4_TRAPS, L4_PQ],
     distinctions: [{ ...LETTER_VS_TRUTH, taughtIn: L1 }],
+    terms: [
+      { term: 'inverse', also: 'NOT only', means: 'A rule with NOT put in its IF part and in its THEN part. It does not mean the same as the rule.' },
+      { term: 'contrapositive', also: 'Flip and NOT', means: 'A rule flipped, with NOT put in each part. It always means the same as the rule.' },
+    ],
     // Quiz: the same test in other stories, on the three sentences the boards mark. No odd rewrite (NOT in one part
     // only) is offered: no card or board marks one. Every pack has one P and Q question, and the pass rule asks for it.
     pass: PQ_PASS,
@@ -811,44 +1304,56 @@ const lessons: LessonDef[] = [
       return makers.map((make, i) => finish(one(make), `s6-l5-${i + 1}`, L5));
     },
   },
+  L6_LESSON,
+  L7_LESSON,
 ];
 
 // ---------- check and arcade ----------
 
 /**
- * 9-10 items: one on who breaks a rule, one on turning a rule around, all four moves, one on flip and NOT,
- * one rule checker with four cards, plus one or two more from lessons 1, 4 and 5 (the other lesson 1 or
- * lesson 4 question, or a one-card rule check). Skins do not repeat until every skin a slot allows is used.
+ * 10 items: one on who breaks a rule, one on turning a rule around, all four moves, one on flip and NOT, one rule
+ * checker with four cards, one question from lesson 6 or 7, and last the closing why item from the other of the two
+ * (tag `why`, reasons as choices): why “only if” points the way it does, or why the THEN card need not be turned.
+ * Skins do not repeat until every skin a slot allows is used.
  */
 function check(rng: Rng): Item[] {
   const next = skinDeck(rng);
   const one = distinctItems();
-  const whoFirst = rng.chance(0.5);
-  const pickFirst = rng.chance(0.5);
   const who = () => whoBrokeItem(rng, { skin: next(L1_SKINS) });
   const did = () => didBreakItem(rng, { skin: next(L1_SKINS) });
   // Only the three sentences lesson 4 marks: no odd rewrite.
   const pick = () => samePickItem(rng, { skin: next(SKIN_IDS), extra: false });
   const yesNo = () => sameYesNoItem(rng, { skin: next(SKIN_IDS) });
-  const extras = rng.shuffle(['l1', 'l4', 'card'] as const).slice(0, rng.chance(0.5) ? 2 : 1);
-  const plan: [string, () => CondMade][] = [[L1, whoFirst ? who : did]];
-  if (extras.includes('l1')) plan.push([L1, whoFirst ? did : who]);
+  const plan: [string, () => Pick<CondMade, 'tag' | 'item'>][] = [[L1, rng.chance(0.5) ? who : did]];
   plan.push([L2, () => turnItem(rng, { skin: next(SKIN_IDS), fact: rng.chance(0.65) ? 'Q' : 'P' })]);
   for (const move of rng.shuffle(MOVES)) plan.push([L3, () => moveItem(rng, { skin: next(SKIN_IDS), move })]);
-  plan.push([L4, pickFirst ? pick : yesNo]);
-  if (extras.includes('l4')) plan.push([L4, pickFirst ? yesNo : pick]);
+  plan.push([L4, rng.chance(0.5) ? pick : yesNo]);
   plan.push([L5, () => checkerItem(rng, { skin: next(CARD_SKINS) })]);
-  if (extras.includes('card')) plan.push([L5, () => cardItem(rng, { skin: next(CARD_SKINS) })]);
+  // Lessons 6 and 7 share the last two places: a question from one, then the closing why item from the other.
+  const [inner, last] = rng.chance(0.5) ? ([L6, L7] as const) : ([L7, L6] as const);
+  plan.push([inner, () => (inner === L6 ? anyL6(rng) : anyL7(rng))]);
+  plan.push([last, () => whyItem(rng, last)]);
   return plan.map(([lesson, make], i) => finish(one(make), `s6-c${i + 1}`, lesson));
 }
 
-const ARCADE: Record<string, (rng: Rng) => CondMade> = {
+const ARCADE: Record<string, (rng: Rng) => Pick<CondMade, 'tag' | 'item'>> = {
   [L1]: (rng) => (rng.chance(0.5) ? whoBrokeItem(rng, { skin: rng.pick(L1_SKINS) }) : didBreakItem(rng, { skin: rng.pick(L1_SKINS) })),
   [L2]: (rng) => turnItem(rng, { skin: rng.pick(SKIN_IDS), fact: rng.chance(0.5) ? 'Q' : 'P' }),
   [L3]: (rng) => moveItem(rng, { skin: rng.pick(SKIN_IDS), move: rng.pick(MOVES) }),
   [L4]: (rng) => (rng.chance(0.5) ? samePickItem(rng, { skin: rng.pick(SKIN_IDS), extra: false }) : sameYesNoItem(rng, { skin: rng.pick(SKIN_IDS) })),
   [L5]: (rng) => (rng.chance(0.6) ? checkerItem(rng, { skin: rng.pick(CARD_SKINS) }) : cardItem(rng, { skin: rng.pick(CARD_SKINS) })),
+  [L6]: (rng) => (rng.chance(0.2) ? whyItem(rng, L6) : anyL6(rng)),
+  [L7]: (rng) => (rng.chance(0.2) ? whyItem(rng, L7) : anyL7(rng)),
 };
+
+/**
+ * The warm-up on the stop page, from Stop 5 (Knights & Knaves): suppose one islander's kind, then test it. What must
+ * the other islander be, or does the guess crash? Lesson 3 uses the same move: suppose the IF part happened, and the
+ * case crashes.
+ */
+function bridge(rng: Rng): Item {
+  return supposeItem(rng, { id: 's6-bridge', skin: rng.pick(KNIGHT_SKINS), target: rng.pick(['crash', 'crash', 'knight', 'knave'] as const), pool: 'plain' }).item;
+}
 
 function arcade(rng: Rng): Item {
   const lesson = rng.pick(lessons).id;
@@ -914,7 +1419,9 @@ const FACE_PAIR: Record<Lit, Lit> = { P: 'notP', notP: 'P', notQ: 'Q', Q: 'notQ'
  */
 function fresh(missed: Item, rng: Rng): Item[] {
   const tag = missed.skill.replace(/^s6\./, '');
-  const make = (m: CondMade) => finish(m, 'new', missed.lesson);
+  const make = (m: Pick<CondMade, 'tag' | 'item'>) => finish(m, 'new', missed.lesson);
+  const more = freshL67(missed, rng);
+  if (more) return more.map(make);
   if (tag === 'who-broke') return [make(whoBrokeItem(rng, { skin: otherSkin(rng, L1_SKINS, missed) }))];
   if (tag === 'same-pick') return [make(samePickItem(rng, { skin: otherSkin(rng, SKIN_IDS, missed), extra: false }))];
   if (tag === 'checker') return [make(checkerItem(rng, { skin: otherSkin(rng, CARD_SKINS, missed) }))];
@@ -947,6 +1454,60 @@ function fresh(missed: Item, rng: Rng): Item[] {
   return [];
 }
 
+/** The story a lesson 6 or 7 question is told in, read from its rule card. */
+function storyOfItem(missed: Item): StoryId | undefined {
+  const line = missed.scene?.kind === 'text' ? missed.scene.lines[1] : undefined;
+  if (!line) return undefined;
+  for (const f of FORMS) for (const id of FORM_STORIES[f]) if (formText(storyOf(id, f), f) === line) return id;
+  return NEED_SKINS.find((s) => ruleText(s) === line);
+}
+
+/** A story from `from` other than `not`. */
+function otherStory<T extends StoryId>(rng: Rng, from: readonly T[], not?: StoryId): T {
+  const rest = from.filter((s) => s !== not);
+  return rng.pick(rest.length ? rest : from);
+}
+
+const ROW_IDS = ROWS.map(rowId);
+
+/**
+ * New examples after a miss in lesson 6 or 7 (null for the other lessons): the same kind of question in another story.
+ * A missed “did this case break it?” gets the same case, then its boundary partner (a kept case gets the case that
+ * breaks the rule; a break gets the case the misreading gets wrong). A missed needed or enough sentence gets the same
+ * sentence, then one with the other answer. A missed why item gets another why item.
+ */
+function freshL67(missed: Item, rng: Rng): FormMade[] | null {
+  if (missed.lesson !== L6 && missed.lesson !== L7) return null;
+  const story = storyOfItem(missed);
+  const tag = missed.skill.replace(/^s6\./, '');
+  if (missed.tags?.includes(WHY_TAG)) {
+    return [missed.lesson === L6 ? whyOnlyIfItem(rng, { story: otherStory(rng, ONLY_IF_STORIES, story) }) : whyCardItem(rng, { skin: otherStory(rng, WHY_CARD_SKINS, story) })];
+  }
+  if (tag === 'need-enough') {
+    if (missed.kind !== 'choose') return [];
+    const skin = otherStory(rng, NEED_SKINS, story);
+    if (missed.choices.length > 2) return [needPickItem(rng, { skin })];
+    const which = story ? NEED_IDS.find((id) => missed.prompt.endsWith(`“${NEED_WORDS[story as NeedSkin][id]}”`)) : undefined;
+    if (!which) return [];
+    const partner: NeedId = sameMeaning(needCond(which), RULE) ? 'enough-Q' : 'needed-Q';
+    return [needYesNoItem(rng, { skin, which }), needYesNoItem(rng, { skin: otherStory(rng, NEED_SKINS, story), which: partner })];
+  }
+  const form = FORMS.find((f) => f === tag);
+  if (!form) return [];
+  const next = otherStory(rng, FORM_STORIES[form], story);
+  if (missed.kind === 'multi') return [iffWhoItem(rng, { story: next })];
+  if (missed.kind !== 'choose' || form === 'iff' && missed.choices.length !== 2) return [];
+  if (form !== 'iff' && missed.choices.every((c) => ROW_IDS.includes(c.id))) return [formWhoItem(rng, { form, story: next })];
+  if (missed.choices.length === 2) {
+    const ex = Object.values(missed.feedback ?? {})[0]?.example;
+    const row = ex?.truths && ex.truths.length >= 2 ? rowAt(ex.truths[0].value, ex.truths[1].value) : null;
+    if (!row) return [];
+    const partner = formHolds(form, row) ? formBroken(form)[0] : ROWS.find((r) => formHolds(form, r) && misreadMatters(form, r)) ?? rowAt(false, false);
+    return [formDidItem(rng, { form, story: next, row }), formDidItem(rng, { form, story: otherStory(rng, FORM_STORIES[form], story), row: partner })];
+  }
+  return form === 'iff' ? [] : [formPickItem(rng, { form, story: next })];
+}
+
 export const stop6: StopDef = {
   n: STOP,
   id: 's6',
@@ -957,4 +1518,11 @@ export const stop6: StopDef = {
   check,
   practice: arcade,
   fresh,
+  bridge,
+  skillNames: {
+    's6.only-if': 'Rules with only if',
+    's6.unless': 'Rules with unless',
+    's6.iff': 'Rules with if and only if',
+    's6.need-enough': 'Needed and enough',
+  },
 };

@@ -1,0 +1,113 @@
+/* ---------- circuits (Circuit Lab): still SVG frames, then a table of Closed, Open, On and Off; fits a 320 px phone ---------- */
+.play-circ {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.play-circ-svg {
+  display: block;
+  width: 100%;
+  max-width: 420px;
+  height: auto;
+  margin: 0 auto;
+  color: var(--text-2, #c9cff0);
+}
+.play-circ-wire {
+  stroke: currentColor;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  fill: none;
+}
+.play-circ-lever {
+  stroke: currentColor;
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+.play-circ-dot {
+  fill: var(--bg, #0b1020);
+  stroke: currentColor;
+  stroke-width: 2;
+}
+.play-circ-cell {
+  fill: rgba(154, 163, 209, 0.18);
+  stroke: currentColor;
+  stroke-width: 2;
+}
+.play-circ-bulb {
+  stroke: currentColor;
+  stroke-width: 2;
+}
+.play-circ-filament {
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+.play-circ-text,
+.play-circ-name {
+  fill: currentColor;
+}
+.play-circ-name {
+  fill: var(--text, #eef0ff);
+}
+.play-circ-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.play-circ-table th,
+.play-circ-table td {
+  padding: 5px 4px;
+  text-align: center;
+  border-bottom: 1px solid var(--line-soft, rgba(154, 163, 209, 0.25));
+}
+.play-circ-table thead th {
+  font-weight: 800;
+  color: var(--text, #eef0ff);
+}
+.play-circ-table .is-first {
+  border-left: 2px solid var(--line-soft, rgba(154, 163, 209, 0.45));
+}
+.play-circ-rowhead {
+  font-weight: 700;
+  color: var(--text-2, #c9cff0);
+  white-space: nowrap;
+}
+.play-circ-mark {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  color: #ffd84d;
+}
+.play-circ-table tr.is-marked td,
+.play-circ-table tr.is-marked th {
+  background: rgba(255, 216, 77, 0.1);
+}
+.play-circ-v {
+  font-weight: 700;
+}
+.play-circ-v.is-yes {
+  color: #7dffbf;
+}
+.play-circ-v.is-no {
+  color: #ff8fa3;
+}
+.play-circ-table .is-lamp .play-circ-v.is-yes {
+  color: #ffd84d;
+}
+.play-circ-table .is-lamp .play-circ-v.is-no {
+  color: var(--text-2, #c9cff0);
+}
+.play-circ-blank {
+  display: inline-block;
+  width: 34px;
+  height: 18px;
+  border: 1.5px dashed var(--line-soft, rgba(154, 163, 209, 0.6));
+  border-radius: 4px;
+  vertical-align: middle;
+}
+.play-circ-cap {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--text-2, #c9cff0);
+}

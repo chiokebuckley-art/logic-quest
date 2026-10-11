@@ -284,7 +284,7 @@ describe('s7.l3 one rule for a cause', () => {
     expect(card1).toContain('In these puzzles, one thing makes the effect happen. So a cause passes two checks.');
     expect(card1).toContain('Check 1: when it happens, the effect happens. It works every time, unless the table names something that stopped it.');
     expect(card1).toContain('Check 2: when it does not happen, the effect does not happen. Nothing else makes the effect.');
-    expect(card1).toContain('In Stop 6, THEN without IF did not break an if-then rule. “Follows” is stronger: it needs both checks.');
+    expect(card1).toContain('In Stop 7, THEN without IF did not break an if-then rule. “Follows” is stronger: it needs both checks.');
     const third = lesson.ideas.find((c) => c.title === 'Look for a third thing')!.body.join(' ');
     expect(third).toContain('The heat may cause both. A fair test could check it.');
     expect(third).not.toContain('Heat still causes');

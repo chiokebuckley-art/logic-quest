@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { COLORS, MAX_PLAYERS, checkPin, isPin, loadSave, type Player } from '../../engine/save/save';
 import { CODE_LENGTH, CODE_PREFIX, normalizeCode } from '../../engine/save/sync';
-import { STOPS } from '../../content/stops';
+import { STOPS, isMainPath } from '../../content/stops';
 import { frontierStop } from '../progressStats';
 import { useStore, type Route } from '../store';
 import { Icon } from '../components/Icon';
@@ -31,7 +31,8 @@ export function PlayersScreen({ route }: { route: PlayersRoute }) {
   const pinPlayer = pinFor ? players.find((p) => p.id === pinFor) ?? null : null;
 
   const stopNumbers = useMemo(() => {
-    const ids = STOPS.filter((s) => !s.observatory).map((s) => s.id);
+    // Positions in this list are the shown stop numbers (stopNumber), so the card's "Stop n" matches the Journey.
+    const ids = STOPS.filter(isMainPath).map((s) => s.id);
     const out: Record<string, number> = {};
     for (const p of players) {
       const data = p.id === current?.id && currentSave ? currentSave : loadSave(kv, p.id);

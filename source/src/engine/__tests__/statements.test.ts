@@ -1463,6 +1463,13 @@ describe('See -> Do -> Quiz: lessons 1-3 (skill-drill handoff)', () => {
       const text = rowSentence(it);
       expect(text, it.prompt).toMatch(/^(There is an? [a-z ]+|Every card is (an? )?[a-z]+)\.$/);
       const s = readSentence(text);
+      // The check's closing why item gives the verdict and asks for the reason: its answer is a reason (tested in
+      // cross-stop.test.ts), and its prompt states the verdict the cards give.
+      if (it.tags?.includes('why')) {
+        const v = refVerdict(s, it.scene?.kind === 'things' ? it.scene.things : []);
+        expect(it.prompt, text).toContain(v === 'false' ? 'This sentence is false.' : 'You can’t tell yet if this sentence is true.');
+        continue;
+      }
       expect(it.answer, text).toBe(refVerdict(s, it.scene?.kind === 'things' ? it.scene.things : []));
       forms.add(`${s.t}:${Object.keys((s as { d: Desc }).d).sort().join('+')}`);
     }

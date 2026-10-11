@@ -8,15 +8,22 @@ import { S4_WORLD } from './s4';
 import { S5_WORLD } from './s5';
 import { S6_WORLD } from './s6';
 import { S7_WORLD } from './s7';
+import { S8_WORLD } from './s8';
+import { S9_WORLD } from './s9';
+import { S10_WORLD } from './s10';
+import { S11_WORLD } from './s11';
+import { S12_WORLD } from './s12';
+import { S13_WORLD } from './s13';
 import { S14_WORLD } from './s14';
 import { S15_WORLD } from './s15';
 import { S16_WORLD } from './s16';
 import { S17_WORLD } from './s17';
+import { S18_WORLD } from './s18';
 
 export type { LessonWorld, RealUse, StopWorld } from './types';
 
 /** The ready stops' content, by stop id. */
-export const WORLD: Record<string, StopWorld> = { s1: S1_WORLD, s2: S2_WORLD, s3: S3_WORLD, s4: S4_WORLD, s5: S5_WORLD, s6: S6_WORLD, s7: S7_WORLD, s14: S14_WORLD, s15: S15_WORLD, s16: S16_WORLD, s17: S17_WORLD };
+export const WORLD: Record<string, StopWorld> = { s1: S1_WORLD, s2: S2_WORLD, s3: S3_WORLD, s4: S4_WORLD, s5: S5_WORLD, s6: S6_WORLD, s7: S7_WORLD, s8: S8_WORLD, s9: S9_WORLD, s10: S10_WORLD, s11: S11_WORLD, s12: S12_WORLD, s13: S13_WORLD, s14: S14_WORLD, s15: S15_WORLD, s16: S16_WORLD, s17: S17_WORLD, s18: S18_WORLD };
 export { SOON_WORLD };
 
 const LESSONS: Record<string, LessonWorld> = Object.assign({}, ...Object.values(WORLD).map((w) => w.lessons));

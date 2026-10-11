@@ -73,6 +73,7 @@ import {
   withoutBrackets,
 } from '../engine/puzzles/rules';
 import type { Card, CardWords, Feature, FeatureKind, Formula, MatchWords, RuleGuess } from '../engine/puzzles/rules';
+import { FRAMES, rowItem, type RowTemplate } from '../engine/puzzles/statements';
 import { syncWhyWrong } from '../engine/teach';
 import type {
   BoardWords,
@@ -84,6 +85,7 @@ import type {
   Distinction,
   DrillRow,
   DrillStep,
+  GlossaryTerm,
   IdeaCard,
   Item,
   LessonDef,
@@ -116,6 +118,8 @@ interface Skin {
   /** Plural question: "Which cards fit the rule NOT red?" */
   which(rule: string): string;
   guess: string;
+  /** A story's rule, said both ways: “Jo packs every cookie that is red, and no other cookies.” Plain cards have none. */
+  says?(rule: string): string;
 }
 
 interface Story {
@@ -142,6 +146,7 @@ const story = (key: SkinKey, s: Story): Skin => ({
   yesNo: (r) => `${s.rule(r)} ${s.yesNo}`,
   which: (r) => `${s.rule(r)} ${s.which}`,
   guess: s.guess,
+  says: s.rule,
 });
 
 /**
@@ -1207,6 +1212,127 @@ function orYesNoAs(rng: Rng, id: string, s: Skin, want?: OrCard): ChooseItem {
 
 const orYesNo: Gen = (rng, id, s) => orYesNoAs(rng, id, s);
 
+// ---------- the closing why item: why does this card not fit the AND or OR rule? ----------
+//
+// docs/CURRICULUM-PLAN.md, "the closing why item": the stop check ends with one item whose choices are reasons. Here the
+// card does not fit a rule with AND (it fits one part) or with OR (it fits no part), and the learner picks the reason.
+// Each reason is a claim the engine checks on the card and on all 18 cards: what each part says about this card, and
+// whether a part being false (or true) is enough to make the rule false. Exactly one reason holds.
+
+/** The tag of the stop check's closing item (its choices are reasons), and its skill. */
+export const WHY_TAG = 'why';
+export const WHY_SKILL = 's2.why-not';
+
+/** A reason on the why item: its words, and whether evaluate() finds it true and enough. */
+export interface CardReason {
+  id: string;
+  label: string;
+  holds: boolean;
+}
+
+/** Is a part's value (false, or true) enough to make the rule false, on every one of the 18 cards? */
+const partDecides = (rule: Formula, part: Formula, value: boolean) => ALL_CARDS.every((k) => evaluate(part, k) !== value || !evaluate(rule, k));
+
+/**
+ * “The rule is red AND big. This card does not fit it. Which reason shows why?” AND: the card fits one part, and the
+ * right reason names the false part. OR: the card fits no part, and the right reason says no part is true. The wrong
+ * reasons are the misreadings: the wrong part, both parts false, a true part that breaks AND, OR needing both parts,
+ * OR as one but not both, OR needing its first part.
+ */
+export function whyNotFitItem(rng: Rng, id: string, s: Skin, op: 'and' | 'or' = rng.pick(['and', 'or'] as const)): ChooseItem & { reasons: CardReason[] } {
+  const [fa, fb] = twoFeatures(rng);
+  const A = is(fa), B = is(fb);
+  const rule = op === 'and' ? and(A, B) : or(A, B);
+  // AND: one part true and one false; which one is false is random. OR: no part true.
+  const offA = rng.chance(0.5);
+  const c = cardFitting(rng, op === 'and' ? (offA ? and(not(A), B) : and(A, not(B))) : and(not(A), not(B)));
+  if (evaluate(rule, c)) throw new Error('whyNotFitItem: the card must not fit the rule');
+  const [x, y] = op === 'and' ? (offA ? [A, B] : [B, A]) : [A, B];
+  const fx = featOf(x), fy = featOf(y);
+  // Choice ids say what the reason claims (which part, which reading), never where it sits or whether it is right.
+  const reasons: CardReason[] = op === 'and'
+    ? [
+      { id: `false-${ruleId(x)}`, label: `The part ${Q(x)} is false, and AND needs both parts to be true.`, holds: !evaluate(x, c) && partDecides(rule, x, false) },
+      { id: `false-${ruleId(y)}`, label: `The part ${Q(y)} is false, and AND needs both parts to be true.`, holds: !evaluate(y, c) && partDecides(rule, y, false) },
+      { id: 'both-false', label: `Both parts are false. It is not ${ft(fx)}, and it is not ${ft(fy)}.`, holds: !evaluate(x, c) && !evaluate(y, c) },
+      { id: `true-breaks-${ruleId(y)}`, label: `The part ${Q(y)} is true, and one true part makes AND false.`, holds: evaluate(y, c) && partDecides(rule, y, true) },
+    ]
+    : [
+      { id: 'no-part', label: `No part is true. It is not ${ft(fx)}, and it is not ${ft(fy)}.`, holds: !evaluate(x, c) && !evaluate(y, c) && ALL_CARDS.every((k) => evaluate(x, k) || evaluate(y, k) || !evaluate(rule, k)) },
+      { id: `or-needs-both-${ruleId(x)}`, label: `The part ${Q(x)} is false, and OR needs both parts to be true.`, holds: !evaluate(x, c) && partDecides(rule, x, false) },
+      { id: 'or-not-both', label: 'Both parts are true, and OR takes one part, not both parts.', holds: evaluate(x, c) && evaluate(y, c) },
+      { id: `or-first-${ruleId(y)}`, label: `The part ${Q(y)} is true, but OR needs its first part.`, holds: evaluate(y, c) },
+    ];
+  const right = reasons.filter((r) => r.holds);
+  if (right.length !== 1) throw new Error(`${id}: exactly one reason must hold`);
+  const teach = teachFor(rule, s, [c]);
+  const card = cardCase(c, [partTruth(A, c), partTruth(B, c), fitsTruth(rule, c)], noteFor(rule, c, s), { the: true });
+  const other = (f: Formula) => {
+    const k = example(f);
+    return cardCase(k, [partTruth(A, k), partTruth(B, k), fitsTruth(rule, k)], noteFor(rule, k, s));
+  };
+  const feedback: Record<string, ChoiceFeedback> = op === 'and'
+    ? {
+      [`false-${ruleId(y)}`]: {
+        headline: `Your reason names the wrong part. The part ${Q(y)} is true for this ${s.one}.`,
+        detail: [`${The(c)} is ${ft(fy)}, so ${Q(y)} is true.`, `It is not ${ft(fx)}, so ${Q(x)} is false. That is the part that fails, and AND needs both parts.`],
+        example: card,
+      },
+      'both-false': {
+        headline: `Your reason says both parts are false, but only one part is false for this ${s.one}.`,
+        detail: [`${The(c)} is ${ft(fy)}, so ${Q(y)} is true.`, `The part ${Q(x)} is false. AND needs both parts, so that one false part is enough.`],
+        example: card,
+      },
+      [`true-breaks-${ruleId(y)}`]: {
+        headline: 'Your reason says a true part makes AND false, but a true part never does.',
+        detail: [`The part ${Q(y)} is true for ${the(c)}. That part fits.`, `The rule fails because ${Q(x)} is false. AND needs both parts to be true.`, `A ${s.one} that fits both parts fits the rule.`],
+        example: other(and(A, B)),
+      },
+    }
+    : {
+      [`or-needs-both-${ruleId(x)}`]: {
+        headline: 'Your reason says OR needs both parts, but one true part is enough.',
+        detail: [`The part ${Q(x)} is false for ${the(c)}. That alone would not stop it.`, `A ${s.one} that is ${ft(fy)} fits ${Q(rule)}, even when it is not ${ft(fx)}.`, `${The(c)} does not fit because no part is true.`],
+        example: other(and(not(x), y)),
+      },
+      'or-not-both': {
+        headline: `Your reason says both parts are true, but no part is true for this ${s.one}.`,
+        detail: [`${The(c)} is not ${ft(fx)}, and it is not ${ft(fy)}.`, `In logic, OR takes a ${s.one} that fits both parts too. This one fits no part.`],
+        example: card,
+      },
+      [`or-first-${ruleId(y)}`]: {
+        headline: `Your reason says ${Q(y)} is true, but it is false for this ${s.one} too.`,
+        detail: [`${The(c)} is not ${ft(fy)}.`, 'OR does not need its first part. Either part is enough, but here no part is true.'],
+        example: card,
+      },
+    };
+  const item = chooseItem({ id, lesson: op === 'and' ? L2 : L3, skill: WHY_SKILL }, {
+    prompt: s.says ? `${s.says(R(rule))} This ${s.one} does not fit the rule. Which reason shows why?` : `This ${s.one} does not fit the rule ${R(rule)}. Which reason shows why?`,
+    scene: { kind: 'things', things: [{ id: cardId(c), shape: c.shape, color: c.color, size: c.size }] },
+    choices: rng.shuffle(reasons.map((r) => ({ id: r.id, label: r.label }))),
+    answer: right[0].id,
+    explain: op === 'and'
+      ? `${The(c)} is ${ft(fy)}, but it is not ${ft(fx)}. So ${Q(x)} is false. AND needs both parts, so it does not fit.`
+      : `${The(c)} is not ${ft(fx)}, and it is not ${ft(fy)}. No part is true. OR needs at least one part, so it does not fit.`,
+    hint: `Check each part on this ${s.one}. ${checkedOther(s)}`,
+    hintCase: hintCaseOf(teach, [(k) => !sameCard(k, c)], id),
+    feedback,
+    teach,
+  });
+  item.tags = [WHY_TAG];
+  return { ...item, reasons };
+}
+
+/**
+ * The warm-up for Stop 3 (Line Up): one AND or OR card question from this stop, in any skin. It is a Stop 2 item, so it
+ * never counts for Stop 3. Its prompt says it is a warm-up from NOT, AND, OR.
+ */
+export function andOrWarmUp(rng: Rng, id: string): Item {
+  const s = skinOf(rng, rng.pick(SKIN_KEYS));
+  const it = rng.pick<Gen>([andPick, orYesNo, andCount, orCount])(rng, id, s);
+  return { ...it, prompt: `A warm-up from “NOT, AND, OR.” ${it.prompt}` };
+}
+
 // ---------- distinctions: two ideas lessons 4 and 5 teach apart ----------
 //
 // docs/CONTENT_GUIDE.md, "Distinctions". Lesson 4: whether a card fits the inside of the brackets is one question,
@@ -2210,7 +2336,7 @@ const IDEAS: Record<string, IdeaCard[]> = {
       title: 'Kept is not proved',
       distinction: KEPT_VS_PROVED.id,
       body: [
-        'A rule that matches every mark is kept for now. It is still possible, but it is not proved. Stop 7 has more on guesses like this.',
+        'A rule that matches every mark is kept for now. It is still possible, but it is not proved. Stop 8 has more on guesses like this.',
         'Look below. Two rules match all six marks. A new card could tell them apart. It is like “Can’t tell yet” in Stop 1: the marks do not decide it.',
         'In a puzzle, the rule the machine uses is one of the choices. When the other choices are ruled out, the one left must be it.',
       ],
@@ -2703,11 +2829,18 @@ const PASS: Record<string, LessonPass> = {
   [L5]: { firstTry: 3, include: [{ tag: NO_CARD_OUT, label: 'a puzzle where only a no card rules out a rule' }] },
 };
 
+/** The words each lesson names first (the glossary, LessonDef.terms). NOT is named in Stop 1, lesson 3 (The NOT flip). */
+const TERMS: Record<string, GlossaryTerm[]> = {
+  [L2]: [{ term: 'AND', means: 'A rule with AND has two parts. A card fits only when both parts fit it.' }],
+  [L3]: [{ term: 'OR', means: 'A rule with OR has two parts. A card fits when one part fits it, or when both parts do.' }],
+};
+
 const lessons: LessonDef[] = [L1, L2, L3, L4, L5].map((lid) => ({
   id: lid,
   title: TITLES[lid],
   ideas: IDEAS[lid],
   drill: DRILLS[lid],
+  ...(TERMS[lid] ? { terms: TERMS[lid] } : {}),
   ...(DISTINCTIONS[lid] ? { distinctions: DISTINCTIONS[lid] } : {}),
   ...(PASS[lid] ? { pass: PASS[lid] } : {}),
   practice(rng: Rng): Item[] {
@@ -2717,7 +2850,10 @@ const lessons: LessonDef[] = [L1, L2, L3, L4, L5].map((lid) => ({
   },
 }));
 
-/** The stop check: 9 items, every lesson covered, several conflict items, skins mixed three each. Taught families only. */
+/**
+ * The stop check: 10 items, every lesson covered, several conflict items, skins mixed three each, taught families only.
+ * The last is the closing why item (tag `why`): a card that does not fit an AND or OR rule, and the reason to pick.
+ */
 function check(rng: Rng): Item[] {
   const gens: Gen[] = [
     rng.pick([notTap, notTap, notCount, notMeans]),
@@ -2731,8 +2867,21 @@ function check(rng: Rng): Item[] {
     rng.pick([guessOr, guessHard]),
   ];
   const keys = rng.shuffle<SkinKey>(['abstract', 'abstract', 'abstract', 'everyday', 'everyday', 'everyday', 'fantasy', 'fantasy', 'fantasy']);
-  return gens.map((gen, i) => gen(rng, `s2-c${i + 1}`, skinOf(rng, keys[i])));
+  const items = gens.map((gen, i) => gen(rng, `s2-c${i + 1}`, skinOf(rng, keys[i])));
+  return [...items, whyNotFitItem(rng, 's2-c10', skinOf(rng, rng.pick(SKIN_KEYS)))];
 }
+
+/**
+ * The warm-up on the stop page, from Stop 1 (True or False?): is one sentence about a row of cards true, false, or
+ * can't you tell yet? It is built by Stop 1's statement engine and filed under lesson 1 here, so it never counts for
+ * Stop 1. Its prompt says it is a warm-up from “True or False?”
+ */
+function bridge(rng: Rng): Item {
+  const m = rowItem(rng, { frame: rng.pick(FRAMES), target: rng.pick(['true', 'false', 'cant'] as const), templates: WARM_TEMPLATES });
+  return { id: 's2-warm', stop: STOP, lesson: L1, skill: 's2.warm-up', ...m.item, prompt: `A warm-up from “True or False?” ${m.item.prompt}` };
+}
+/** The sentences Stop 1's lesson 2 teaches: “There is …” and “Every card is …”. */
+const WARM_TEMPLATES: readonly RowTemplate[] = ['hasColor', 'hasShape', 'hasExact', 'allColor', 'allShape'];
 
 /** One Arcade item from anywhere in the stop. */
 function practice(rng: Rng): Item {
@@ -2773,6 +2922,11 @@ function fresh(missed: Item, rng: Rng): Item[] {
     case 's2.or-both': return [make(orTap), yesNo('both')];
     case 's2.or-count': return [make(orCount), yesNo('both')];
     case 's2.or-pick': return [make(orNotFit), yesNo('both')];
+    // The check's closing why item: a new card to explain with the same word (AND or OR), then one with the other word.
+    case WHY_SKILL: {
+      const op = missed.lesson === L3 ? 'or' : 'and';
+      return [whyNotFitItem(rng, 'new', skin(), op), whyNotFitItem(rng, 'new', skin(), op === 'and' ? 'or' : 'and')];
+    }
     case 's2.bracket-yesno': {
       const first = missed.kind === 'choose' && missed.answer === 'no' ? 'or' : 'and';
       return [bracketYesNoAs(rng, 'new', skin(), first), bracketYesNoAs(rng, 'new', skin(), first === 'and' ? 'or' : 'and')];
@@ -2816,4 +2970,10 @@ export const stop2: StopDef = {
   check,
   practice,
   fresh,
+  bridge,
+  bridgeFrom: 's1',
+  skillNames: {
+    [WHY_SKILL]: 'Why a card does not fit an AND or OR rule',
+    's2.warm-up': 'Warm-up: is a sentence about cards true, false or can’t tell?',
+  },
 };

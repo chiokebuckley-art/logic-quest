@@ -2594,6 +2594,139 @@ button.play-stamp[aria-disabled='true'] {
 .play-contrast-ask strong {
   color: var(--text, #f1f3ff);
 }
+
+/* ---------- an argument: its givens, its claim and its cases as boxes (Stop 2, Arguments) ---------- */
+.play-arg {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.play-arg-givens {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.play-arg-line {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  padding: 8px 12px;
+  background: var(--panel-solid, #141a3f);
+  border: 1px solid var(--line-soft, rgba(154, 163, 209, 0.16));
+  border-radius: 10px;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.play-arg-line--claim {
+  background: rgba(255, 201, 60, 0.08);
+  border-color: rgba(255, 201, 60, 0.55);
+}
+.play-arg-tag {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(34, 230, 255, 0.16);
+  color: #9feeff;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.play-arg-tag--claim {
+  background: rgba(255, 201, 60, 0.2);
+  color: var(--gold, #ffc93c);
+}
+.play-arg-text {
+  flex: 1 1 12em;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.play-arg-real {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+}
+.play-arg-real.is-true {
+  background: rgba(60, 255, 157, 0.16);
+  color: var(--teal-soft, #7dffbf);
+}
+.play-arg-real.is-false {
+  background: rgba(255, 77, 109, 0.16);
+  color: #ff8fa3;
+}
+.play-arg-cases {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.play-arg-case {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 8px 10px;
+  background: var(--panel, rgba(20, 26, 63, 0.86));
+  border: 1px solid rgba(154, 163, 209, 0.35);
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.play-arg-case.is-out {
+  background: rgba(255, 77, 109, 0.06);
+  border-color: rgba(255, 77, 109, 0.45);
+  border-style: dashed;
+}
+.play-arg-case.is-yes {
+  border-color: rgba(60, 255, 157, 0.55);
+}
+.play-arg-case.is-no {
+  border-color: rgba(255, 122, 26, 0.6);
+}
+.play-arg-case-name {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-2, #c9cff0);
+}
+.play-arg-fact {
+  font-weight: 600;
+}
+.play-arg-verdict {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 800;
+}
+.play-arg-verdict.is-out {
+  color: #ff8fa3;
+}
+.play-arg-verdict.is-true {
+  color: var(--teal-soft, #7dffbf);
+}
+.play-arg-verdict.is-false {
+  color: #ffa25c;
+}
+.play-arg-caption {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--text-2, #c9cff0);
+}
 .play-drill-status.is-diagnosis {
   display: flex;
   flex-direction: column;

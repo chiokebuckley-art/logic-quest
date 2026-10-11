@@ -7,7 +7,7 @@ import { useState } from 'react';
 import { seedFor } from '../../engine/journey/mastery';
 import { canFix, FIXES_TO_CLEAR, fixableCards, type NoteCard, type Notebook } from '../../engine/notebook';
 import type { StopDef } from '../../engine/types';
-import { STOPS } from '../../content/stops';
+import { STOPS, stopLabelOf, stopNumberOf } from '../../content/stops';
 import { readyLabel, skillName } from '../progressStats';
 import { useStore, type Route } from '../store';
 import { NotebookRunner } from '../components/NotebookRunner';
@@ -23,12 +23,15 @@ export const NOTEBOOK_INTRO = [
 
 const upperFirst = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 
-/** Open cards grouped by stop (stop order), each group sorted by the day it is ready, then by skill. */
+/**
+ * Open cards grouped by stop, in Journey order (the shown number, not the stored one), each group sorted by the day
+ * it is ready, then by skill. `stop` is the stored number (NoteCard.stop); show it with stopLabelOf.
+ */
 export function notebookGroups(notebook: Notebook): { stop: number; cards: NoteCard[] }[] {
   const byStop = new Map<number, NoteCard[]>();
   for (const c of Object.values(notebook)) byStop.set(c.stop, [...(byStop.get(c.stop) ?? []), c]);
   return [...byStop.entries()]
-    .sort((a, b) => a[0] - b[0])
+    .sort((a, b) => stopNumberOf(a[0]) - stopNumberOf(b[0]))
     .map(([stop, cards]) => ({ stop, cards: cards.sort((a, b) => (a.due === b.due ? a.skill.localeCompare(b.skill) : a.due < b.due ? -1 : 1)) }));
 }
 
@@ -88,7 +91,7 @@ export function NotebookList({ notebook, today, stops, onFix, fixed = 0, onBack 
         return (
           <section key={stop} className="sl-section" aria-labelledby={`nb-stop-${stop}`}>
             <h3 id={`nb-stop-${stop}`} className="sl-label">
-              STOP {stop}{def ? ` · ${def.title.toUpperCase()}` : ''}
+              {stopLabelOf(stop).toUpperCase()}{def ? ` · ${def.title.toUpperCase()}` : ''}
             </h3>
             <ul className="sl-nb-list">
               {shown.map((c) => {

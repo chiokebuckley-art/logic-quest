@@ -25,6 +25,13 @@ import {
   L4_TRAPS,
   L5_CARDS,
   L5_LETTERS,
+  L6_ONLY_BOXES,
+  L6_ONLY_VS_IF,
+  L6_UNLESS_BOXES,
+  L6_UNLESS_IF,
+  L7_CARDS,
+  L7_IFF_BOXES,
+  L7_NEED,
   PETS_KEPT,
   stop6,
 } from '../../content/stop6';
@@ -32,6 +39,32 @@ import { checkDrill, extraQuizItem, marksToTap } from '../drill';
 import {
   BROKEN_VS_CANT,
   CAN_LABEL,
+  FORMS,
+  IFF_STORIES,
+  MISREAD,
+  NEEDED_VS_ENOUGH,
+  NEED_IDS,
+  NEED_SKINS,
+  NEED_WORDS,
+  ONLY_IF_STORIES,
+  ONLY_IF_VS_IF,
+  UNLESS_STORIES,
+  WHY_CARD_SKINS,
+  formBroken,
+  formDidItem,
+  formPickItem,
+  formText,
+  formWhoItem,
+  iffWhoItem,
+  needCond,
+  needContrast,
+  needPickItem,
+  needYesNoItem,
+  onlyIfContrast,
+  sameAsForm,
+  storyOf,
+  whyCardItem,
+  whyOnlyIfItem,
   CARD_SKINS,
   COMPARE_LINE,
   CONTRA,
@@ -75,6 +108,11 @@ import {
   whoBrokeItem,
   type Cond,
   type CondMade,
+  type FormKind,
+  type NeedId,
+  type NeedSkin,
+  type Story,
+  type StoryId,
   type Lit,
   type Row,
   type Skin,
@@ -157,6 +195,8 @@ function skinOfScene(it: Item): SkinId {
 }
 
 const SEEDS = Array.from({ length: 150 }, (_, i) => i + 1);
+/** Lessons 1 to 5: their rules are said with “if” and “then” on a rule card the readers above know. Lessons 6 and 7 have their own block below. */
+const BASE = () => stop6.lessons.slice(0, 5);
 
 // ---------- text rules for every item ----------
 
@@ -424,24 +464,32 @@ describe('stop 6 content', () => {
     }
   });
 
-  it('every check has 9-10 items, all four moves, a four-card rule checker and a trap', () => {
+  it('every check has 10 items: all four moves, a four-card rule checker, a trap, lessons 6 and 7, and the closing why item last', () => {
+    const lastFrom = new Set<string>();
     for (let seed = 1; seed <= 300; seed++) {
       const items = stop6.check!(createRng(seed));
-      expect(items.length).toBeGreaterThanOrEqual(9);
-      expect(items.length).toBeLessThanOrEqual(10);
+      expect(items.length).toBe(10);
       for (const tag of ['move-if', 'move-not-then', 'trap-then', 'trap-not-if']) expect(items.some((i) => i.skill === `s6.${tag}`), `seed ${seed} ${tag}`).toBe(true);
       expect(items.some((i) => i.kind === 'multi' && i.skill === 's6.checker')).toBe(true);
       expect(items.some((i) => i.conflict)).toBe(true);
-      // Lessons come in order.
-      const order = items.map((i) => Number(i.lesson.slice(-1)));
+      // Lessons 1 to 5 come in order; lessons 6 and 7 share the last two places, one each, the why item last.
+      const order = items.slice(0, 8).map((i) => Number(i.lesson.slice(-1)));
       expect([...order].sort((a, b) => a - b)).toEqual(order);
-      items.forEach(checkText);
+      expect(order).toEqual([1, 2, 3, 3, 3, 3, 4, 5]);
+      expect(items.slice(8).map((i) => i.lesson).sort()).toEqual(['s6.l6', 's6.l7']);
+      const last = items[9];
+      expect(last.tags, `seed ${seed}`).toContain('why');
+      expect(items.slice(0, 9).some((i) => i.tags?.includes('why')), `seed ${seed}: one why item`).toBe(false);
+      lastFrom.add(last.lesson);
+      items.slice(0, 8).forEach(checkText);
     }
+    // The closing why item is drawn from each of lessons 6 and 7.
+    expect([...lastFrom].sort()).toEqual(['s6.l6', 's6.l7']);
   });
 
   it('practice sets mix skins, and lesson 5 puts letters and numbers last', () => {
     for (let seed = 1; seed <= 60; seed++) {
-      for (const l of stop6.lessons) {
+      for (const l of BASE()) {
         const items = l.practice(createRng(seed));
         expect(new Set(items.map(skinGroup)).size, `${l.id} seed ${seed}`).toBeGreaterThanOrEqual(2);
         items.forEach(checkText);
@@ -921,7 +969,7 @@ describe('stop 6 wrong answers teach first', () => {
 
   it('T-fresh: a miss gets the same skill in a new story, then its boundary partner', () => {
     const items: Item[] = [];
-    for (let seed = 1; seed <= 12; seed++) for (const l of stop6.lessons) items.push(...l.practice(createRng(seed)));
+    for (let seed = 1; seed <= 12; seed++) for (const l of BASE()) items.push(...l.practice(createRng(seed)));
     const partner: Record<string, string> = {
       's6.forward': 's6.backward',
       's6.backward': 's6.forward',
@@ -1118,12 +1166,14 @@ describe('stop 6: See -> Do -> Quiz (skill-drill handoff)', () => {
     's6.l3': [L3_HAPPENED, L3_NOT],
     's6.l4': [L4_SAME, L4_TRAPS, L4_PQ],
     's6.l5': [L5_CARDS, L5_LETTERS],
+    's6.l6': [L6_ONLY_BOXES, L6_ONLY_VS_IF, L6_UNLESS_BOXES, L6_UNLESS_IF],
+    's6.l7': [L7_IFF_BOXES, L7_NEED, L7_CARDS],
   };
   const ALL_BOARDS = Object.values(BOARDS).flat();
   /** The four-box boards read by their names: lesson 1's two, and lesson 2's pet rule (marked before it is turned around). */
   const FOUR_BOXES = [L1_DRILL, L1_TWIN, L2_BOXES];
   /** Boards whose wrong taps start “This box is for …”: the four-box boards, the letters twin and the can-happen twin. */
-  const BOX_BOARDS = [...FOUR_BOXES, L1_PQ, L2_CAN];
+  const BOX_BOARDS = [...FOUR_BOXES, L1_PQ, L2_CAN, L6_ONLY_BOXES, L6_UNLESS_BOXES, L7_IFF_BOXES];
   /** The twins: a board that changes one piece of a card's board, and says what changed. */
   const TWINS = new Map<DrillStep, string>([
     [L1_TWIN, 'The same four boxes, with a new rule: a red card and a hat.'],
@@ -1172,6 +1222,8 @@ describe('stop 6: See -> Do -> Quiz (skill-drill handoff)', () => {
       // Lessons 1 and 5: the default pass rule (the boards, then 3 right on the first try with no hint). Lessons 2 to
       // 4 ask for a P and Q question among them: the letters are taught in lesson 1.
       if (l.id === 's6.l1' || l.id === 's6.l5') expect(l.pass, l.id).toBeUndefined();
+      else if (l.id === 's6.l6') expect(l.pass, l.id).toEqual({ firstTry: 3, include: [{ tag: 'only-if-trap', label: 'a question where “only if” is easy to turn around' }] });
+      else if (l.id === 's6.l7') expect(l.pass, l.id).toEqual({ firstTry: 3, include: [{ tag: 'needed-as-enough', label: 'a question where “needed” is easy to read as “enough”' }] });
       else expect(l.pass, l.id).toEqual({ firstTry: 3, include: [{ tag: 'pq', label: 'a question with P and Q' }] });
     }
     for (const st of ALL_BOARDS) {
@@ -1476,6 +1528,8 @@ describe('stop 6: See -> Do -> Quiz (skill-drill handoff)', () => {
       's6.l3': ['s6.move-if', 's6.move-not-then', 's6.trap-then', 's6.trap-not-if'],
       's6.l4': ['s6.same-pick', 's6.same-yesno'],
       's6.l5': ['s6.checker', 's6.checker-card'],
+      's6.l6': ['s6.only-if', 's6.unless'],
+      's6.l7': ['s6.iff', 's6.need-enough'],
     };
     /** A "which sentence means the same?" item offers only the three sentences lesson 4 marks. */
     const onlyMarked = (it: Item) => {
@@ -1537,7 +1591,7 @@ describe('stop 6: See -> Do -> Quiz (skill-drill handoff)', () => {
     // A P and Q case card names the letters: “The IF part (P)”, “The THEN part (Q)”.
     const truth = (c: TeachCase, who: string) => c.truths!.find((t) => t.who === who || t.who === `${who} (P)` || t.who === `${who} (Q)`)?.value;
     for (let seed = 1; seed <= 30; seed++) {
-      for (const l of stop6.lessons) {
+      for (const l of BASE()) {
         for (const it of l.practice(createRng(seed))) {
           const c = it.hintCase!;
           expect(it.hint, it.id).toBeTruthy();
@@ -1893,7 +1947,7 @@ describe('stop 6: distinctions taught apart', () => {
     const PQ = { firstTry: 3, include: [{ tag: 'pq', label: 'a question with P and Q' }] };
     let l1pq = 0;
     for (const seed of SEEDS40) {
-      for (const l of stop6.lessons) {
+      for (const l of BASE()) {
         const items = l.practice(createRng(seed));
         for (const it of items) {
           // finish() copies the generator's tag; a P and Q question is tagged “pq”, and only one is.
@@ -2042,7 +2096,7 @@ describe('stop 6: distinctions taught apart', () => {
     }
     // Every question with “I’m confused” has a board that sets the closing line, so the panel never speaks of signs.
     for (const seed of SEEDS.slice(0, 20)) {
-      for (const l of stop6.lessons) {
+      for (const l of BASE()) {
         for (const it of l.practice(createRng(seed))) {
           const story = skinOfScene(it);
           const hasHelp = l === l2 || l === l3 || ((l === l1 || l === l4) && story === 'pq');
@@ -2168,3 +2222,625 @@ describe('stop 6: distinctions taught apart', () => {
 
 /** A sentence mark's label without its curly quotes and final period: “Max has four legs.” */
 const unquoteS = (s: string) => s.replace(/^“/, '').replace(/”$/, '').replace(/\.$/, '');
+
+// ---------- lessons 6 and 7: only if, unless, if and only if, needed and enough ----------
+//
+// Every answer is worked out again here by a brute force over the four cases, from what each word means, never from
+// the engine's if–then pieces:
+//   “P only if Q”: P can’t happen without Q.          “P unless Q”: when Q does not happen, P does.
+//   “P if and only if Q”: P and Q happen together, or neither does.
+//   “x is needed for y”: y can’t happen without x.    “x is enough for y”: when x happens, y happens.
+// Every rule, case, sentence and card is read back from the words the player sees.
+//
+// L67-logic   each form breaks where the brute force says; which if–then sentences mean the same, by the brute force.
+// L67-items   every lesson 6 and 7 question (practice, the check, the Arcade, every generator and story) re-solved from
+//             its words, with every worked case, hint case and counterexample's truths worked out again.
+// L67-why     the closing why items: each reason's claim worked out again; exactly one is true, and it is the answer.
+// L67-packs   every pack: its trap tag (the pass rule), two kinds of story, the why item last; the check's why item last.
+// L67-boards  the four boxes, the sentence grids and the cards board, every mark worked out again from the board's words;
+//             each mix-up fires on its picks; the contrast cards come out apart.
+// L67-fresh   a miss gets the same kind of question in another story, with its boundary partner where it has one.
+// L67-terms   the glossary words: converse (lesson 2), inverse and contrapositive (lesson 4), only if and unless (lesson
+//             6), if and only if, sufficient and necessary (lesson 7), each named on a card of its lesson.
+// L67-bridge  the warm-up is Stop 5's “suppose it” question, the same for the same seed.
+
+describe('stop 6 lessons 6 and 7', () => {
+  const FORM_OK: Record<FormKind, (p: boolean, q: boolean) => boolean> = {
+    'only-if': (p, q) => !(p && !q),
+    unless: (p, q) => (q ? true : p),
+    iff: (p, q) => p === q,
+  };
+  /** The misreadings: “only if” as plain “if” (If Q, then P), “unless” as “If Q, then not P”, “if and only if” one way. */
+  const MISREAD_OK: Record<FormKind, (p: boolean, q: boolean) => boolean> = {
+    'only-if': (p, q) => !(q && !p),
+    unless: (p, q) => !(q && p),
+    iff: (p, q) => !(p && !q),
+  };
+  const needOk = (word: 'needed' | 'enough', x: 'P' | 'Q', p: boolean, q: boolean) => {
+    const xv = x === 'P' ? p : q;
+    const yv = x === 'P' ? q : p;
+    return word === 'needed' ? !(yv && !xv) : !(xv && !yv);
+  };
+  const sameAs = (a: (p: boolean, q: boolean) => boolean, b: (p: boolean, q: boolean) => boolean) => CASES.every((c) => a(c.p, c.q) === b(c.p, c.q));
+  const ALL_STORIES: StoryId[] = [...L1_SKINS, 'recess', 'store', 'cave', 'broom'];
+  const L6L7 = () => stop6.lessons.slice(5);
+  const lines = (s: Scene | undefined) => (s?.kind === 'text' ? s.lines : []);
+
+  /** The form and the story of a lesson 6 or 7 question, read from the rule on its card. */
+  function readForm(scene: Scene | undefined): { form: FormKind; w: Story } {
+    const line = lines(scene)[1] ?? '';
+    const form: FormKind | null = / if and only if /.test(line) ? 'iff' : / only if /.test(line) ? 'only-if' : / unless /.test(line) ? 'unless' : null;
+    if (!form) throw new Error(`no form: ${line}`);
+    const hits = ALL_STORIES.flatMap((id) => {
+      try {
+        const w = storyOf(id, form);
+        return formText(w, form) === line ? [w] : [];
+      } catch {
+        return [];
+      }
+    });
+    if (hits.length !== 1) throw new Error(`cannot read rule: ${line}`);
+    // The rule's words are the story's parts, joined by the form's word.
+    const w = hits[0];
+    const word = { 'only-if': 'only if', unless: 'unless', iff: 'if and only if' }[form];
+    expect(line.toLowerCase()).toBe(`${w.parts.P.if} ${word} ${form === 'unless' ? w.parts.Q.if : w.parts.Q.then ?? w.parts.Q.if}.`.toLowerCase());
+    return { form, w };
+  }
+  /** A plain if–then rule card (lesson 7's needed and enough, the cards): its skin. */
+  const readRuleSkin = (scene: Scene | undefined): NeedSkin => {
+    const hit = NEED_SKINS.find((s) => ruleText(s) === lines(scene)[1]);
+    if (!hit) throw new Error(`cannot read rule: ${lines(scene)[1]}`);
+    return hit;
+  };
+  /** A case told about a name (or a card's symbols), read back. */
+  function readStoryCase(w: Story, text: string): Row {
+    const t = strip(text);
+    if (w.id === 'letters') {
+      const m = t.match(/^(?:The card with )?([A-Z]) and (\d)/);
+      if (!m) throw new Error(`cannot read card: ${text}`);
+      return { p: /^[AEIOU]$/.test(m[1]), q: Number(m[2]) % 2 === 0 };
+    }
+    const SYM = { vowel: 'E', consonant: 'K', even: '4', odd: '7' };
+    const hits = w.names.flatMap((n) => ROWS.filter((r) => w.label(n, r, SYM) === t || w.says(n, r, SYM) === t));
+    if (!hits.length || new Set(hits.map((r) => keyOf(r.p, r.q))).size !== 1) throw new Error(`cannot read case: ${text}`);
+    return hits[0];
+  }
+  /** A case named as a noun phrase: “A kid with a library card who takes no book home.” */
+  function readKaseOf(kase: Record<string, string>, text: string): Row {
+    const hits = ROWS.filter((r) => kase[keyOf(r.p, r.q)].toLowerCase() === strip(text).toLowerCase());
+    if (hits.length !== 1) throw new Error(`cannot read case: ${text}`);
+    return hits[0];
+  }
+  /** “If A, then B.” in a story's words. */
+  function readIf(w: Story, text: string): Cond {
+    const m = strip(text).match(/^If (.+), then (.+)$/);
+    if (!m) throw new Error(`not an if–then sentence: ${text}`);
+    const a = LITS.find((l) => w.parts[l].if === m[1]);
+    const b = LITS.find((l) => (w.parts[l].then ?? w.parts[l].if) === m[2]);
+    if (!a || !b) throw new Error(`cannot read sentence: ${text}`);
+    return { a, b };
+  }
+  /** A needed or enough sentence: which word, and which part it is about. */
+  function readNeed(skin: NeedSkin, text: string): { word: 'needed' | 'enough'; x: 'P' | 'Q' } {
+    const id = (Object.keys(NEED_WORDS[skin]) as NeedId[]).find((k) => NEED_WORDS[skin][k] === text);
+    if (!id) throw new Error(`cannot read sentence: ${text}`);
+    const [word, x] = id.split('-') as ['needed' | 'enough', 'P' | 'Q'];
+    // The words say it: the part the word is about comes first in the sentence.
+    expect(text, id).toContain(word === 'needed' ? 'is needed' : 'is enough');
+    return { word, x };
+  }
+
+  /** Every lesson 6 and 7 question the game can ask: practice, the check's two, the Arcade, and each generator and story. */
+  function allL67(): Item[] {
+    const out: Item[] = [];
+    const tag = (m: { tag: string; item: CondMade['item'] }, lesson: string, i: number) => ({ id: `g${i}`, stop: 6, lesson, skill: `s6.${m.tag}`, ...m.item }) as Item;
+    for (const seed of SEEDS.slice(0, 30)) {
+      for (const l of L6L7()) out.push(...l.practice(createRng(seed)));
+      out.push(...stop6.check!(createRng(seed)).slice(8));
+      const a = stop6.practice!(createRng(seed));
+      if (a.lesson === 's6.l6' || a.lesson === 's6.l7') out.push(a);
+    }
+    let i = 0;
+    for (const seed of SEEDS.slice(0, 4)) {
+      for (const form of ['only-if', 'unless'] as const) {
+        for (const story of form === 'only-if' ? ONLY_IF_STORIES : UNLESS_STORIES) {
+          out.push(tag(formWhoItem(createRng(seed), { form, story }), 's6.l6', i++), tag(formPickItem(createRng(seed), { form, story }), 's6.l6', i++));
+          for (const row of ROWS) out.push(tag(formDidItem(createRng(seed), { form, story, row }), 's6.l6', i++));
+        }
+      }
+      for (const story of IFF_STORIES) {
+        out.push(tag(iffWhoItem(createRng(seed), { story }), 's6.l7', i++));
+        for (const row of ROWS) out.push(tag(formDidItem(createRng(seed), { form: 'iff', story, row }), 's6.l7', i++));
+      }
+      for (const skin of NEED_SKINS) {
+        out.push(tag(needPickItem(createRng(seed), { skin }), 's6.l7', i++));
+        for (const which of NEED_IDS) out.push(tag(needYesNoItem(createRng(seed), { skin, which }), 's6.l7', i++));
+      }
+      for (const skin of WHY_CARD_SKINS) out.push(tag(whyCardItem(createRng(seed), { skin }), 's6.l7', i++));
+      for (const story of ONLY_IF_STORIES) out.push(tag(whyOnlyIfItem(createRng(seed), { story }), 's6.l6', i++));
+    }
+    return out;
+  }
+  let cache: Item[] | null = null;
+  const items = () => (cache ??= allL67());
+
+  /** The case a teach card, hint or counterexample shows, and each of its truths worked out again. */
+  function checkCase(c: TeachCase, read: (label: string) => Row, truth: Record<string, (p: boolean, q: boolean) => boolean>, where: string) {
+    const r = read(c.label);
+    expect(c.truths?.length, `${where}: ${c.label}`).toBeGreaterThan(0);
+    for (const t of c.truths ?? []) {
+      expect(truth[t.who], `${where}: unknown truth “${t.who}”`).toBeDefined();
+      expect(t.value, `${where}: ${c.label} ${t.who}`).toBe(truth[t.who](r.p, r.q));
+    }
+    return r;
+  }
+
+  it('L67-logic: each form breaks where the brute force says, and only the right if–then sentences mean the same', () => {
+    for (const f of FORMS) {
+      expect(formBroken(f).map((r) => keyOf(r.p, r.q)), f).toEqual(CASES.filter((c) => !FORM_OK[f](c.p, c.q)).map((c) => keyOf(c.p, c.q)));
+      for (const c of ALL_CONDS) expect(sameAsForm(c, f), `${f} ${JSON.stringify(c)}`).toBe(sameAs((p, q) => condOk(c, p, q), FORM_OK[f]));
+      expect(sameAs((p, q) => condOk(MISREAD[f], p, q), MISREAD_OK[f]), f).toBe(true);
+      expect(sameAs(MISREAD_OK[f], FORM_OK[f]), `${f}: the misreading is a different rule`).toBe(false);
+    }
+    // “Only if” breaks in one box, “unless” in one, “if and only if” in two.
+    expect(FORMS.map((f) => CASES.filter((c) => !FORM_OK[f](c.p, c.q)).length)).toEqual([1, 1, 2]);
+    // “P only if Q” means “If P, then Q” (and its flip and NOT), never plain “if”.
+    expect(ALL_CONDS.filter((c) => sameAsForm(c, 'only-if')).map((c) => `${c.a}>${c.b}`).sort()).toEqual(['P>Q', 'notQ>notP']);
+    expect(ALL_CONDS.filter((c) => sameAsForm(c, 'unless')).map((c) => `${c.a}>${c.b}`).sort()).toEqual(['notP>Q', 'notQ>P']);
+    expect(ALL_CONDS.filter((c) => sameAsForm(c, 'iff'))).toEqual([]);
+    // Needed and enough: the THEN part is needed, the IF part enough; turned around, they are the rule turned around.
+    for (const id of NEED_IDS) {
+      const [word, x] = id.split('-') as ['needed' | 'enough', 'P' | 'Q'];
+      for (const c of CASES) expect(condOk(needCond(id), c.p, c.q), `${id} ${keyOf(c.p, c.q)}`).toBe(needOk(word, x, c.p, c.q));
+      expect(sameAs((p, q) => needOk(word, x, p, q), ruleOk), id).toBe(id === 'needed-Q' || id === 'enough-P');
+    }
+  });
+
+  it('L67-items: every lesson 6 and 7 question re-solved from its words, with every worked case worked out again', () => {
+    const seen = new Set<string>();
+    for (const it of items()) {
+      checkText(it);
+      expect(it.teach, it.id).toBeDefined();
+      expect(it.hint && it.hintCase, `${it.id}: a hint with a marked case`).toBeTruthy();
+      if (it.kind === 'choose') for (const c of it.choices) if (c.id !== it.answer) expect(it.feedback?.[c.id], `${it.id} ${c.id}`).toBeDefined();
+      if (it.tags?.includes('why')) continue; // L67-why
+      const skill = it.skill.replace('s6.', '');
+      if (skill === 'need-enough') {
+        if (it.kind !== 'choose') throw new Error('a choose item');
+        const skin = readRuleSkin(it.scene);
+        const kase = SKINS[skin].kase;
+        const meansRule = (text: string) => {
+          const n = readNeed(skin, text);
+          return sameAs((p, q) => needOk(n.word, n.x, p, q), ruleOk);
+        };
+        let truth: Record<string, (p: boolean, q: boolean) => boolean>;
+        if (it.choices.length === 2) {
+          seen.add('need-yesno');
+          const said = it.prompt.match(/“([^“”]+)”$/)![1];
+          const n = readNeed(skin, said);
+          expect(it.answer, it.prompt).toBe(meansRule(said) ? 'yes' : 'no');
+          // “Needed” read as “enough” is the trap and the conflict.
+          const trap = n.word === 'enough' && n.x === 'Q';
+          expect(!!it.conflict, it.prompt).toBe(trap);
+          expect(it.tags?.includes('needed-as-enough'), it.prompt).toBe(trap);
+          truth = { 'The rule': ruleOk, 'This sentence': (p, q) => needOk(n.word, n.x, p, q) };
+          // The hint keeps the rule and the sentence, so it never gives the answer away.
+          const h = checkCase(it.hintCase!, (l) => readKaseOf(kase, l), truth, it.id);
+          expect(ruleOk(h.p, h.q) && needOk(n.word, n.x, h.p, h.q)).toBe(true);
+        } else {
+          seen.add('need-pick');
+          const right = it.choices.filter((c) => meansRule(c.label));
+          expect(right.map((c) => c.id), it.prompt).toEqual([it.answer]);
+          // The trap is always offered: “needed” read as “enough”.
+          expect(it.choices.some((c) => readNeed(skin, c.label).word === 'enough' && readNeed(skin, c.label).x === 'Q')).toBe(true);
+          const rn = readNeed(skin, right[0].label);
+          truth = { 'The rule': ruleOk, 'The right sentence': (p, q) => needOk(rn.word, rn.x, p, q) };
+          for (const [id, fb] of Object.entries(it.feedback ?? {})) {
+            const yn = readNeed(skin, it.choices.find((c) => c.id === id)!.label);
+            const r = checkCase(fb.example!, (l) => readKaseOf(kase, l), { 'The rule': ruleOk, 'Your sentence': (p, q) => needOk(yn.word, yn.x, p, q) }, `${it.id} ${id}`);
+            // The counterexample tells the two apart.
+            expect(ruleOk(r.p, r.q)).not.toBe(needOk(yn.word, yn.x, r.p, r.q));
+          }
+          const hn = readNeed(skin, it.hint!.match(/“(.+)”/)![1]);
+          expect(meansRule(it.hint!.match(/“(.+)”/)![1]), `${it.id}: the hint checks a wrong choice`).toBe(false);
+          checkCase(it.hintCase!, (l) => readKaseOf(kase, l), { 'The rule': ruleOk, 'This sentence': (p, q) => needOk(hn.word, hn.x, p, q) }, it.id);
+        }
+        for (const c of it.teach!.cases ?? []) checkCase(c, (l) => readKaseOf(kase, l), { ...truth, 'This sentence': truth['This sentence'] ?? truth['The right sentence'] }, it.id);
+        continue;
+      }
+      const { form, w } = readForm(it.scene);
+      expect(skill, it.prompt).toBe(form);
+      const partTruth = { [capFirst(w.parts.P.if)]: (p: boolean) => p, [capFirst(w.parts.Q.if)]: (_p: boolean, q: boolean) => q };
+      const caseTruth: Record<string, (p: boolean, q: boolean) => boolean> = { ...partTruth, 'The rule': FORM_OK[form] };
+      const readCase = (l: string) => readStoryCase(w, l);
+      for (const c of it.teach!.cases ?? []) {
+        if (it.kind === 'choose' && it.choices.length === 3 && it.choices.every((ch) => /^If /.test(ch.label))) continue;
+        checkCase(c, readCase, caseTruth, it.id);
+      }
+      if (it.kind === 'multi') {
+        seen.add('iff-who');
+        expect(form).toBe('iff');
+        const want = it.choices.filter((c) => !FORM_OK[form](readCase(c.label).p, readCase(c.label).q)).map((c) => c.id);
+        expect([...it.answer].sort(), it.prompt).toEqual(want.sort());
+        expect(want.length).toBe(2);
+        expect(Object.keys(it.missTips ?? {}).sort()).toEqual(want.sort());
+        expect(Object.keys(it.pickTips ?? {}).length).toBe(2);
+        const h = checkCase(it.hintCase!, readCase, caseTruth, it.id);
+        expect(FORM_OK[form](h.p, h.q), `${it.id}: the hint is not an answer`).toBe(true);
+        continue;
+      }
+      if (it.kind !== 'choose') throw new Error('a choose item');
+      if (it.choices.every((c) => /^If /.test(c.label))) {
+        seen.add(`${form}-pick`);
+        const conds = it.choices.map((c) => readIf(w, c.label));
+        const right = it.choices.filter((_, k) => sameAs((p, q) => condOk(conds[k], p, q), FORM_OK[form]));
+        expect(right.map((c) => c.id), it.prompt).toEqual([it.answer]);
+        // The misreading is always offered.
+        expect(conds.some((c) => sameAs((p, q) => condOk(c, p, q), MISREAD_OK[form])), it.prompt).toBe(true);
+        expect(it.tags?.includes('only-if-trap'), it.prompt).toBe(form === 'only-if');
+        for (const [id, fb] of Object.entries(it.feedback ?? {})) {
+          const yc = readIf(w, it.choices.find((c) => c.id === id)!.label);
+          const r = checkCase(fb.example!, (l) => readKaseOf(w.kase, l), { 'The rule': FORM_OK[form], 'Your sentence': (p, q) => condOk(yc, p, q) }, `${it.id} ${id}`);
+          expect(FORM_OK[form](r.p, r.q)).not.toBe(condOk(yc, r.p, r.q));
+          // The case the rule keeps comes first: it shows what the misreading gets wrong.
+          if (CASES.some((c) => FORM_OK[form](c.p, c.q) && !condOk(yc, c.p, c.q))) expect(FORM_OK[form](r.p, r.q), `${it.id} ${id}`).toBe(true);
+        }
+        const off = readIf(w, it.hint!.match(/“(.+)”/)![1]);
+        expect(sameAs((p, q) => condOk(off, p, q), FORM_OK[form]), `${it.id}: the hint checks a wrong choice`).toBe(false);
+        checkCase(it.hintCase!, (l) => readKaseOf(w.kase, l), { 'The rule': FORM_OK[form], 'This sentence': (p, q) => condOk(off, p, q) }, it.id);
+        const rc = conds[it.choices.findIndex((c) => c.id === it.answer)];
+        for (const c of it.teach!.cases ?? []) checkCase(c, (l) => readKaseOf(w.kase, l), { 'The rule': FORM_OK[form], 'The if–then sentence': (p, q) => condOk(rc, p, q) }, it.id);
+        continue;
+      }
+      if (it.choices.length === 2) {
+        seen.add(`${form}-did`);
+        const said = it.prompt.split(/(?<=\.) /)[0];
+        const r = readCase(said);
+        expect(it.answer, it.prompt).toBe(FORM_OK[form](r.p, r.q) ? 'no' : 'yes');
+        const misread = MISREAD_OK[form](r.p, r.q) !== FORM_OK[form](r.p, r.q);
+        expect(!!it.conflict, it.prompt).toBe(misread);
+        expect(!!it.tags?.includes('only-if-trap'), it.prompt).toBe(form === 'only-if' && misread);
+        const ex = checkCase(Object.values(it.feedback!)[0].example!, readCase, caseTruth, it.id);
+        expect(keyOf(ex.p, ex.q)).toBe(keyOf(r.p, r.q));
+        const h = checkCase(it.hintCase!, readCase, caseTruth, it.id);
+        expect(keyOf(h.p, h.q), `${it.id}: the hint is another case`).not.toBe(keyOf(r.p, r.q));
+        continue;
+      }
+      seen.add(`${form}-who`);
+      const broken = it.choices.filter((c) => !FORM_OK[form](readCase(c.label).p, readCase(c.label).q));
+      expect(broken.map((c) => c.id), it.prompt).toEqual([it.answer]);
+      for (const [id, fb] of Object.entries(it.feedback ?? {})) {
+        const r = checkCase(fb.example!, readCase, caseTruth, `${it.id} ${id}`);
+        expect(keyOf(r.p, r.q)).toBe(keyOf(readCase(it.choices.find((c) => c.id === id)!.label).p, readCase(it.choices.find((c) => c.id === id)!.label).q));
+      }
+      // The hint is a case that keeps the rule, and never the one the misreading gets wrong.
+      const h = checkCase(it.hintCase!, readCase, caseTruth, it.id);
+      expect(FORM_OK[form](h.p, h.q)).toBe(true);
+      expect(MISREAD_OK[form](h.p, h.q)).toBe(FORM_OK[form](h.p, h.q));
+    }
+    expect([...seen].sort()).toEqual(['iff-did', 'iff-who', 'need-pick', 'need-yesno', 'only-if-did', 'only-if-pick', 'only-if-who', 'unless-did', 'unless-pick', 'unless-who']);
+  });
+
+  it('L67-why: each reason’s claim is worked out again; exactly one is true, and it is the answer', () => {
+    let cards = 0;
+    let onlyIf = 0;
+    for (const it of items().filter((x) => x.tags?.includes('why'))) {
+      if (it.kind !== 'choose') throw new Error('a choose item');
+      expect(it.choices.length).toBe(4);
+      for (const c of it.choices) expect(c.label.length, c.label).toBeGreaterThan(12);
+      const claims: Record<string, boolean> = {};
+      if (it.skill === 's6.need-enough') {
+        cards++;
+        const skin = readRuleSkin(it.scene);
+        const face = readFace(skin, it.prompt.match(/The card that shows “(.+)” does not need/)![1]);
+        // It is the card most people turn by mistake: the THEN part, which can't hide a break.
+        expect(face).toBe('Q');
+        expect(bruteTurn(face)).toBe(false);
+        claims['needed-not-enough'] = !aboutP(face) && !bruteTurn(face) && CASES.some((c) => value(face, c.p, c.q) && ruleOk(c.p, c.q) && !c.p);
+        claims['back-must'] = CASES.filter((c) => value(face, c.p, c.q) && ruleOk(c.p, c.q)).every((c) => c.p);
+        claims['only-if-card'] = LITS.filter(bruteTurn).every((l) => l === 'P');
+        claims['shows-if'] = aboutP(face);
+        expect(it.choices.find((c) => c.id === 'back-must')!.label).toContain(SKINS[skin].cards!.back('P', { vowel: 'E', consonant: 'K', even: '4', odd: '7' }).replace(/”$/, ''));
+        for (const [id, fb] of Object.entries(it.feedback ?? {})) {
+          const m = fb.example!.label.match(/^A card with “(.+)” on the front and (.+) on the back\.$/)!;
+          const r = cardCase(readFace(skin, m[1]), readBack(skin, m[2]));
+          checkCase(fb.example!, () => r, { 'The IF part': (p) => p, 'The THEN part': (_p, q) => q, 'The rule': ruleOk }, `${it.id} ${id}`);
+        }
+        expect(it.tags).toContain('needed-as-enough');
+      } else {
+        onlyIf++;
+        const { form, w } = readForm(it.scene);
+        expect(form).toBe('only-if');
+        const [, first, second] = it.prompt.match(/^The rule means “(.+)” It does not mean “(.+)” Why\?$/)!;
+        const [c1, c2] = [readIf(w, first), readIf(w, second)];
+        expect(sameAs((p, q) => condOk(c1, p, q), FORM_OK[form])).toBe(true);
+        expect(sameAs((p, q) => condOk(c2, p, q), FORM_OK[form])).toBe(false);
+        claims['same-break'] = sameAs((p, q) => condOk(c1, p, q), FORM_OK[form]);
+        claims['only-if-is-if'] = sameAs((p, q) => condOk({ a: 'Q', b: 'P' }, p, q), FORM_OK[form]);
+        for (const id of ['then-alone', 'neither']) {
+          const r = readKaseOf(w.kase, it.choices.find((c) => c.id === id)!.label.replace(/ breaks the rule\.$/, '.'));
+          claims[id] = !FORM_OK[form](r.p, r.q);
+        }
+        // The right reason names the one case that breaks the rule and the first sentence.
+        const named = readKaseOf(w.kase, it.choices.find((c) => c.id === 'same-break')!.label.split(': ')[1]);
+        expect(FORM_OK[form](named.p, named.q) || condOk(c1, named.p, named.q)).toBe(false);
+        const truth = { 'The rule': FORM_OK[form], 'The first sentence': (p: boolean, q: boolean) => condOk(c1, p, q), 'The second sentence': (p: boolean, q: boolean) => condOk(c2, p, q) };
+        for (const c of [...it.teach!.cases!, it.hintCase!, ...Object.values(it.feedback ?? {}).map((fb) => fb.example!)]) checkCase(c, (l) => readKaseOf(w.kase, l), truth, it.id);
+        expect(it.tags).toContain('only-if-trap');
+      }
+      const right = Object.entries(claims).filter(([, v]) => v).map(([k]) => k);
+      expect(right, it.prompt).toEqual([it.answer]);
+      expect(Object.keys(claims).sort()).toEqual(it.choices.map((c) => c.id).sort());
+    }
+    expect(cards).toBeGreaterThan(0);
+    expect(onlyIf).toBeGreaterThan(0);
+  });
+
+  it('L67-packs: every pack has its trap, two kinds of story and the why item last; the pass rule asks for the trap', () => {
+    const [l6, l7] = L6L7();
+    const group = (it: Item) => {
+      try {
+        return SKINS[readRuleSkin(it.scene)].group;
+      } catch {
+        return readForm(it.scene).w.group;
+      }
+    };
+    for (let seed = 1; seed <= 60; seed++) {
+      for (const [l, trap, skills, why] of [[l6, 'only-if-trap', ['s6.only-if', 's6.unless'], 's6.only-if'], [l7, 'needed-as-enough', ['s6.iff', 's6.need-enough'], 's6.need-enough']] as const) {
+        const pack = l.practice(createRng(seed));
+        expect(pack.length).toBe(5);
+        expect(pack.some((it) => it.tags?.includes(trap)), `${l.id} seed ${seed}`).toBe(true);
+        expect(l.pass?.include?.map((g) => g.tag)).toEqual([trap]);
+        expect(new Set(pack.map(group)).size, `${l.id} seed ${seed}`).toBeGreaterThanOrEqual(2);
+        for (const s of skills) expect(pack.some((it) => it.skill === s), `${l.id} seed ${seed} ${s}`).toBe(true);
+        const last = pack[pack.length - 1];
+        expect(last.tags).toContain('why');
+        expect(last.skill).toBe(why);
+        expect(pack.slice(0, -1).some((it) => it.tags?.includes('why'))).toBe(false);
+        expect(l.practice(createRng(seed))).toEqual(pack);
+      }
+    }
+    // When the trap question is missed, an extra one comes from the lesson's own practice.
+    for (const [l, trap] of [[l6, 'only-if-trap'], [l7, 'needed-as-enough']] as const) {
+      for (const seed of [1, 2, 3]) {
+        const x = extraQuizItem(l, seed, l.practice(createRng(seed)), [trap], 0);
+        expect(x?.tags, `${l.id} seed ${seed}`).toContain(trap);
+      }
+    }
+  });
+
+  it('L67-boards: every mark worked out again from the board’s words; each mix-up fires on its picks; the contrasts come out apart', () => {
+    const right = (st: DrillStep) => Object.fromEntries(marksToTap(st).map((m) => [m.id, m.answer]));
+    const yn = (v: boolean) => (v ? 'yes' : 'no');
+    // The four boxes: each row and column name read back through the story's box names.
+    for (const st of [L6_ONLY_BOXES, L6_UNLESS_BOXES, L7_IFF_BOXES]) {
+      const { form, w } = readForm(st.scene);
+      const lit = (name: string) => LITS.find((l) => w.face[l] === name)!;
+      for (const r of st.rows) {
+        r.marks.forEach((m, k) => {
+          const c = cardCase(lit(r.label), lit(st.columns![k]));
+          expect(m.answer, `${st.id} ${r.label} ${st.columns![k]}`).toBe(yn(FORM_OK[form](c.p, c.q)));
+        });
+      }
+      expect(st.rows.flatMap((r) => r.marks).filter((m) => m.answer === 'no').length).toBe(CASES.filter((c) => !FORM_OK[form](c.p, c.q)).length);
+      // The mix-up is the misreading: it marks the box the misreading gets wrong.
+      for (const mc of st.misconceptions ?? []) {
+        expect(checkDrill(st, { ...right(st), ...mc.picks }).diagnosis, `${st.id} ${mc.id}`).toBe(mc.id);
+        for (const [id, o] of Object.entries(mc.picks!)) {
+          const m = st.rows.flatMap((r) => r.marks).find((x) => x.id === id)!;
+          const row = st.rows.find((r) => r.marks.includes(m))!;
+          const c = cardCase(lit(row.label), lit(m.label));
+          expect(o, mc.id).toBe(yn(MISREAD_OK[form](c.p, c.q)));
+          expect(o, mc.id).not.toBe(m.answer);
+        }
+        expect(mc.text).toMatch(/^You may be treating .+ as the same thing\. They are two different things/);
+      }
+      expect(checkDrill(st, right(st)).done).toBe(true);
+    }
+    // The sentence grids: each column's sentence read from the board's words.
+    const sentenceOf = (st: DrillStep, label: string) => st.body.map((b) => b.match(new RegExp(`^${label}: “(.+)”$`))?.[1]).find(Boolean);
+    for (const st of [L6_ONLY_VS_IF, L6_UNLESS_IF]) {
+      const { form, w } = readForm(st.scene);
+      st.columns!.forEach((col, k) => {
+        const said = sentenceOf(st, col);
+        let ok: (p: boolean, q: boolean) => boolean;
+        if (!said) ok = FORM_OK[form];
+        else if (/^If /.test(said)) {
+          const c = readIf(w, said);
+          ok = (p, q) => condOk(c, p, q);
+        } else {
+          // Plain “if” in the middle: “A if B.” means “If B, then A.”
+          const m = strip(said).match(/^(.+) if (.+)$/)!;
+          const a = LITS.find((l) => (w.parts[l].then ?? w.parts[l].if) === m[2] || w.parts[l].if === m[2])!;
+          const b = LITS.find((l) => capFirst(w.parts[l].if) === m[1])!;
+          ok = (p, q) => condOk({ a, b }, p, q);
+        }
+        for (const r of st.rows) {
+          const c = readKaseOf(w.kase, `${r.label}.`);
+          expect(r.marks[k].answer, `${st.id} ${r.label} ${col}`).toBe(yn(ok(c.p, c.q)));
+          expect(!!r.marks[k].given, `${st.id} ${col}`).toBe(!said);
+        }
+      });
+      expect(checkDrill(st, right(st)).done).toBe(true);
+    }
+    // The needed and enough grid.
+    {
+      const st = L7_NEED;
+      const skin = readRuleSkin(st.scene);
+      st.columns!.forEach((col, k) => {
+        const said = sentenceOf(st, col);
+        const n = said ? readNeed(skin, said) : null;
+        for (const r of st.rows) {
+          const c = readKaseOf(SKINS[skin].kase, `${r.label}.`);
+          expect(r.marks[k].answer, `${st.id} ${r.label} ${col}`).toBe(yn(n ? needOk(n.word, n.x, c.p, c.q) : ruleOk(c.p, c.q)));
+        }
+      });
+      const mc = st.misconceptions![0];
+      expect(checkDrill(st, { ...right(st), ...mc.picks }).diagnosis).toBe(mc.id);
+    }
+    // The cards board: lesson 5's letter cards, each back and the turn worked out again.
+    for (const r of L7_CARDS.rows) {
+      const f = readFace('letters', r.label.match(/^The card that shows “(.+)\.”$/)![1]);
+      for (const m of r.marks) {
+        if (m.label === 'Turn it over?') expect(m.answer).toBe(yn(bruteTurn(f)));
+        else {
+          const c = cardCase(f, readBack('letters', m.label.replace(/ on the back$/, '').replace(/^A/, 'a').replace(/^An/, 'an')));
+          expect(m.answer, `${r.label} ${m.label}`).toBe(ruleOk(c.p, c.q) ? 'holds' : 'crashes');
+        }
+      }
+    }
+    expect(L7_CARDS.rows.filter((r) => r.marks.every((m) => m.given)).map((r) => readFace('letters', r.label.match(/“(.+)\.”/)![1]))).toEqual(['P', 'notQ']);
+    // The cards board names the trap: turning over the THEN card (the “4”) reads “needed” as “enough”.
+    const cardMix = L7_CARDS.misconceptions ?? [];
+    expect(cardMix.map((m) => m.id)).toEqual(['needed-as-enough']);
+    const thenTurn = L7_CARDS.rows.find((r) => readFace('letters', r.label.match(/“(.+)\.”/)![1]) === 'Q')!.marks.find((m) => m.label === 'Turn it over?')!;
+    expect(cardMix[0].picks).toEqual({ [thenTurn.id]: yn(!bruteTurn('Q')) });
+    expect(checkDrill(L7_CARDS, { ...right(L7_CARDS), ...cardMix[0].picks }).diagnosis).toBe('needed-as-enough');
+    expect(cardMix[0].text).toMatch(/^You may be treating “needed” and “enough” as the same thing\. They are two different things/);
+    // The contrast cards: the same case under two sentences, kept by one and broken by the other.
+    const only = onlyIfContrast();
+    const w = storyOf('library', 'only-if');
+    const kai = readStoryCase(w, only.pairs[0].world);
+    expect(only.pairs[0].world).toBe(only.pairs[1].world);
+    expect(only.pairs[0].truth).toBe(FORM_OK['only-if'](kai.p, kai.q));
+    expect(only.pairs[1].truth).toBe(MISREAD_OK['only-if'](kai.p, kai.q));
+    expect(only.pairs[0].truth).not.toBe(only.pairs[1].truth);
+    const need = needContrast();
+    const dee = readCase(SKINS.dessert, need.pairs[0].world, { vowel: 'E', consonant: 'K', even: '4', odd: '7' }, true);
+    for (const p of need.pairs) {
+      const n = readNeed('dessert', p.says);
+      expect(p.truth, p.says).toBe(needOk(n.word, n.x, dee.p, dee.q));
+    }
+    expect(need.pairs[0].truth).not.toBe(need.pairs[1].truth);
+    // Each lesson declares its distinction and teaches it: a contrast card, then a board right after it.
+    const [l6, l7] = L6L7();
+    expect(l6.distinctions).toEqual([ONLY_IF_VS_IF]);
+    expect(l7.distinctions).toEqual([NEEDED_VS_ENOUGH]);
+    for (const [l, d, board] of [[l6, ONLY_IF_VS_IF, L6_ONLY_VS_IF], [l7, NEEDED_VS_ENOUGH, L7_NEED]] as const) {
+      const k = l.ideas.findIndex((c) => c.distinction === d.id);
+      expect(l.ideas[k].scene?.kind).toBe('contrast');
+      expect(board.afterCard).toBe(k);
+      expect(board.distinction).toBe(d.id);
+    }
+  });
+
+  it('L67-confused: each board’s “I’m confused” question has one right option and a “Not sure”, asked in another story, its answer worked out again', () => {
+    const boards = [L6_ONLY_BOXES, L6_ONLY_VS_IF, L6_UNLESS_BOXES, L6_UNLESS_IF, L7_IFF_BOXES, L7_NEED];
+    for (const st of boards) {
+      expect(st.confused?.length, st.id).toBeGreaterThanOrEqual(1);
+      expect(st.words?.closing, st.id).toMatch(/^Those two ideas are apart now\./);
+      const own = lines(st.scene)[1];
+      for (const q of st.confused!) {
+        expect(q.options.filter((o) => o.right).length, q.q).toBe(1);
+        expect(q.options.map((o) => o.label)).toContain('Not sure');
+        // Asked about another story's rule, so it never gives the board's own marks.
+        expect(q.q, st.id).not.toContain(strip(own));
+        const right = q.options.find((o) => o.right)!.label;
+        const quoted = q.q.match(/“(.+?)[.,]?”/)![1];
+        if (/ only if /.test(quoted) && !/ if and only if /.test(quoted)) {
+          // The needed part is the one after “only if”.
+          expect(right.toLowerCase()).toBe(quoted.split(' only if ')[1].toLowerCase());
+        } else if (/ unless /.test(quoted)) {
+          // On a day the part after “unless” happens, the part before it may still happen: that keeps the rule.
+          expect(right.startsWith('Yes')).toBe(FORM_OK.unless(true, true));
+        } else if (/ if and only if /.test(quoted)) {
+          // The THEN part alone: kept only if the rule worked one way.
+          expect(right.startsWith('Yes')).toBe(FORM_OK.iff(false, true));
+        } else {
+          // Is the THEN part enough for the IF part? Only if no case has the THEN part alone.
+          expect(right.startsWith('Yes')).toBe(needOk('enough', 'Q', false, true));
+        }
+        checkLines([q.q, q.teach, ...q.options.map((o) => o.label)]);
+      }
+    }
+  });
+
+  it('L67-fresh: a miss gets the same kind of question in another story, with its boundary partner', () => {
+    const story = (it: Item) => {
+      try {
+        return readRuleSkin(it.scene);
+      } catch {
+        return readForm(it.scene).w.id;
+      }
+    };
+    const kind = (it: Item) => (it.tags?.includes('why') ? 'why' : it.kind === 'multi' ? 'multi' : it.kind === 'choose' ? `${it.choices.length}` : it.kind);
+    let n = 0;
+    for (let seed = 1; seed <= 10; seed++) {
+      for (const l of L6L7()) {
+        for (const it of l.practice(createRng(seed))) {
+          const set = freshCheckSet(stop6, it, 700 + seed, [], 1);
+          expect(set.length, it.id).toBeGreaterThan(0);
+          for (const x of set) {
+            expect(x.skill, it.id).toBe(it.skill);
+            expect(x.lesson).toBe(it.lesson);
+            expect(kind(x), it.id).toBe(kind(it));
+          }
+          expect(story(set[0]), it.id).not.toBe(story(it));
+          expect(new Set([it, ...set].map(looks)).size).toBe(set.length + 1);
+          // A “did this break it?” miss: the same case, then its partner (a break for a kept case, and the other way).
+          if (it.kind === 'choose' && it.choices.length === 2 && it.skill !== 's6.need-enough') {
+            const { form } = readForm(it.scene);
+            const at = (x: Item) => readStoryCase(readForm(x.scene).w, x.prompt.split(/(?<=\.) /)[0]);
+            const [r0, r1, r2] = [at(it), at(set[0]), at(set[1])];
+            expect(keyOf(r1.p, r1.q)).toBe(keyOf(r0.p, r0.q));
+            expect(FORM_OK[form](r2.p, r2.q)).not.toBe(FORM_OK[form](r0.p, r0.q));
+            n++;
+          }
+          if (it.skill === 's6.need-enough' && it.kind === 'choose' && it.choices.length === 2 && !it.tags?.includes('why')) {
+            expect(set.length).toBe(2);
+            expect((set[0] as ChooseItem).answer).toBe((it as ChooseItem).answer);
+            expect((set[1] as ChooseItem).answer).not.toBe((it as ChooseItem).answer);
+            n++;
+          }
+        }
+      }
+    }
+    expect(n).toBeGreaterThan(0);
+  });
+
+  it('L67-terms: each glossary word is named on a card of the lesson that lists it, once in the stop', () => {
+    const want: Record<string, string[]> = {
+      's6.l2': ['converse'],
+      's6.l4': ['inverse', 'contrapositive'],
+      's6.l6': ['only if', 'unless'],
+      's6.l7': ['if and only if', 'sufficient', 'necessary'],
+    };
+    const all: string[] = [];
+    for (const l of stop6.lessons) {
+      const terms = (l.terms ?? []).map((t) => t.term);
+      expect(terms, l.id).toEqual(want[l.id] ?? []);
+      all.push(...terms);
+      const cards = l.ideas.flatMap((c) => [c.title, ...c.body]).join(' ').toLowerCase();
+      for (const t of l.terms ?? []) {
+        expect(cards, `${l.id}: “${t.term}” on a card`).toContain(t.term);
+        if (t.also) expect(cards, `${l.id}: “${t.also}” on a card`).toContain(t.also.toLowerCase());
+        expect(t.means).toMatch(/^[A-Z].*[.!?]$/);
+        checkLines([t.term, t.means, t.also ?? '']);
+      }
+    }
+    expect(new Set(all).size).toBe(all.length);
+    // The kid words come with the grown-up words: Flip only, NOT only, Flip and NOT; needed and enough.
+    expect(stop6.lessons[1].terms![0].also).toBe('Flip only');
+    expect(stop6.lessons[3].terms!.map((t) => t.also)).toEqual(['NOT only', 'Flip and NOT']);
+    expect(stop6.lessons[6].terms!.map((t) => t.also ?? null)).toEqual([null, 'enough', 'needed']);
+    // Every new skill has a plain name.
+    expect(Object.keys(stop6.skillNames ?? {}).sort()).toEqual(['s6.iff', 's6.need-enough', 's6.only-if', 's6.unless']);
+  });
+
+  it('L67-bridge: the warm-up is Stop 5’s “suppose it” question, the same for the same seed', () => {
+    const answers = new Set<string>();
+    for (let seed = 1; seed <= 60; seed++) {
+      const it = stop6.bridge!(createRng(seed));
+      expect(it.stop).toBe(5);
+      expect(it.lesson).toBe('s5.l3');
+      expect(it.skill).toBe('s5.suppose');
+      expect(it.prompt).toMatch(/Suppose .+\. What must .+ be\? Or does that guess crash\?$/);
+      expect(it.kind === 'choose' && it.choices.some((c) => c.id === 'crash')).toBe(true);
+      if (it.kind === 'choose') answers.add(it.answer);
+      expect(stop6.bridge!(createRng(seed))).toEqual(it);
+    }
+    // Most warm-ups crash; some settle the other islander's kind.
+    expect(answers.has('crash')).toBe(true);
+    expect(answers.size).toBeGreaterThan(1);
+  });
+});

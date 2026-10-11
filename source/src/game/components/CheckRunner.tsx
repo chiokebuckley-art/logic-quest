@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CheckKind } from '../../engine/journey/mastery';
 import type { Item } from '../../engine/types';
+import { stopLabel } from '../../content/stops';
 import type { AnswerRecord, CheckRunnerProps } from './contracts';
 import { Dots, ItemView, PlayHeader, type DotState } from './ItemView';
 
@@ -70,7 +71,7 @@ export function CheckRunner({ stop, kind, items, timeLimit, readAloud, onFinish,
   return (
     <div className="play-root" ref={rootRef}>
       <PlayHeader
-        over={`Stop ${stop.n} · ${stop.title}`}
+        over={`${stopLabel(stop)} · ${stop.title}`}
         title={label}
         onBack={n ? () => setLeaving(true) : () => onExit([])}
         backLabel={`Leave the ${label.toLowerCase()}`}

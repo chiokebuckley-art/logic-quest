@@ -124,9 +124,11 @@ describe('skills', () => {
   });
 
   it('labels skills for grown-ups', () => {
-    expect(skillLabel('s2.or-both')).toBe('Stop 2 · OR includes both');
-    expect(skillLabel('s12.base_rate')).toBe('Stop 12 · base rate');
+    // The id's number is the stored one; the label shows the stop's place on the Journey (Arguments is Stop 2).
+    expect(skillLabel('s2.or-both')).toBe('Stop 3 · OR includes both');
+    expect(skillLabel('s12.base_rate')).toBe('Stop 13 · base rate');
     expect(skillLabel('s1.l2.cant-tell')).toBe('Stop 1 · cant tell');
+    expect(skillLabel('s14.unit')).toMatch(/^Ring 1 · /);
     expect(skillLabel('mystery')).toBe('mystery');
   });
 

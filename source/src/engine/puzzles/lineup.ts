@@ -1115,6 +1115,123 @@ function chainPath(ids: readonly string[], clues: readonly LineClue[], from: str
 const pathText = (path: readonly Edge[], texts: readonly string[]) =>
   [...new Set(path.map((e) => e.clue))].map((i) => unstop(texts[i])).join('. ');
 
+// ---------- the closing why item: why must one come before another? (the chain) ----------
+//
+// docs/CURRICULUM-PLAN.md, "the closing why item": the stop check ends with one item whose choices are reasons. Here the
+// clues prove that one person comes before another through a middle person, and the learner picks the reason. Each
+// reason is a claim the engine checks: which clues the list holds, what two clues alone force (every order that fits
+// them, listed), and who can be at the front. Exactly one reason holds.
+
+/** The tag of the stop check's closing item (its choices are reasons), and its skill. */
+export const WHY_TAG = 'why';
+export const WHY_SKILL = 's3.why-chain';
+
+/** A reason on the why item: its words, and whether the clues make it true and enough. */
+export interface LineReason {
+  id: string;
+  label: string;
+  holds: boolean;
+}
+
+export interface WhyChainOpts {
+  id: string;
+  skin: SkinId;
+}
+
+const hasBefore = (clues: readonly LineClue[], a: string, b: string) => clues.findIndex((c) => c.t === 'before' && c.a === a && c.b === b);
+
+/**
+ * “The clues prove that Ava is taller than Cal. Which reason shows why?” Four people and three “before” clues: a chain
+ * (Ava before Ben, Ben before Cal) and one clue that puts the fourth person ahead of someone, so the front is not proved
+ * for Ava. The right reason is the chain through the middle person (transitive: two clues force it). The wrong reasons:
+ * a clue that names the two (there is none), a fork (the second clue turned around), and “Ava is first” (not proved).
+ */
+export function whyChainItem(rng: Rng, o: WhyChainOpts): Built<ChooseItem> & { reasons: LineReason[]; a: string; mid: string; c: string } {
+  const skin = SKINS[o.skin];
+  for (let tries = 0; tries < 400; tries++) {
+    const n = 4;
+    const cast = makeCast(rng, skin, n);
+    const [a, mid, c, d] = rng.shuffle(cast.ids);
+    // The fourth person goes ahead of someone in the chain, so nobody but the clues decides who is first.
+    const other = rng.pick([a, mid, c]);
+    const clues = rng.shuffle<LineClue>([before(a, mid), before(mid, c), before(d, other)]);
+    const fit = fits(cast.ids, clues);
+    if (statusOf(fit, before(a, c)) !== 'must') continue;
+    const nm = cast.nm;
+    const A = nm(a), B = nm(mid), C = nm(c);
+    const texts = clues.map((cl) => clueText(skin, cl, n, nm));
+    const i = hasBefore(clues, a, mid), j = hasBefore(clues, mid, c);
+    const front = skin.spot(1, n, true);
+    const reasons: LineReason[] = [
+      // Two clues alone force it: every order that fits just those two has a before c (the chain rule, listed).
+      { id: 'chain', label: `Clue ${i + 1} says ${skin.before(A, B)}. Clue ${j + 1} says ${skin.before(B, C)}. So ${B} links them.`, holds: i >= 0 && j >= 0 && fits(cast.ids, [clues[i], clues[j]]).every((p) => p.indexOf(a) < p.indexOf(c)) },
+      { id: 'direct', label: `A clue says ${skin.before(A, C)}.`, holds: hasBefore(clues, a, c) >= 0 },
+      { id: 'fork', label: `${cap(skin.before(A, B))}, and ${skin.before(C, B)}. So ${B} links them.`, holds: hasBefore(clues, a, mid) >= 0 && hasBefore(clues, c, mid) >= 0 },
+      { id: 'first', label: `${cap(say(skin, 'is', A, front))}, so ${skin.before(A, C)}.`, holds: JSON.stringify(whoCanBeAt(fit, 1)) === JSON.stringify([a]) },
+    ];
+    const right = reasons.filter((r) => r.holds);
+    if (right.length !== 1 || right[0].id !== 'chain') continue;
+    const t: Talk = { skin, nm, clues, texts };
+    const ow = (p: readonly string[]) => orderText(skin, cast, p);
+    const notFirst = fit.find((p) => p[0] !== a)!;
+    const order = fit[0];
+    /** The best try at the other way round (the closest order with c before a): it breaks a clue. */
+    const swapped = closest(cast.ids, clues, (p) => p.indexOf(c) < p.indexOf(a), order);
+    const ac = (p: readonly string[]): Truth => ({ who: cap(skin.before(A, C)), value: p.indexOf(a) < p.indexOf(c) });
+    const feedback: Record<string, ChoiceFeedback> = {
+      direct: {
+        headline: `No clue names ${A} and ${C} together.`,
+        detail: [`The clues link ${A} and ${C} only through ${B}.`, `Clue ${i + 1} says ${skin.before(A, B)}. Clue ${j + 1} says ${skin.before(B, C)}. That chain proves it.`],
+        example: lineCase(t, order, [ac(order)]),
+      },
+      fork: {
+        headline: `Clue ${j + 1} says ${skin.before(B, C)}, not the other way around.`,
+        detail: [`So ${B} is in the middle: ${skin.before(A, B)}, and ${skin.before(B, C)}.`, 'That is a chain, not a fork. A chain links the two ends.'],
+        example: lineCase(t, order, [ac(order)]),
+      },
+      first: {
+        headline: `The clues do not prove that ${say(skin, 'is', A, front)}.`,
+        detail: [`Think of the order ${ow(notFirst)}. Every clue is true there, but ${say(skin, 'is', nm(notFirst[0]), front)}.`, `Still, ${skin.before(A, C)} there. The chain through ${B} proves that.`],
+        example: lineCase(t, notFirst, [ac(notFirst)]),
+      },
+    };
+    const item: ChooseItem = {
+      kind: 'choose',
+      id: o.id,
+      stop: STOP,
+      lesson: 's3.l1',
+      skill: WHY_SKILL,
+      prompt: `${cast.setting} The clues prove that ${skin.before(A, C)}. Which reason shows why?`,
+      scene: { kind: 'clues', clues: texts },
+      choices: rng.shuffle(reasons.map((r) => ({ id: r.id, label: r.label }))),
+      answer: 'chain',
+      feedback,
+      explain: `${cap(skin.before(A, B))}, and ${skin.before(B, C)}. ${B} links them, so ${skin.before(A, C)}.`,
+      hint: `Here is one order that fits, checked for you. Who links ${A} and ${C}?`,
+      hintCase: lineCase(t, order, [ac(order)], `Every clue is true here, and ${skin.before(A, C)}.`),
+      teach: {
+        rule: 'A chain links two people through a middle person. If A is before B, and B is before C, then A is before C.',
+        terms: [{ word: 'A chain', meaning: 'clues that link up, one person to the next, so you can follow them from one end to the other.' }, ...clueTerms(skin, clues)].slice(0, 3),
+        meaning: `Clue ${i + 1} puts ${A} ahead of ${B}. Clue ${j + 1} puts ${B} ahead of ${C}. No clue names ${A} and ${C} together.`,
+        casesTitle: `Could ${skin.before(C, A)}?`,
+        // One order that fits, and the best try with the two swapped: it breaks a clue, so every such order does.
+        cases: [surveyCase(t, order, [ac(order)], `${cluesNote(t, order)} ${cap(skin.before(A, C))} here.`), surveyCase(t, swapped, [ac(swapped)], bestTryNote(t, swapped, skin.before(C, A), ''))],
+        remember: ['Follow the chain from one end to the other.', `Ask: “Who links the two, ahead of one and behind the other?”`],
+        simpler: [
+          `${cap(skin.before(A, B))}.`,
+          `${cap(skin.before(B, C))}.`,
+          `So in the order ${skin.lineLabel.toLowerCase()}, ${A} comes before ${B}, and ${B} comes before ${C}.`,
+          `So ${skin.before(A, C)}.`,
+        ],
+      },
+      tags: [WHY_TAG],
+    };
+    syncWhyWrong(item);
+    return { item, ids: cast.ids, order, clues, reasons, a, mid, c };
+  }
+  throw new Error('whyChainItem: no puzzle found');
+}
+
 // ---------- lesson 2: before vs right before ----------
 
 export interface StatusOpts {

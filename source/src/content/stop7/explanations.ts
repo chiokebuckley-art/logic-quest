@@ -85,7 +85,7 @@ export const lesson: LessonModule['lesson'] = {
         'Picture the idea as the whole story of what happened. It fits a clue if the clue could still be true in that story. It misses a clue if the story would make the clue different.',
         `Say the street is wet too. ${WORKED_SHOWN[1].why.rain} So ${RAIN.name} fits that clue.`,
         `${WORKED_SHOWN[1].why.sprinkler} So ${SPRINKLER.name} misses that clue.`,
-        'In Stop 6, you asked: could it happen another way? Here, each idea is the whole story. Don’t add a second idea to save it.',
+        'In Stop 7, you asked: could it happen another way? Here, each idea is the whole story. Don’t add a second idea to save it.',
         'The best explanation must fit every clue. If an idea misses even one clue, it is out.',
       ],
     },
@@ -129,6 +129,7 @@ export const lesson: LessonModule['lesson'] = {
   distinctions: [FITS_VS_EXPLAINS],
   practice: practiceOf(LESSON, practice),
   pass: { firstTry: 3, include: [CAN_FAIL] },
+  terms: [{ term: 'best explanation', means: 'The idea that fits every clue and needs the fewest extra things. It is a best guess, not a proof.' }],
 };
 
 /** Two items for the stop check: a new clue (a conflict item) and one other kind, each in any skin. */

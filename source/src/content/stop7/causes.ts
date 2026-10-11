@@ -62,6 +62,7 @@ export const lesson: LessonModule['lesson'] = {
   distinctions: [WORKS_VS_ONLY_CAUSE, TESTS_VS_RECORDS],
   practice: practiceOf(ID, pack),
   pass: { firstTry: 3, include: [CAN_FAIL, RECORDS_GROUP] },
+  terms: [{ term: 'cause', means: 'Something that makes another thing happen. Flip a switch, and a lamp turns on: the switch is the cause.' }],
 };
 
 /** Two items for the stop check: a test table (which, or can’t tell) and a conflict item (together, or a third thing). */

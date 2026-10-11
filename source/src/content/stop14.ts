@@ -592,6 +592,10 @@ const star: LessonDef = {
   requires: [],
   ideas: STAR_IDEAS,
   drill: [starBoard(), starTwinBoard()],
+  terms: [
+    { term: 'unit', means: 'The shortest block that repeats to make the whole chain.' },
+    { term: 'position', means: 'The spot of a piece in the chain. The first piece is position 1.' },
+  ],
   practice: starPack,
   practiceAt: (rng, level) => (level <= 1 ? starPackL1(rng) : starPack(rng)),
   review: (rng) =>
@@ -677,7 +681,14 @@ const echo: LessonDef = {
 
 // ---------- the Ring Check, the Arcade, new examples, the diagnostic ----------
 
-/** The Ring Check: 9 fresh items, three per place; each place's trap is a conflict item. */
+/** A place's Explain item as the check's closing why item: its choices are reasons, one right (tag `why`). */
+const asWhy = (it: Item): Item => ({ ...it, tags: [...(it.tags ?? []), 'why'] });
+
+/**
+ * The Ring Check: 9 fresh items, three per place; each place's trap is a conflict item. Last comes the closing why item
+ * (docs/CURRICULUM-PLAN.md): one place's Explain item, whose choices are reasons (why a block is not the unit, why a
+ * piece breaks the rule, or why two blocks match).
+ */
 function check(rng: Rng): Item[] {
   const made = distinctSet([
     () => ({ ...unitItem(rng, { trap: true }), conflict: true }),
@@ -689,6 +700,7 @@ function check(rng: Rng): Item[] {
     () => ({ ...matchItem(rng, { from: 'abc', to: 'sounds', trap: true }), conflict: true }),
     () => rebuildItem(rng, {}),
     () => matchItem(rng, { from: rng.pick(ECHO_TRANSFER), to: rng.pick(['colors', 'bells'] as const) }),
+    () => asWhy(rng.pick([unitWhyItem, repairWhyItem, echoWhyItem])(rng)),
   ]);
   return ids(made, `s${STOP}-c`);
 }
@@ -760,7 +772,7 @@ export const stop14: StopDef = {
   check,
   practice: arcade,
   fresh,
-  requires: [],
+  requires: ['s1'],
   lessonOrder: 'free',
   skillNames: SKILL_NAMES_S14,
   observatory: { ring: 1, track: 1, plain: 'Repeating units', diagnostic },

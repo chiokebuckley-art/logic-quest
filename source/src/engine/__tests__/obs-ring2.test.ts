@@ -414,7 +414,7 @@ describe('Clock Tower: positions from 1, elapsed steps from 0 (acceptance check 
 describe('Rule Rise: the places, their cards and boards', () => {
   it('three places in order, with the routine, track, levels, plain label, requirements and primers the handoff gives', () => {
     expect(stop15.ready).toBe(true);
-    expect(stop15.requires).toEqual([]);
+    expect(stop15.requires).toEqual(['s14']);
     expect(stop15.lessonOrder).toBe('free');
     const [l1, l2, l3] = stop15.lessons;
     expect([l1.id, l2.id, l3.id]).toEqual(['s15.l1', 's15.l2', 's15.l3']);
@@ -658,12 +658,15 @@ describe('Rule Rise: every item, seeds 1 to 40', () => {
     }
   });
 
-  it('the ring check: 9 items over all three places, a conflict item, new on most seeds', () => {
+  it('the ring check: 9 items over all three places, then the closing why item (an Explain item, tag why); a conflict item, new on most seeds', () => {
     const seen = new Set<string>();
     for (let seed = 1; seed <= 300; seed++) {
       const items = stop15.check!(createRng(seed));
-      expect(items).toHaveLength(9);
-      for (const l of stop15.lessons) expect(items.filter((x) => x.lesson === l.id)).toHaveLength(3);
+      expect(items).toHaveLength(10);
+      const why = items[9];
+      expect(why.tags).toContain('why');
+      expect(['s15.stair-why', 's15.machine-why', 's15.cycle-why']).toContain(why.skill);
+      for (const l of stop15.lessons) expect(items.slice(0, 9).filter((x) => x.lesson === l.id)).toHaveLength(3);
       expect(items.some((x) => x.conflict)).toBe(true);
       seen.add(JSON.stringify(items.map((x) => [x.prompt, x.scene])));
     }

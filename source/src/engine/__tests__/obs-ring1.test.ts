@@ -270,7 +270,8 @@ describe('every place generates for seeds 1-40 with the contract’s shapes', ()
       }
     }
     expect(stop14.ready).toBe(true);
-    expect(stop14.requires).toEqual([]);
+    // The ring opens after Stop 1 (docs/CURRICULUM-PLAN.md §1); its places keep their skill-based opening.
+    expect(stop14.requires).toEqual(['s1']);
     expect(stop14.lessonOrder).toBe('free');
     expect(stop14.observatory).toMatchObject({ ring: 1, track: 1, plain: 'Repeating units' });
   });
@@ -486,6 +487,9 @@ describe('acceptance checks this ring owns', () => {
       for (const l of LESSONS) expect(items.some((x) => x.lesson === l.id)).toBe(true);
       expect(items.filter((x) => x.conflict)).toHaveLength(3);
       for (const x of items.filter((y) => y.conflict)) expect(Object.values(TRAP).some((t) => x.tags?.includes(t)), x.id).toBe(true);
+      // The closing why item: one place's Explain item, last, tag why (its choices are reasons).
+      expect(items[items.length - 1].tags).toContain('why');
+      expect(['s14.unit-why', 's14.repair-why', 's14.echo-why']).toContain(items[items.length - 1].skill);
       expect(items.every((x) => !x.frame)).toBe(true);
       expect(stop14.check!(createRng(seed))).toEqual(items);
       seen.add(JSON.stringify(items.map((x) => [x.prompt, x.scene])));

@@ -266,6 +266,110 @@ did not happen: “The card that shows “No broom.”” The rule with “Helme
 on the back: true. You must turn it over: false. For one card it is another card: the IF card, or the NOT IF card
 when the IF card is asked.
 
+## Lesson 6 · Only if, and unless
+
+Added by the curriculum plan (`docs/CURRICULUM-PLAN.md`, §3 “Stop 6 extension”); lessons 1 to 5 are unchanged.
+
+**Model.** Each form is said as if–then rules (`FORM_CONDS` in `engine/puzzles/conditionals.ts`): “P only if Q” is “If P,
+then Q”; “P unless Q” is “If not Q, then P”. A box keeps the form when it keeps every one of those rules (`formHolds`), so
+“only if” and “unless” each break in one box (`formBroken`). Each form’s usual misreading is a rule too (`MISREAD`): “only if” turned
+around (“If Q, then P”), and “unless” read as “If Q, then not P”. A case where the misreading and the form disagree is a
+conflict item (`misreadMatters`). A sentence means the same as the form when the same cases break them (`sameAsForm`).
+
+**See.** Five cards.
+1. “Only if”: the library rule, “You take a book home only if you have a library card.” Kai (a card, no book) is marked in
+   words: the part before “only if” did not happen, so the rule asks for nothing.
+2. “Say it with if”: the rule means “If you take a book home, then you have a library card.” The one case that breaks
+   both: a kid who takes a book home with no library card.
+3. The contrast card, titled “Only if” is not plain “if” (distinction `only-if-vs-if`): the same case under “only if”
+   and under plain “if” (“You take a book home if you have a library card”, where the card would be enough).
+4. “Unless”: the recess rule, “Recess is outside unless it rains.” Monday (no rain, recess inside) is marked: it breaks
+   the rule.
+5. “Rain makes no promise”: said with if, “If it does not rain, then recess is outside.” Tuesday (rain, recess outside)
+   keeps it; only a day with no rain and recess inside breaks it.
+
+**Do.** Four boards, each built by an engine helper (`formBoxDrill`, `sentenceGridDrill`), so every mark comes from the
+rules. None has a twin note: each is the board of the card right before it.
+- `s6.l6-do-only` “Mark the four boxes”, after card 1: the only-if rule’s four boxes (Took a book home, No book home ×
+  Library card, No library card), ✓ or ✗ each; one ✗ (a book home, no card).
+- `s6.l6-do-only-vs-if` “Only if, or plain if?”, after the contrast: the four cases with the only-if column given; the
+  learner marks the if–then sentence (the same as the rule) and plain “if” (breaks only where the card is there and no
+  book went home). 8 taps. Catches `plain-as-only-if` (the plain-if column copied from the rule).
+- `s6.l6-do-unless` “Mark the four boxes again”, after card 4: the unless rule’s four boxes (Outside, Inside × Rain, No
+  rain); one ✗ (no rain, inside).
+- `s6.l6-do-unless-if` (title: Say “unless” with if), after card 5: the unless column given; the learner marks sentence A (“If
+  it does not rain, then recess is outside”, the same) and sentence B (“If it rains, then recess is inside”, the everyday
+  reading). 8 taps.
+
+**Quiz.** `formWhoItem` (which case breaks it) or `formDidItem` (did this case break it) on the four boxes, and
+`formPickItem` (which if–then sentence means the same), for “only if” and for “unless” in other stories, then
+`whyOnlyIfItem` last (why the rule means “If P, then Q” and not “If Q, then P”; tags `why` and the trap). Skills
+`s6.only-if` and `s6.unless`. Trap tag `only-if-trap` (“only if” is easy to turn around), on every only-if who and pick
+item and on a did item where the misreading disagrees. Pack of five; the first two are in different story groups
+(everyday, fantasy, abstract).
+
+**Pass.** `{ firstTry: 3, include: [only-if-trap] }`.
+
+**Terms.** only if; unless. **Distinction.** `only-if-vs-if` (the part after “only if” is needed; after plain “if” it is
+enough).
+
+## Lesson 7 · Both ways: needed and enough
+
+**Model.** “P if and only if Q” is two rules at once, “If P, then Q” and “If Q, then P”, so two boxes break it. On a plain
+if–then rule, the IF part is enough (sufficient) for the THEN part, and the THEN part is needed (necessary) for the IF
+part: “needed” and “enough” sentences are if–then rules too (`needCond`), worked out box by box. The cards are lesson 5’s
+letter cards (E, K, 4, 7; “If a card has a vowel, then it has an even number”): a card must be turned when some back
+breaks the rule (`mustTurn`).
+
+**See.** Five cards.
+1. “Each way”: “You get dessert if and only if you have eaten all your veggies”, said as two rules. Dee (all the veggies,
+   no dessert) is marked: that breaks it. Two boxes break this rule, not one.
+2. “Enough and needed”: the plain dessert rule; the IF part is enough, the THEN part is needed; names sufficient and
+   necessary.
+3. “Needed is not enough”: the contrast card (distinction `needed-vs-enough`) shows Dee under “needed” and under “enough”.
+4. “Back to the cards”: E (a vowel is enough for an even number: turn it), 7 (an even number is needed for a vowel: turn
+   it), 4 (an even number is not enough for a vowel: skip it).
+5. “The trap”: reading “needed” as “enough” turns the rule around.
+
+**Do.** Three boards, none with a twin note.
+- `s6.l7-do-iff` “Mark the four boxes”, after card 1: the rule’s four boxes (Dessert, No dessert × Ate all veggies, Left
+  some veggies); two ✗.
+- `s6.l7-do-need` “Needed, or enough?”, after the contrast: the four cases with the rule given; the learner marks
+  “Eating all your veggies is needed to get dessert” (the same as the rule) and “Eating all your veggies is enough to get
+  dessert” (breaks only for a kid who ate all the veggies and skips dessert). 8 taps. Catches `needed-as-enough`.
+- `s6.l7-do-cards` “The cards again”, after card 4: E and 7 are given, checked back by back; the learner checks 4 and K
+  (each back keeps the rule; turn it over? no). Picking “turn it over” on the 4 is the `needed-as-enough` mix-up.
+
+The plan put the needed-and-enough board on the four-box card; the code uses a sentence grid beside the rule, as the
+plan’s §6 status says.
+
+**Quiz.** `formDidItem` (did this case break the if-and-only-if rule) and `iffWhoItem` (pick every case that breaks it),
+`needPickItem` (which sentence is true: needed or enough) and `needYesNoItem` (is this needed or enough sentence true),
+then `whyCardItem` last (why the THEN card need not be turned; tags `why` and the trap). Skills `s6.iff` and
+`s6.need-enough`. Trap tag `needed-as-enough` (“needed” read as “enough”), on every pick item and the why item. Pack of
+five.
+
+**Pass.** `{ firstTry: 3, include: [needed-as-enough] }`.
+
+**Terms.** if and only if; sufficient (enough); necessary (needed). **Distinction.** `needed-vs-enough`.
+
+## Lessons 6 and 7 in the stop
+
+- **Check:** still 10 items. Lessons 6 and 7 take the last two places: a question from one, then the closing why item
+  from the other (`whyOnlyIfItem` for lesson 6, `whyCardItem` for lesson 7, both tagged `why` and conflict items). The
+  check-shape test in `conditionals.test.ts` (“every check has 10 items …”) pins this order.
+- **Arcade:** a lesson 6 or 7 slot gives a why item one time in five, otherwise any question of that lesson.
+- **Warm-up (bridge):** a Stop 5 “suppose it and test it” question (`supposeItem`: suppose one islander’s kind; what must
+  the other be, or does the guess crash?). It is stored as a Stop 5 item.
+- **Skill names:** `s6.only-if`, `s6.unless`, `s6.iff`, `s6.need-enough` (`StopDef.skillNames`).
+- **Plan and code:** the plan’s why item asks why the “4” card need not be turned, or why “only if” points the other way;
+  the code asks one of the two at random. The plan also asks for converse, inverse and contrapositive as terms on lesson
+  4; that is lesson 4’s, not covered here.
+- **Test:** `engine/__tests__/conditionals.test.ts`, block “stop 6 lessons 6 and 7”: L67-logic (each form breaks where the
+  brute force says), L67-items (every lesson 6 and 7 question solved again from its words), L67-why, L67-packs (every pack
+  has its trap, two kinds of story and the why item last), L67-boards (every mark worked out again; each mix-up fires on
+  its picks), L67-confused, L67-fresh, L67-terms, L67-bridge.
+
 ## Tests
 
 In `engine/__tests__/conditionals.test.ts`, block “stop 6: See -> Do -> Quiz (skill-drill handoff)”:

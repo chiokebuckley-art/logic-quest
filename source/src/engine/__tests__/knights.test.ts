@@ -66,6 +66,7 @@ import {
   type SkinId,
   type SupposeAnswer,
   type WordsType,
+  WHY_SKILL,
 } from '../puzzles/knights';
 import { READING, fkGrade, sentences, words } from '../readability';
 import { createRng } from '../rng';
@@ -829,6 +830,13 @@ describe('stop 5 content', () => {
     for (let seed = 1; seed <= 30; seed++) {
       for (const l of stop5.lessons) for (const it of l.practice(createRng(seed))) (used.get(it.skill) ?? used.set(it.skill, new Set()).get(it.skill)!).add(it.lesson);
       for (const it of stop5.check!(createRng(seed))) {
+        // The closing why item (tag why) has its own skill, named on the stop (StopDef.skillNames). A miss gets new
+        // examples from StopDef.fresh: a new why item and a guess to crash-test (tested below).
+        if (it.tags?.includes('why')) {
+          expect(it.skill).toBe(WHY_SKILL);
+          expect(stop5.skillNames?.[it.skill], it.skill).toBeDefined();
+          continue;
+        }
         expect(SKILL_NAMES[it.skill], it.skill).toBeDefined();
         // A check item's skill is practised in the lesson it points to, so the Notebook can find a fresh one.
         expect(used.get(it.skill)?.has(it.lesson), `${it.skill} in ${it.lesson}`).toBe(true);
@@ -1456,6 +1464,14 @@ describe('wrong answers teach first (handoff v1.0)', () => {
       for (const item of missed) {
         const set = freshCheckSet(stop5, item, seed * 31, [], 1);
         expect(set.length, `${item.skill} ${item.prompt}`).toBe(item.kind === 'assign' ? 1 : 2);
+        if (item.tags?.includes('why')) {
+          // The closing why item: a new why item on the same skill first, then a guess to crash-test on its own.
+          expect(new Set([item, ...set].map(looks)).size).toBe(3);
+          expect([set[0].lesson, set[0].skill, set[0].kind]).toEqual([item.lesson, item.skill, item.kind]);
+          expect([set[1].lesson, set[1].skill, (set[1] as ChooseItem).answer]).toEqual(['s5.l3', 's5.suppose', 'crash']);
+          for (const x of set) teachShape(x);
+          continue;
+        }
         expect(new Set([item, ...set].map(looks)).size, 'every new example looks different').toBe(set.length + 1);
         for (const x of set) {
           expect([x.lesson, x.skill, x.kind]).toEqual([item.lesson, item.skill, item.kind]);

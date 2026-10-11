@@ -1,5 +1,5 @@
 /**
- * The Pattern Observatory's shared core: unlock rules that never touch the main path, the evidence profile and its
+ * The Pattern Observatory's shared core: unlock rules (every stop's requires, rings included), the evidence profile and its
  * save key, the number item, the diagnostic's adaptive rule, and the circle-regions safeguard (acceptance checks
  * 3, 4, 7, 8 and 9 of the handoff).
  */
@@ -15,27 +15,86 @@ import type { LessonDef, NumberItem, StopDef } from '../types';
 
 const today = '2026-10-07';
 
-describe('unlocks: the Observatory opens from the start and never blocks the main path (acceptance check 8)', () => {
-  it('stops 1-13 unlock exactly as before; the rings are open with no progress', () => {
-    const views = viewAll(STOPS, {}, today);
-    const byId = Object.fromEntries(views.map((v) => [v.stop.id, v.view.status]));
-    expect(byId.s1).toBe('learning');
-    for (let n = 2; n <= 7; n++) expect(byId[`s${n}`], `s${n}`).toBe('locked');
-    for (let n = 8; n <= 13; n++) expect(byId[`s${n}`], `s${n}`).toBe('soon');
-    for (let n = 14; n <= 17; n++) expect(byId[`s${n}`], `s${n}`).toBe(STOPS.find((s) => s.n === n)!.ready ? 'learning' : 'soon');
-    // The lock label still names the stop before, as before.
-    expect(views.find((v) => v.stop.id === 's2')!.view.label).toBe('Opens after Stop 1');
+describe('unlocks: the Journey order and every stop’s requires (docs/CURRICULUM-PLAN.md §1, acceptance check 2)', () => {
+  // Arguments (s18) is built. The regression keeps its one-lesson stand-in, so these unlock checks do not depend on its lessons.
+  const built = STOPS.map((s) => (s.id === 's18' ? { ...s, ready: true, lessons: [{ id: 's18.l1', title: 'Givens and claims', ideas: [], practice: () => [] }] } : s));
+  /** A stop that is not ready (an unknown id, s99): the example of a stop still coming. */
+  const later: StopDef = { n: 99, id: 's99', title: 'Later', idea: '', ready: false, lessons: [] };
+  const passed = (...ids: string[]) => Object.fromEntries(ids.map((id) => [id, { lessonsDone: [], attempts: 1, passDay: '2026-10-01' }]));
+  const statusOf = (stops: readonly StopDef[], progress: Record<string, { lessonsDone: string[]; attempts: number; passDay?: string }>) =>
+    Object.fromEntries(viewAll(stops, progress, today).map((v) => [v.stop.id, v.view]));
+
+  it('with no progress: Stop 1 is open, Arguments opens after Stop 1, NOT, AND, OR after Stop 2, and every ring is locked', () => {
+    const v = statusOf(built, {});
+    expect(v.s1.status).toBe('learning');
+    expect(v.s18).toMatchObject({ status: 'locked', label: 'Opens after Stop 1' });
+    expect(v.s2).toMatchObject({ status: 'locked', label: 'Opens after Stop 2' });
+    for (let n = 3; n <= 7; n++) expect(v[`s${n}`].status, `s${n}`).toBe('locked');
+    // Stops shown as 9-14 (ids s8-s13): a built one waits for the stop it opens after; one still coming shows as coming.
+    for (let n = 8; n <= 13; n++) expect(v[`s${n}`].status, `s${n}`).toBe(built.find((s) => s.id === `s${n}`)!.ready ? 'locked' : 'soon');
+    expect(v.s8).toMatchObject({ status: 'locked', label: 'Opens after Stop 8' });
+    // No ring is open from the start any more: Ring 1 needs Stop 1.
+    for (const s of built.filter((x) => x.observatory)) expect(v[s.id].status, s.id).toBe('locked');
+    expect(v.s14.label).toBe('Opens after Stop 1');
+    expect(v.s15.label).toBe('Opens after Ring 1');
+    expect(v.s16.label).toBe('Opens after Ring 1');
+    expect(v.s17.label).toBe('Opens after Stop 6 (Knights & Knaves), Stop 8 (Ways to Think) and Ring 2 (Rule Rise)');
+    // The real list today: Arguments is built and opens after Stop 1; a stop that is not ready shows as coming; and
+    // NOT, AND, OR names Arguments by its shown number.
+    const real = statusOf([...STOPS, later], {});
+    expect(real.s18).toMatchObject({ status: 'locked', label: 'Opens after Stop 1' });
+    expect(real.s99.status).toBe('soon');
+    expect(real.s2).toMatchObject({ status: 'locked', label: 'Opens after Stop 2' });
   });
-  it('a ring requires nothing; a main stop requires the one before it; passing s1 opens s2 and nothing else changes', () => {
-    for (const s of STOPS.filter((x) => x.observatory)) expect(requiredStops(STOPS, s)).toEqual([]);
-    expect(requiredStops(STOPS, STOPS[1]).map((s) => s.id)).toEqual(['s1']);
-    const after = viewAll(STOPS, { s1: { lessonsDone: [], attempts: 1, passDay: '2026-10-01' } }, today);
-    expect(after.find((v) => v.stop.id === 's2')!.view.status).toBe('learning');
-    expect(after.find((v) => v.stop.id === 's3')!.view.status).toBe('locked');
-    // An unreachable stop cannot exist: every stop's requirements are stops in the list.
-    for (const s of STOPS) expect(stopOpening(STOPS, {}, s).after.length >= 0).toBe(true);
+
+  it('passing Stop 1 opens Arguments and Ring 1; passing Arguments too opens NOT, AND, OR', () => {
+    const one = statusOf(built, passed('s1'));
+    expect(one.s18.status).toBe('learning');
+    expect(one.s14.status).toBe('learning');
+    expect(one.s2.status).toBe('locked');
+    expect(one.s15.status).toBe('locked');
+    const two = statusOf(built, passed('s1', 's18'));
+    expect(two.s2.status).toBe('learning');
+    expect(two.s3.status).toBe('locked');
+    // Ring 2 and Ring 3 need Ring 1; Ring 4 needs Stops 6 and 8 (ids s5, s7) and Ring 2.
+    expect(statusOf(built, passed('s1', 's14')).s15.status).toBe('learning');
+    expect(statusOf(built, passed('s1', 's14')).s16.status).toBe('learning');
+    expect(statusOf(built, passed('s1', 's14', 's15', 's5')).s17.status).toBe('locked');
+    expect(statusOf(built, passed('s1', 's14', 's15', 's5', 's7')).s17.status).toBe('learning');
+  });
+
+  it('a save from before Arguments keeps every stop it had open: started or passed stops never lock again', () => {
+    // Stops 1-7 passed under the old order (no Arguments): all still passed, none locked.
+    const old = statusOf(STOPS, passed('s1', 's2', 's3', 's4', 's5', 's6', 's7'));
+    for (const id of ['s1', 's2', 's3', 's4', 's5', 's6', 's7']) expect(old[id].status, id).toBe('passed');
+    // Arguments is new to this save: it is open, because Stop 1 is passed. A stop that is not ready stays coming.
+    expect(old.s18.status).toBe('learning');
+    expect(statusOf([...STOPS, later], passed('s1', 's2', 's3', 's4', 's5', 's6', 's7')).s99.status).toBe('soon');
+    // Partway through NOT, AND, OR: it stays open; the next stop still waits for it.
+    const partway = statusOf(STOPS, { ...passed('s1'), s2: { lessonsDone: ['s2.l1'], attempts: 0 } });
+    expect(partway.s2.status).toBe('learning');
+    expect(partway.s3.status).toBe('locked');
+  });
+
+  it('every stop requires stops in the list, as the plan sets them; labels name a stop by its shown number', () => {
+    const req = (id: string) => requiredStops(STOPS, STOPS.find((s) => s.id === id)!).map((s) => s.id);
+    expect(req('s1')).toEqual([]);
+    expect(req('s18')).toEqual(['s1']);
+    expect(req('s2')).toEqual(['s18']);
+    expect(req('s14')).toEqual(['s1']);
+    expect(req('s15')).toEqual(['s14']);
+    expect(req('s16')).toEqual(['s14']);
+    expect(req('s17')).toEqual(['s5', 's7', 's15']);
+    expect(req('s11')).toEqual(['s10', 's17']);
+    expect(req('s12')).toEqual(['s8']);
+    expect(req('s13')).toEqual(['s12']);
+    for (const s of STOPS) for (const id of s.requires ?? []) expect(STOPS.some((x) => x.id === id), `${s.id} needs ${id}`).toBe(true);
+    // Two required stops, or one that is not right before: each named with its title.
+    expect(stopOpening(STOPS, {}, STOPS.find((s) => s.id === 's11')!).after).toBe('Stop 11 (Circuit Lab) and Ring 4 (Proof Lantern)');
+    expect(stopOpening(STOPS, {}, STOPS.find((s) => s.id === 's12')!).after).toBe('Stop 9 (All, Some, None)');
+    expect(stopOpening(STOPS, {}, STOPS.find((s) => s.id === 's13')!).after).toBe('Stop 13');
     const fake: StopDef = { n: 99, id: 's99', title: 'X', idea: '', ready: true, lessons: [], requires: ['s1', 's14'] };
-    expect(stopOpening([...STOPS, fake], {}, fake).after).toBe('Stop 1 (True or False?) and Stop 14 (First Lights)');
+    expect(stopOpening([...STOPS, fake], {}, fake).after).toBe('Stop 1 (True or False?) and Ring 1 (First Lights)');
   });
   it('a place opens on skills: required lessons done anywhere, the diagnostic’s credit, or its primer', () => {
     const place: LessonDef = { id: 's15.l2', title: 'Rule Machine', ideas: [], practice: () => [], requires: ['s15.l1', 's2.l5'] };

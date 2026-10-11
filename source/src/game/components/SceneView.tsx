@@ -10,6 +10,10 @@ import { boxTint, RuleBanner } from './boxes';
 import { CaseScene } from './CaseBoard';
 import { ContrastView } from './Distinction';
 import { ObservatoryScene } from './scenes/ObservatoryScene';
+import { RingsPicture } from './RingsScene';
+import { TruthTablePicture } from './TruthTable';
+import { CountsPicture } from './CountsScene';
+import { CircuitPicture } from './CircuitScene';
 
 export { RuleBanner };
 
@@ -182,6 +186,16 @@ export function SceneView({ scene, clueState, labelId, revealed }: SceneViewProp
       );
     case 'grid':
       return <GridPicture scene={scene} labelId={labelId} />;
+    case 'argument':
+      return <ArgumentPicture scene={scene} labelId={labelId} />;
+    case 'rings':
+      return <RingsPicture scene={scene} labelId={labelId} />;
+    case 'table':
+      return <TruthTablePicture scene={scene} labelId={labelId} />;
+    case 'counts':
+      return <CountsPicture scene={scene} labelId={labelId} />;
+    case 'circuit':
+      return <CircuitPicture scene={scene} labelId={labelId} />;
     case 'chain':
     case 'staircase':
     case 'machine':
@@ -192,6 +206,61 @@ export function SceneView({ scene, clueState, labelId, revealed }: SceneViewProp
     case 'lantern':
       return <ObservatoryScene scene={scene} revealed={revealed} labelId={labelId} />;
   }
+}
+
+type ArgumentScene = Extract<Scene, { kind: 'argument' }>;
+
+/**
+ * An argument as a still picture (Stop 2, Arguments): the givens, numbered, then the claim, each with a True or False
+ * tag when the picture says what is really true. Then every case as a box: its facts, and either a cross with the
+ * given it breaks or, for a case left, whether the claim is true there. Two boxes a row, so it fits a phone.
+ */
+function ArgumentPicture({ scene, labelId }: { scene: ArgumentScene; labelId?: string }) {
+  const tag = (v: boolean | null | undefined) =>
+    v === true || v === false ? <span className={`play-arg-real is-${v ? 'true' : 'false'}`}>{v ? 'True' : 'False'}</span> : null;
+  return (
+    <div className="play-scene play-arg" id={labelId}>
+      <ol className="play-arg-givens" aria-label="The givens">
+        {scene.givens.map((g, i) => (
+          <li key={i} className="play-arg-line">
+            <span className="play-arg-tag">Given {i + 1}</span>
+            <span className="play-arg-text">{g}</span>
+            {tag(scene.real?.[i])}
+          </li>
+        ))}
+      </ol>
+      <p className="play-arg-line play-arg-line--claim">
+        <span className="play-arg-tag play-arg-tag--claim">Claim</span>
+        <span className="play-arg-text">{scene.claim}</span>
+        {tag(scene.realClaim)}
+      </p>
+      {scene.cases && scene.cases.length > 0 && (
+        <ol className="play-arg-cases" aria-label="Every case">
+          {scene.cases.map((c) => {
+            const state = c.out ? 'out' : c.claim === true ? 'yes' : c.claim === false ? 'no' : 'open';
+            return (
+              <li key={c.name} className={`play-arg-case is-${state}`}>
+                <span className="play-arg-case-name">{c.name}</span>
+                {c.facts.map((f, k) => (
+                  <span key={k} className="play-arg-fact">{f}</span>
+                ))}
+                {c.out ? (
+                  <span className="play-arg-verdict is-out">
+                    <PlayIcon name="cross" size={14} /> Crossed out: breaks given {c.out}
+                  </span>
+                ) : c.claim !== undefined ? (
+                  <span className={`play-arg-verdict is-${c.claim ? 'true' : 'false'}`}>
+                    Left: the claim is {c.claim ? 'true' : 'false'}
+                  </span>
+                ) : null}
+              </li>
+            );
+          })}
+        </ol>
+      )}
+      {scene.caption && <p className="play-arg-caption">{scene.caption}</p>}
+    </div>
+  );
 }
 
 type GridScene = Extract<Scene, { kind: 'grid' }>;

@@ -42,11 +42,14 @@ import {
   onlyOnePuzzle,
   proofPuzzle,
   spreadPuzzle,
+  whyOnlyOneItem,
+  WHY_SKILL,
   type BoardAsk,
   type LinkMode,
   type MarkClue,
   type SkinId,
 } from '../engine/puzzles/grid';
+import { chainPuzzle, SKIN_IDS as LINE_SKINS } from '../engine/puzzles/lineup';
 import type { Choice, DrillStep, GridClue, IdeaCard, Item, LessonDef, Rng, Scene, StopDef } from '../engine/types';
 
 /** Skins for a practice set: everyday, fantasy, abstract, then any, in a shuffled order. */
@@ -878,6 +881,15 @@ const lessons: LessonDef[] = [
         ],
       },
       {
+        // Names the idea the link uses: kid words first, the grown-up word once.
+        title: 'A pair works both ways',
+        body: [
+          'A link works both ways. If Ava goes with the dog, then the dog goes with Ava.',
+          'So you can read a link from either end. Start with Ava, or start with the dog.',
+          'Grown-ups call a link like this symmetric.',
+        ],
+      },
+      {
         title: 'Back and forth',
         scene: CARD_CLUES.backForth,
         body: [
@@ -889,6 +901,7 @@ const lessons: LessonDef[] = [
       },
     ],
     drill: [L4_LINK, L4_NOT, L4_BACK, L4_BACK_FORTH],
+    terms: [{ term: 'symmetric', also: 'works both ways', means: 'A link that works both ways. If Ava goes with the dog, then the dog goes with Ava.' }],
     // “Who must eat popcorn?” counts the crosses in the popcorn column only (box-vs-kid, taught in lesson 2).
     distinctions: [{ ...BOX_VS_KID, taughtIn: L2 }],
     // Three right on the first try, one of them a whole two-part grid.
@@ -992,7 +1005,18 @@ function check(rng: Rng): Item[] {
     // Proofs are one-part grids, as lesson 5 teaches them.
     () => proofPuzzle(rng, { id: 'c8', skin: any(), ncat: 1 }).item,
     () => enoughPuzzle(rng, { id: 'c9', skin: any(), tell: rng.chance(0.5) }).item,
+    // The closing why item (tag why): one box is left in a row or column, and the reason to pick is “only one left”.
+    () => whyOnlyOneItem(rng, { id: 'c10', skin: any(), n: 3 }).item,
   ]);
+}
+
+/**
+ * The warm-up on the stop page, from Line Up: who is first (or last) from a chain of clues, or can't you tell? It is a
+ * Stop 3 item, so it never counts for this stop. Its prompt says it is a warm-up from Line Up.
+ */
+function bridge(rng: Rng): Item {
+  const it = chainPuzzle(rng, { id: 's4-warm', skin: rng.pick(LINE_SKINS), cantTell: rng.chance(0.35) }).item;
+  return { ...it, prompt: `A warm-up from “Line Up.” ${it.prompt}` };
 }
 
 /** One Arcade item from anywhere in the stop. */
@@ -1034,6 +1058,8 @@ function fresh(missed: Item, rng: Rng): Item[] {
   const enough = (tell: boolean) => enoughPuzzle(rng, { id, skin: skin(), tell }).item;
   const answer = missed.kind === 'choose' ? missed.answer : '';
   switch (missed.skill) {
+    // The check's closing why item: a new “only one left” to explain, then a grid where two boxes are left.
+    case WHY_SKILL: return [whyOnlyOneItem(rng, { id, skin: skin() }).item, open()];
     case 's4.grid-marks': return [markPuzzle(rng, { id, skin: skin(), t: markClueOf(missed) }).item];
     case 's4.only-one-left': return [decided(), open()];
     case 's4.not-decided': return [open(), decided()];
@@ -1054,4 +1080,6 @@ export const stop4: StopDef = {
   check,
   practice: arcade,
   fresh,
+  bridge,
+  skillNames: { [WHY_SKILL]: 'Why a box gets the check mark: only one left' },
 };

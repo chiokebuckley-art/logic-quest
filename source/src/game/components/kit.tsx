@@ -32,6 +32,8 @@ const STOP_PLACE: Record<string, string> = {
   s7: 'fog-marsh', s8: 'twin-isles', s9: 'switch-caverns', s10: 'signal-camp', s11: 'of-rules', s12: 'trickster-market', s13: 'chance-dock',
   // The Pattern Observatory rings reuse the sky-side art until the constellation art is drawn.
   s14: 'chance-dock', s15: 'ladder-cliffs', s16: 'twin-isles', s17: 'of-rules',
+  // Arguments (shown as Stop 2) uses the of-rules art until its own is drawn.
+  s18: 'of-rules',
 };
 
 export function stopPlace(stopId: string): { art: string; name: string } {

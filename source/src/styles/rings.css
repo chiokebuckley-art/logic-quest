@@ -1,0 +1,21 @@
+/* ---------- rings around shape cards (All, Some, None): a still SVG picture with a caption under it ---------- */
+.play-rings {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.play-rings-svg {
+  display: block;
+  width: 100%;
+  max-width: 420px;
+  height: auto;
+  margin: 0 auto;
+  color: var(--text-2, #c9cff0);
+}
+.play-rings-cap {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--text-2, #c9cff0);
+}

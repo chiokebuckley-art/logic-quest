@@ -65,6 +65,11 @@ export const S5_WORLD: StopWorld = {
       'Your water bottle matches a teammate’s. Suppose the left one is yours, so the right is hers. You drank half of yours, so if the left one is full, that crashes: the right is yours.',
       'Suppose the top switch runs the porch light, so the bottom one runs the hall light. Flip the bottom one. If the porch light comes on, the guess crashes: top runs the hall light.',
     ],
+    // The check's closing why item: the reason is that the other guess crashes in every case.
+    's5.why-crash': [
+      'A gardener supposes a plant wilted from too much water. Then its soil would be wet, but the soil is dry. That guess crashes, so too much water was not the cause.',
+      'You suppose your friend took the last apple. Then she was home today, but she was at practice all day. That guess crashes, so someone else took it.',
+    ],
     // s5.l4 Three islanders
     's5.three': [
       'A team captain says, “At least one of us has never played on this field.” Her “us” counts her too. If she has played here before, then at least one teammate has not.',

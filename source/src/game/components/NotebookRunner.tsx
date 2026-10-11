@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from 'react';
 import { seedFor } from '../../engine/journey/mastery';
 import { FIX_GAPS, FIXES_TO_CLEAR, freshItem, type NoteCard } from '../../engine/notebook';
 import type { Item, StopDef } from '../../engine/types';
+import { stopLabel } from '../../content/stops';
 import { skillName } from '../progressStats';
 import type { AnswerRecord } from './contracts';
 import { PlayHeader, type DotState } from './ItemView';
@@ -114,7 +115,7 @@ export function NotebookRunner({ cards, stops, seed, readAloud, onFix, onExit }:
           </h2>
           <p>
             <strong>{upperFirst(skillName(tries[step.i].card.skill))}</strong>
-            {' · '}Stop {tries[step.i].card.stop}
+            {' · '}{stopLabel(tries[step.i].stop)}
           </p>
           {!step.cleared && step.clean && (
             <p>

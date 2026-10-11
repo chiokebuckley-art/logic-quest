@@ -1,7 +1,7 @@
 /** Arcade: practice any passed stop, one puzzle at a time. Blitz and Conquer come later. */
 import { useState } from 'react';
 import { seedFor } from '../../engine/journey/mastery';
-import { STOPS, stopById } from '../../content/stops';
+import { STOPS, stopById, stopLabel, stopNumber } from '../../content/stops';
 import { PageHead, StopArt } from '../components/kit';
 import { useStore, type Route } from '../store';
 import { PracticeRunner } from '../components/PracticeRunner';
@@ -43,7 +43,7 @@ function ArcadeHome() {
       <div className="sl-art-grid">
         {STOPS.map((stop) => {
           const open = !!save.stops[stop.id]?.passDay && !!stop.practice && stop.ready;
-          const sub = open ? 'tap to practice' : !stop.ready ? 'coming soon' : `opens at Stop ${stop.n} pass`;
+          const sub = open ? 'tap to practice' : !stop.ready ? 'coming soon' : `opens at ${stopLabel(stop)} pass`;
           return (
             <button
               key={stop.id}
@@ -53,7 +53,7 @@ function ArcadeHome() {
               onClick={() => actions.navigate({ name: 'arcade', practice: stop.id })}
             >
               <StopArt stopId={stop.id} />
-              <span className="sl-art-name">{stop.n}. {stop.title}</span>
+              <span className="sl-art-name">{stop.observatory ? `Ring ${stop.observatory.ring}` : stopNumber(stop)}. {stop.title}</span>
               <span className={`sl-art-sub ${open ? 't-lime' : 't-muted'}`}>{sub}</span>
             </button>
           );

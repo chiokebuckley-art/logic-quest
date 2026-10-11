@@ -2257,3 +2257,1185 @@ export function pqMeaningScratch(rewrites: Rewrite[]): DrillStep {
   const board = meaningDrill('pq', { id: 'scratch', title: 'Your case grid', body: [`The rule: “${ruleText('pq')}” ${PQ_KEY}`, ...lines, 'Mark the boxes if it helps. Nothing here is checked.'] }, rewrites);
   return { ...board, done: '', words: { closing: LETTERS_CLOSING } };
 }
+
+// ---------- lessons 6 and 7: only if, unless, if and only if, needed and enough ----------
+//
+// Each new way of saying a rule is said again as if–then rules (FORM_CONDS), so every truth below comes from
+// condHolds() over the four cases, never written by hand:
+//  - “P only if Q” is “If P, then Q”: the part after “only if” is needed. It is broken only when P happens and Q does not.
+//  - “P unless Q” is “If not Q, then P”. It is broken only when neither part happens.
+//  - “P if and only if Q” is “If P, then Q” and “If Q, then P”. It is broken when one part happens without the other.
+//  - In “If P, then Q”, P is enough for Q (sufficient) and Q is needed for P (necessary): needCond().
+// Lesson 7 points back to lesson 5's cards: the card that shows the THEN part need not be turned, because the THEN part
+// is needed for the IF part, not enough for it (whyCardItem). The closing why item of the stop check is that item, or
+// the one on why “only if” points the other way (whyOnlyIfItem).
+
+export type FormKind = 'only-if' | 'unless' | 'iff';
+export const FORMS: readonly FormKind[] = ['only-if', 'unless', 'iff'];
+
+/** Each form, said as if–then rules. A case keeps the form when it keeps every one of them. */
+export const FORM_CONDS: Record<FormKind, readonly Cond[]> = {
+  'only-if': [{ a: 'P', b: 'Q' }],
+  unless: [{ a: 'notQ', b: 'P' }],
+  iff: [{ a: 'P', b: 'Q' }, { a: 'Q', b: 'P' }],
+};
+export const formHolds = (f: FormKind, r: Row) => FORM_CONDS[f].every((c) => condHolds(c, r));
+export const formBroken = (f: FormKind) => ROWS.filter((r) => !formHolds(f, r));
+/** An if–then sentence means the same as a form when the same cases break them. */
+export const sameAsForm = (c: Cond, f: FormKind) => ROWS.every((r) => condHolds(c, r) === formHolds(f, r));
+/**
+ * The way each form is most often misread: “P only if Q” as “If Q, then P” (the trap of lesson 6), “P unless Q” as
+ * “If Q, then not P”, and “P if and only if Q” as one way only. A case where the misreading and the form disagree is a
+ * conflict item.
+ */
+export const MISREAD: Record<FormKind, Cond> = { 'only-if': { a: 'Q', b: 'P' }, unless: { a: 'Q', b: 'notP' }, iff: { a: 'P', b: 'Q' } };
+export const misreadMatters = (f: FormKind, r: Row) => condHolds(MISREAD[f], r) !== formHolds(f, r);
+
+/** The tag of lesson 6's trap (“only if” turned around) and lesson 7's (“needed” read as “enough”). */
+export const ONLY_IF_TRAP = 'only-if-trap';
+export const NEED_TRAP = 'needed-as-enough';
+/** The tag every closing why item carries (its choices are reasons). */
+export const WHY_TAG = 'why';
+
+/** The words of one story for lessons 6 and 7: its people or days, its two parts and its four cases. */
+export interface Story {
+  id: StoryId;
+  group: Group;
+  setting: string;
+  /** An extra line under the rule (the vowels, for letter cards). */
+  note?: string;
+  names: readonly string[];
+  /** The parts: `if` as it follows “if” (or starts the sentence), `then` as it follows “then”. */
+  parts: Record<Lit, { if: string; then?: string }>;
+  /** A fact about one case: capital first letter, no final period. */
+  fact(l: Lit, name: string): string;
+  /** A whole case about one name, as a sentence without its period. */
+  says(name: string, r: Row, sym: Symbols): string;
+  /** A case as a choice label, without its period. */
+  label(name: string, r: Row, sym: Symbols): string;
+  ask: string;
+  did(name: string): string;
+  /** A case as a noun phrase. */
+  kase: Record<RowKey, string>;
+  /** Short names for the four boxes. */
+  face: Record<Lit, string>;
+  /** What the rule talks about, by the IF part of its if–then form (the part before “only if”, NOT the part after “unless”). */
+  onlyAbout: string;
+}
+
+export type StoryId = SkinId | 'recess' | 'store' | 'cave' | 'broom';
+
+/** A story told on days: the cases are days (or nights), and the facts are about what happened that day. */
+function dayStory(o: Omit<Story, 'names' | 'parts' | 'label' | 'says'> & { parts: Record<Lit, string>; says(name: string, r: Row): string }): Story {
+  const { parts, says, ...rest } = o;
+  return {
+    ...rest,
+    names: DAYS,
+    parts: { P: { if: parts.P }, notP: { if: parts.notP }, Q: { if: parts.Q }, notQ: { if: parts.notQ } },
+    says: (n, r) => says(n, r),
+    label: (n, r) => says(n, r),
+  };
+}
+
+/** The “unless” stories: each one names a usual thing (the part before “unless”) and the one thing that can stop it. */
+const DAY_STORIES: Record<'recess' | 'store' | 'cave' | 'broom', Story> = {
+  recess: dayStory({
+    id: 'recess',
+    group: 'everyday',
+    setting: 'The school has a rule for recess.',
+    ask: 'Which day breaks the rule?',
+    parts: { P: 'recess is outside', notP: 'recess is inside', Q: 'it rains', notQ: 'it does not rain' },
+    fact: (l, n) => ({ P: `Recess was outside on ${n}`, notP: `Recess was inside on ${n}`, Q: `It rained on ${n}`, notQ: `It did not rain on ${n}` })[l],
+    says: (n, r) => `On ${n}, it ${r.q ? 'rained' : 'did not rain'} and recess was ${r.p ? 'outside' : 'inside'}`,
+    did: (n) => `Did the school break the rule on ${n}?`,
+    kase: { TT: 'a day with rain and recess outside', TF: 'a day with no rain and recess outside', FT: 'a day with rain and recess inside', FF: 'a day with no rain and recess inside' },
+    face: { P: 'Outside', notP: 'Inside', Q: 'Rain', notQ: 'No rain' },
+    onlyAbout: 'The rule only talks about days with no rain.',
+  }),
+  store: dayStory({
+    id: 'store',
+    group: 'everyday',
+    setting: 'The corner store has a rule.',
+    ask: 'Which day breaks the rule?',
+    parts: { P: 'the store is open', notP: 'the store is closed', Q: 'it is a holiday', notQ: 'it is not a holiday' },
+    fact: (l, n) => ({ P: `The store was open on ${n}`, notP: `The store was closed on ${n}`, Q: `${n} was a holiday`, notQ: `${n} was not a holiday` })[l],
+    says: (n, r) => `On ${n}, it was ${r.q ? '' : 'not '}a holiday and the store was ${r.p ? 'open' : 'closed'}`,
+    did: (n) => `Did the store break the rule on ${n}?`,
+    kase: { TT: 'a holiday with the store open', TF: 'a regular day with the store open', FT: 'a holiday with the store closed', FF: 'a regular day with the store closed' },
+    face: { P: 'Open', notP: 'Closed', Q: 'Holiday', notQ: 'Not a holiday' },
+    onlyAbout: 'The rule only talks about days that are not holidays.',
+  }),
+  cave: dayStory({
+    id: 'cave',
+    group: 'fantasy',
+    setting: 'The cave dragon has a rule.',
+    ask: 'Which night breaks the rule?',
+    parts: { P: 'the dragon sleeps', notP: 'the dragon stays awake', Q: 'the moon is full', notQ: 'the moon is not full' },
+    fact: (l, n) => ({ P: `The dragon slept on ${n} night`, notP: `The dragon stayed awake on ${n} night`, Q: `The moon was full on ${n} night`, notQ: `The moon was not full on ${n} night` })[l],
+    says: (n, r) => `On ${n} night, the moon was ${r.q ? '' : 'not '}full and the dragon ${r.p ? 'slept' : 'stayed awake'}`,
+    did: (n) => `Did the dragon break the rule on ${n} night?`,
+    kase: {
+      TT: 'a full moon night when the dragon sleeps',
+      TF: 'a night with no full moon when the dragon sleeps',
+      FT: 'a full moon night when the dragon stays awake',
+      FF: 'a night with no full moon when the dragon stays awake',
+    },
+    face: { P: 'Sleeps', notP: 'Awake', Q: 'Full moon', notQ: 'No full moon' },
+    onlyAbout: 'The rule only talks about nights when the moon is not full.',
+  }),
+  broom: dayStory({
+    id: 'broom',
+    group: 'fantasy',
+    setting: 'Merla the wizard goes to school by broom or on foot. She has a rule.',
+    ask: 'Which day breaks the rule?',
+    parts: { P: 'Merla rides her broom to school', notP: 'Merla walks to school', Q: 'it snows', notQ: 'it does not snow' },
+    fact: (l, n) => ({ P: `Merla rode her broom on ${n}`, notP: `Merla walked on ${n}`, Q: `It snowed on ${n}`, notQ: `It did not snow on ${n}` })[l],
+    says: (n, r) => `On ${n}, it ${r.q ? 'snowed' : 'did not snow'} and Merla ${r.p ? 'rode her broom' : 'walked'}`,
+    did: (n) => `Did Merla break the rule on ${n}?`,
+    kase: { TT: 'a snowy day when Merla rides her broom', TF: 'a day with no snow when Merla rides her broom', FT: 'a snowy day when Merla walks', FF: 'a day with no snow when Merla walks' },
+    face: { P: 'Broom', notP: 'Walks', Q: 'Snow', notQ: 'No snow' },
+    onlyAbout: 'The rule only talks about days with no snow.',
+  }),
+};
+
+/** A lesson 1 skin as a story (its kids, its cases, its card faces). P and Q drop the key line: the parts may swap. */
+function skinStory(id: SkinId, onlyAbout?: string): Story {
+  const s = SKINS[id];
+  const l1 = s.l1;
+  if (!l1) throw new Error(`skinStory: ${id} has no lesson 1 words`);
+  const face: Record<Lit, string> = s.cards
+    ? { P: s.cards.face('P', CLASSIC), notP: s.cards.face('notP', CLASSIC), Q: s.cards.face('Q', CLASSIC), notQ: s.cards.face('notQ', CLASSIC) }
+    : { P: s.fact('P', ''), notP: s.fact('notP', ''), Q: s.fact('Q', ''), notQ: s.fact('notQ', '') };
+  return {
+    id,
+    group: s.group,
+    setting: s.setting,
+    ...(s.note && id !== 'pq' ? { note: s.note } : {}),
+    names: s.names,
+    parts: s.parts,
+    fact: s.fact,
+    says: (name, row, sym) => l1.says({ name, row, sym }),
+    label: (name, row, sym) => l1.label({ name, row, sym }),
+    ask: l1.ask,
+    did: l1.did,
+    kase: s.kase,
+    face,
+    onlyAbout: onlyAbout ?? s.onlyAbout,
+  };
+}
+
+/** Stories for each form: “only if” and “if and only if” use lesson 1's rules; “unless” has its own. */
+export const ONLY_IF_STORIES: readonly SkinId[] = L1_SKINS;
+export const IFF_STORIES: readonly SkinId[] = L1_SKINS;
+export const UNLESS_STORIES: readonly StoryId[] = ['recess', 'store', 'cave', 'broom', 'pq'];
+export const FORM_STORIES: Record<FormKind, readonly StoryId[]> = { 'only-if': ONLY_IF_STORIES, unless: UNLESS_STORIES, iff: IFF_STORIES };
+
+/** A story's words for one form. */
+export function storyOf(id: StoryId, form: FormKind): Story {
+  if (id === 'recess' || id === 'store' || id === 'cave' || id === 'broom') return DAY_STORIES[id];
+  if (form === 'unless') {
+    if (id !== 'pq') throw new Error(`storyOf: ${id} has no “unless” words`);
+    return skinStory('pq', 'The rule only talks about the cases where Q is false.');
+  }
+  return skinStory(id);
+}
+export const storyGroup = (id: StoryId): Group => (id in DAY_STORIES ? DAY_STORIES[id as keyof typeof DAY_STORIES].group : SKINS[id as SkinId].group);
+
+const thenOf = (w: Story, l: Lit) => w.parts[l].then ?? w.parts[l].if;
+/** A fact inside a sentence: "It rained" -> "it rained". Names, P and Q stay as they are. */
+const lead = (s: string) => s.replace(/^(It|The|This|Recess|A|An) /, (m) => m.toLowerCase());
+/** A sentence in quotes inside a sentence: no final period. */
+const bare = (s: string) => s.replace(/\.$/, '');
+
+/** “You take a book home only if you have a library card.” */
+export function formText(w: Story, f: FormKind): string {
+  const first = cap(w.parts.P.if);
+  if (f === 'unless') return `${first} unless ${w.parts.Q.if}.`;
+  return `${first} ${f === 'iff' ? 'if and only if' : 'only if'} ${thenOf(w, 'Q')}.`;
+}
+/** An if–then sentence in the story's words: “If it does not rain, then recess is outside.” */
+export const storyIf = (w: Story, c: Cond) => `If ${w.parts[c.a].if}, then ${thenOf(w, c.b)}.`;
+/** “You take a book home if you have a library card.”: plain “if” in the middle, the trap reading of “only if”. */
+export const plainIfText = (w: Story) => `${cap(w.parts.P.if)} if ${thenOf(w, 'Q')}.`;
+
+/** The rule card of a form: the setting, the rule, and a note (the vowels on letter cards). */
+export function formScene(w: Story, f: FormKind): Scene {
+  return { kind: 'text', lines: [w.setting, formText(w, f), ...(w.note ? [w.note] : [])] };
+}
+
+/** A part as a truth line's name: “You take a book home: true.” */
+const partWho = (w: Story, l: 'P' | 'Q') => cap(w.parts[l].if);
+/** Is each part true, and is the rule kept, in this case? */
+export const formTruths = (w: Story, f: FormKind, r: Row): Truth[] => [
+  { who: partWho(w, 'P'), value: r.p },
+  { who: partWho(w, 'Q'), value: r.q },
+  { who: RULE_WHO, value: formHolds(f, r) },
+];
+
+/** Why a case keeps or breaks a form, with no names: the note on a case card. */
+export function formNote(f: FormKind, r: Row): string {
+  if (!formHolds(f, r)) {
+    if (f === 'only-if') return 'The part before “only if” happened without the part after it. This breaks the rule.';
+    if (f === 'unless') return 'Neither part happened. This breaks the rule.';
+    return 'One part happened without the other. This breaks the rule.';
+  }
+  if (f === 'only-if') return r.p ? 'The part after “only if” happened too. This keeps the rule.' : 'The part before “only if” did not happen, so the rule asks for nothing. This keeps the rule.';
+  if (f === 'unless') return r.q ? 'The part after “unless” happened, so the rule makes no promise. This keeps the rule.' : 'The part before “unless” happened. This keeps the rule.';
+  return r.p ? 'The two parts happened together. This keeps the rule.' : 'Neither part happened, so no part happened alone. This keeps the rule.';
+}
+
+/** Why one named case keeps or breaks a form, in the story's words, worked out from the form's if–then pieces. */
+export function formWhy(w: Story, f: FormKind, name: string, r: Row): string {
+  const fact = (l: Lit) => w.fact(l, name);
+  const broken = FORM_CONDS[f].find((c) => !condHolds(c, r));
+  if (broken) return `${fact(broken.a)}, so the rule needs “${w.parts[broken.b].if}.” But ${lead(fact(neg(broken.b)))}. That breaks the rule.`;
+  if (f === 'iff') {
+    return r.p
+      ? `${fact('P')}, and ${lead(fact('Q'))}. The two parts happened together, so this case keeps the rule.`
+      : `${fact('notP')}, and ${lead(fact('notQ'))}. No part happened alone, so this case keeps the rule.`;
+  }
+  const c = FORM_CONDS[f][0];
+  if (!litHolds(c.a, r)) return `${fact(neg(c.a))}. ${w.onlyAbout} So this case keeps the rule.`;
+  return `${fact(c.a)}, and ${lead(fact(c.b))}. The rule gets what it needs, so this case keeps it.`;
+}
+
+/** Step by step: is each IF part true here, and if it is, is its THEN part true too? */
+function formSteps(w: Story, f: FormKind, says: string, r: Row): string[] {
+  const out = [sentence(says)];
+  for (const c of FORM_CONDS[f]) {
+    const on = litHolds(c.a, r);
+    out.push(`Is “${w.parts[c.a].if}” true here? ${on ? 'Yes' : 'No'}.`);
+    if (on) out.push(`Then “${w.parts[c.b].if}” must be true too. ${litHolds(c.b, r) ? 'It is.' : 'It is not.'}`);
+  }
+  out.push(formHolds(f, r) ? 'So this case keeps the rule.' : 'So this case breaks the rule.');
+  return out;
+}
+
+export const FORM_RULE: Record<FormKind, string> = {
+  'only-if': 'A rule with “only if” is broken only when the part before “only if” happens and the part after it does not.',
+  unless: 'A rule with “unless” is broken only when neither part happens.',
+  iff: 'A rule with “if and only if” is broken when one part happens without the other.',
+};
+const FORM_SAY: Record<FormKind, string> = {
+  'only-if': 'Say it with if: “P only if Q” means “If P, then Q.”',
+  unless: 'Say it with if: “P unless Q” means “If not Q, then P.”',
+  iff: 'Say it with if: “P if and only if Q” means “If P, then Q” and “If Q, then P.”',
+};
+const FORM_ASK: Record<FormKind, string> = {
+  'only-if': 'Ask: which part comes after “only if”? That part is needed.',
+  unless: 'Ask: did the part after “unless” happen? If it did not, the part before it must happen.',
+  iff: 'Ask: did one part happen without the other?',
+};
+export const FORM_ONLY_WAY: Record<FormKind, string> = {
+  'only-if': 'Only the part before “only if” without the part after it breaks the rule.',
+  unless: 'Only a case where neither part happens breaks the rule.',
+  iff: 'The rule breaks when one part happens without the other.',
+};
+const FORM_BREAKS: Record<FormKind, { word: string; meaning: string }> = {
+  'only-if': { word: 'Breaks the rule', meaning: 'the part before “only if” happens, but the part after it does not.' },
+  unless: { word: 'Breaks the rule', meaning: 'neither part happens: not the part after “unless,” and not the part before it.' },
+  iff: { word: 'Breaks the rule', meaning: 'one part happens without the other.' },
+};
+
+/** The word a form uses, defined with the story's own rule said as if–then. */
+export function formTerm(w: Story, f: FormKind): { word: string; meaning: string } {
+  const said = `“${bare(formText(w, f))}”`;
+  if (f === 'only-if') return { word: '“Only if”', meaning: `the part after it is needed. ${said} means “${storyIf(w, FORM_CONDS[f][0])}”` };
+  if (f === 'unless') return { word: '“Unless”', meaning: `the part after it is the one thing that can stop the part before it. ${said} means “${storyIf(w, FORM_CONDS[f][0])}”` };
+  const [a, b] = FORM_CONDS.iff;
+  return { word: '“If and only if”', meaning: `two rules at once, one each way. One is “${storyIf(w, a)}” The other is “${storyIf(w, b)}”` };
+}
+
+/** What the rule talks about and the cases that break it, in the story's words. */
+export function formMeaning(w: Story, f: FormKind): string {
+  const broken = formBroken(f).map((r) => w.kase[rowKey(r)]);
+  if (f === 'iff') return `It is two rules, one each way. It is broken by ${broken[0]}. It is also broken by ${broken.slice(1).join(' and by ')}.`;
+  if (broken.length !== 1) throw new Error('formMeaning: one case breaks the rule');
+  return `${w.onlyAbout} It is broken only by ${broken[0]}.`;
+}
+
+/** A named case as a card: its sentence, each part true or false, the rule kept or broken, and why. */
+const formCase = (w: Story, f: FormKind, says: string, r: Row, extra = ''): TeachCase => ({ label: sentence(says), truths: formTruths(w, f, r), note: `${formNote(f, r)}${extra}` });
+
+/** The teaching of a form's case questions: the four cases in the story's words. */
+function formTeach(w: Story, f: FormKind, cases: { says: string; row: Row; asked?: boolean }[]): Teach {
+  const sorted = [...cases].sort((a, b) => ROWS.findIndex((r) => rowKey(r) === rowKey(a.row)) - ROWS.findIndex((r) => rowKey(r) === rowKey(b.row)));
+  const brk = sorted.find((c) => !formHolds(f, c.row));
+  if (!brk) throw new Error('formTeach: a case must break the rule');
+  return {
+    rule: FORM_RULE[f],
+    terms: [formTerm(w, f), FORM_BREAKS[f]],
+    meaning: formMeaning(w, f),
+    casesTitle: 'When is the rule kept, and when is it broken?',
+    cases: sorted.map((c) => formCase(w, f, c.says, c.row, c.asked ? ' This is the case in the question.' : '')),
+    remember: [FORM_SAY[f], FORM_ASK[f]],
+    simpler: formSteps(w, f, brk.says, brk.row),
+  };
+}
+
+/** A wrong answer that calls a kept case broken: the gap, by the form and the kind of case. */
+function keptHead(f: FormKind, r: Row): string {
+  if (f === 'only-if') {
+    if (misreadMatters(f, r)) return 'Your answer turns “only if” around. It reads “only if” as plain “if.”';
+    return r.p ? 'Your answer says the rule was broken, but the part after “only if” happened too.' : 'Your answer says the rule was broken, but the part before “only if” did not happen.';
+  }
+  if (f === 'unless') {
+    if (misreadMatters(f, r)) return 'Your answer reads more into “unless” than its words say.';
+    return r.q ? 'Your answer says the rule was broken, but the part after “unless” happened, so the rule makes no promise.' : 'Your answer says the rule was broken, but the part before “unless” happened.';
+  }
+  return r.p ? 'Your answer says the rule was broken, but the two parts happened together.' : 'Your answer says the rule was broken, but neither part happened.';
+}
+/** A wrong answer that calls a broken case kept. */
+function missedHead(f: FormKind): string {
+  if (f === 'only-if') return 'Your answer misses that the part before “only if” happened without the part after it.';
+  if (f === 'unless') return 'Your answer misses that neither part happened.';
+  return 'Your answer misses that one part happened without the other.';
+}
+
+export interface FormMade {
+  tag: string;
+  item: CondCore;
+  meta: { story: StoryId; form?: FormKind; name?: string; sym?: Symbols; rows?: Record<string, Row>; conds?: Record<string, Cond>; need?: Record<string, NeedId>; reasons?: Record<string, boolean> };
+}
+
+/** "Which kid broke the rule?" for “only if” or “unless”: one case per choice, and exactly one breaks the rule. */
+export function formWhoItem(rng: Rng, o: { form: 'only-if' | 'unless'; story: StoryId }): FormMade {
+  const f = o.form;
+  const w = storyOf(o.story, f);
+  const names = rng.shuffle(w.names);
+  const sym = drawSymbols(rng);
+  const cases = rng.shuffle(ROWS).map((row, i) => ({ name: names[i % names.length], row }));
+  const says = (c: { name: string; row: Row }) => w.says(c.name, c.row, sym);
+  const choices = cases.map((c) => ({ id: rowId(c.row), label: w.label(c.name, c.row, sym) }));
+  const broken = cases.filter((c) => !formHolds(f, c.row));
+  if (broken.length !== 1) throw new Error('formWhoItem: exactly one case must break the rule');
+  const feedback: Record<string, ChoiceFeedback> = {};
+  for (const c of cases) {
+    if (!formHolds(f, c.row)) continue;
+    feedback[rowId(c.row)] = {
+      headline: keptHead(f, c.row),
+      detail: [sentence(says(c)), formWhy(w, f, c.name, c.row), FORM_ONLY_WAY[f]],
+      example: formCase(w, f, says(c), c.row),
+      simpler: formSteps(w, f, says(c), c.row),
+    };
+  }
+  // The hint checks one case that keeps the rule, never the answer, and never the case the misreading gets wrong.
+  const shown = cases.find((c) => formHolds(f, c.row) && !misreadMatters(f, c.row))!;
+  const item: ChooseCore = {
+    kind: 'choose',
+    prompt: w.ask,
+    scene: formScene(w, f),
+    choices,
+    answer: rowId(broken[0].row),
+    explain: `${sentence(says(broken[0]))} ${formWhy(w, f, broken[0].name, broken[0].row)}`,
+    feedback,
+    hint: 'Here is one case, checked for you. Check the others the same way.',
+    hintCase: formCase(w, f, says(shown), shown.row),
+    teach: formTeach(w, f, cases.map((c) => ({ says: says(c), row: c.row }))),
+    tags: f === 'only-if' ? [ONLY_IF_TRAP] : [],
+  };
+  syncWhyWrong(item);
+  // The misreading picks a case that keeps the rule: intuition points the wrong way.
+  item.conflict = true;
+  return { tag: f, item, meta: { story: o.story, form: f, sym, rows: Object.fromEntries(cases.map((c) => [rowId(c.row), c.row])) } };
+}
+
+/** "Did Kai break the rule?" for one case of any form. A case the misreading gets wrong is a conflict item. */
+export function formDidItem(rng: Rng, o: { form: FormKind; story: StoryId; row?: Row }): FormMade {
+  const f = o.form;
+  const w = storyOf(o.story, f);
+  const row = o.row ?? rng.pick(ROWS);
+  const name = rng.pick(w.names);
+  const sym = drawSymbols(rng);
+  const broke = !formHolds(f, row);
+  const says = w.says(name, row, sym);
+  const example = formCase(w, f, says, row);
+  const fb: ChoiceFeedback = {
+    headline: broke ? missedHead(f) : keptHead(f, row),
+    detail: [sentence(says), formWhy(w, f, name, row), FORM_ONLY_WAY[f]],
+    example,
+    simpler: formSteps(w, f, says, row),
+  };
+  // The other three cases go to other names (or other cards), so each case is told in the story's words.
+  const others = w.names.filter((n) => n !== name);
+  let k = Math.max(0, w.names.indexOf(name));
+  const cases = ROWS.map((r) => {
+    if (rowKey(r) === rowKey(row)) return { says, row: r, asked: true };
+    const who = others.length ? others[k++ % others.length] : name;
+    return { says: w.says(who, r, sym), row: r };
+  });
+  // The hint checks another case in the same story: the same first part, the other second part. Never the asked case.
+  const near = cases.find((c) => rowKey(c.row) === rowKey(rowAt(row.p, !row.q)))!;
+  const item: ChooseCore = {
+    kind: 'choose',
+    prompt: `${sentence(says)} ${w.did(name)}`,
+    scene: formScene(w, f),
+    choices: YES_NO,
+    answer: broke ? 'yes' : 'no',
+    explain: formWhy(w, f, name, row),
+    feedback: { [broke ? 'no' : 'yes']: fb },
+    hint: 'Here is a case like this one, checked for you. Check this one the same way.',
+    hintCase: formCase(w, f, near.says, near.row),
+    teach: formTeach(w, f, cases),
+    tags: f === 'only-if' && misreadMatters(f, row) ? [ONLY_IF_TRAP] : [],
+  };
+  syncWhyWrong(item);
+  if (misreadMatters(f, row)) item.conflict = true;
+  return { tag: f, item, meta: { story: o.story, form: f, name, sym, rows: { one: row } } };
+}
+
+/** "Which kids broke the rule? Pick every one." for “if and only if”: two cases break it. */
+export function iffWhoItem(rng: Rng, o: { story: StoryId }): FormMade {
+  const f: FormKind = 'iff';
+  const w = storyOf(o.story, f);
+  const names = rng.shuffle(w.names);
+  const sym = drawSymbols(rng);
+  const cases = rng.shuffle(ROWS).map((row, i) => ({ name: names[i % names.length], row }));
+  const says = (c: { name: string; row: Row }) => w.says(c.name, c.row, sym);
+  const choices = cases.map((c) => ({ id: rowId(c.row), label: w.label(c.name, c.row, sym) }));
+  const broken = cases.filter((c) => !formHolds(f, c.row));
+  if (broken.length !== 2) throw new Error('iffWhoItem: two cases break the rule');
+  const missTips: Record<string, string> = {};
+  const pickTips: Record<string, string> = {};
+  for (const c of cases) {
+    const label = `“${w.label(c.name, c.row, sym)}.”`;
+    if (formHolds(f, c.row)) pickTips[rowId(c.row)] = `Your answer picks ${label} ${formWhy(w, f, c.name, c.row)}`;
+    else missTips[rowId(c.row)] = `Your answer leaves out ${label} ${formWhy(w, f, c.name, c.row)}`;
+  }
+  const plural = w.ask.replace(/^Which (\w+) (broke|breaks)/, (_m, n: string, v: string) => `Which ${n.endsWith('x') ? `${n}es` : `${n}s`} ${v === 'broke' ? 'broke' : 'break'}`);
+  const shown = cases.find((c) => formHolds(f, c.row))!;
+  const item: CondCore = {
+    kind: 'multi',
+    prompt: `${plural} Pick every one.`,
+    scene: formScene(w, f),
+    choices,
+    answer: broken.map((c) => rowId(c.row)),
+    explain: broken.map((c) => `${sentence(says(c))} ${formWhy(w, f, c.name, c.row)}`).join(' '),
+    missTips,
+    pickTips,
+    hint: 'Here is one case, checked for you. Check the others the same way.',
+    hintCase: formCase(w, f, says(shown), shown.row),
+    teach: formTeach(w, f, cases.map((c) => ({ says: says(c), row: c.row }))),
+    // The one-way reading misses the case where the second part happens alone.
+    conflict: true,
+  };
+  return { tag: f, item, meta: { story: o.story, form: f, sym, rows: Object.fromEntries(cases.map((c) => [rowId(c.row), c.row])) } };
+}
+
+/** The if–then sentences a "say it with if" question offers: the right one and the two it is most often mixed up with. */
+export const PICK_CONDS: Record<'only-if' | 'unless', readonly Cond[]> = {
+  'only-if': [{ a: 'P', b: 'Q' }, { a: 'Q', b: 'P' }, { a: 'notP', b: 'notQ' }],
+  unless: [{ a: 'notQ', b: 'P' }, { a: 'Q', b: 'notP' }, { a: 'Q', b: 'P' }],
+};
+
+/** What a wrong if–then sentence does to a form, by what it says. */
+function pickHead(f: 'only-if' | 'unless', c: Cond): string {
+  if (sameCond(c, MISREAD[f])) return f === 'only-if' ? 'Your answer turns the rule around. It reads “only if” as plain “if.”' : 'Your answer reads more into “unless” than its words say.';
+  if (f === 'only-if') return 'Your answer puts NOT in both parts, and that changes the meaning.';
+  return 'Your answer leaves out the NOT: the part after “unless” has to be false.';
+}
+
+/** A case the form keeps and the sentence breaks (else one the form breaks and the sentence keeps). */
+const formTelltale = (c: Cond, f: FormKind) => ROWS.find((r) => formHolds(f, r) && !condHolds(c, r)) ?? ROWS.find((r) => condHolds(c, r) !== formHolds(f, r))!;
+const formApart = (f: FormKind, r: Row, name: string) => (formHolds(f, r) ? `This case keeps the rule, but it breaks ${name}.` : `This case breaks the rule, but it keeps ${name}.`);
+
+/** "Which if–then sentence means the same as the rule?" for “only if” or “unless”. Exactly one choice does. */
+export function formPickItem(rng: Rng, o: { form: 'only-if' | 'unless'; story: StoryId }): FormMade {
+  const f = o.form;
+  const w = storyOf(o.story, f);
+  const order = rng.shuffle(PICK_CONDS[f]);
+  const choices = order.map((c) => ({ id: condId(c), label: storyIf(w, c) }));
+  const right = order.filter((c) => sameAsForm(c, f));
+  if (right.length !== 1) throw new Error('formPickItem: exactly one sentence must mean the same as the rule');
+  const brk = formBroken(f)[0];
+  const feedback: Record<string, ChoiceFeedback> = {};
+  for (const c of order) {
+    if (sameAsForm(c, f)) continue;
+    const t = formTelltale(c, f);
+    const apart = formApart(f, t, 'your sentence');
+    feedback[condId(c)] = {
+      headline: pickHead(f, c),
+      detail: [`Think of ${w.kase[rowKey(t)]}. ${apart}`, 'So your sentence does not mean the same as the rule.'],
+      example: { label: sentence(cap(w.kase[rowKey(t)])), truths: [{ who: RULE_WHO, value: formHolds(f, t) }, { who: YOURS_WHO, value: condHolds(c, t) }], note: apart },
+      simpler: [
+        `Only ${w.kase[rowKey(brk)]} breaks the rule.`,
+        `Think of ${w.kase[rowKey(t)]}.`,
+        `Does it break the rule? ${formHolds(f, t) ? 'No' : 'Yes'}. Does it break “${bare(storyIf(w, c))}”? ${condHolds(c, t) ? 'No' : 'Yes'}.`,
+        'One case breaks one sentence but not the other. So they do not mean the same.',
+      ],
+    };
+  }
+  // The hint checks one wrong choice (the first in the list) in the case that tells it apart from the rule.
+  const off = order.find((c) => !sameAsForm(c, f))!;
+  const offRow = formTelltale(off, f);
+  const RIGHT_WHO = 'The if–then sentence';
+  const item: ChooseCore = {
+    kind: 'choose',
+    prompt: 'Which if–then sentence means the same as the rule? Two sentences mean the same when the same cases break them.',
+    scene: formScene(w, f),
+    choices,
+    answer: condId(right[0]),
+    explain: `Only ${w.kase[rowKey(brk)]} breaks the rule. It is also the only case that breaks “${storyIf(w, right[0])}” So they mean the same.`,
+    feedback,
+    hint: `Here is one sentence, checked for you: “${storyIf(w, off)}” Check the others the same way.`,
+    hintCase: {
+      label: sentence(cap(w.kase[rowKey(offRow)])),
+      truths: [{ who: RULE_WHO, value: formHolds(f, offRow) }, { who: THIS_WHO, value: condHolds(off, offRow) }],
+      note: `${formApart(f, offRow, 'this sentence')} So this sentence does not mean the same as the rule.`,
+    },
+    teach: {
+      rule: SAME_RULE,
+      terms: [formTerm(w, f), BREAKS_SENTENCE_TERM],
+      meaning: formMeaning(w, f),
+      casesTitle: `Which cases break the rule? Which break “${bare(storyIf(w, right[0]))}”?`,
+      cases: ROWS.map((r) => {
+        const a = formHolds(f, r);
+        const b = condHolds(right[0], r);
+        return { label: sentence(cap(w.kase[rowKey(r)])), truths: [{ who: RULE_WHO, value: a }, { who: RIGHT_WHO, value: b }], note: a === b ? (a ? 'Neither one is broken.' : 'This case breaks the rule and the if–then sentence.') : formApart(f, r, 'the if–then sentence') };
+      }),
+      remember: [FORM_SAY[f], 'Ask: “Does any case break one sentence but not the other?”'],
+      simpler: feedback[condId(MISREAD[f])]?.simpler ?? [],
+    },
+    tags: f === 'only-if' ? [ONLY_IF_TRAP] : [],
+  };
+  syncWhyWrong(item);
+  return { tag: f, item, meta: { story: o.story, form: f, conds: Object.fromEntries(order.map((c) => [condId(c), c])) } };
+}
+
+// ----- lesson 7: needed and enough -----
+
+/** “x is needed”: the other part can’t happen without x. “x is enough”: when x happens, the other part happens too. */
+export type NeedId = 'needed-P' | 'needed-Q' | 'enough-P' | 'enough-Q';
+export const NEED_IDS: readonly NeedId[] = ['needed-Q', 'enough-P', 'enough-Q', 'needed-P'];
+/** A needed or enough sentence, said as an if–then rule: needed x is “If other, then x”, enough x is “If x, then other”. */
+export function needCond(id: NeedId): Cond {
+  const [word, x] = id.split('-') as ['needed' | 'enough', 'P' | 'Q'];
+  const other: Lit = x === 'P' ? 'Q' : 'P';
+  return word === 'needed' ? { a: other, b: x } : { a: x, b: other };
+}
+export type NeedSkin = 'dessert' | 'library' | 'dragons' | 'wizards' | 'letters' | 'pq';
+export const NEED_SKINS: readonly NeedSkin[] = ['dessert', 'library', 'dragons', 'wizards', 'letters', 'pq'];
+/** Each rule's needed and enough sentences, about each part. Their truth comes from needCond(), never from the words. */
+export const NEED_WORDS: Record<NeedSkin, Record<NeedId, string>> = {
+  dessert: {
+    'needed-Q': 'Eating all your veggies is needed to get dessert.',
+    'enough-Q': 'Eating all your veggies is enough to get dessert.',
+    'needed-P': 'Getting dessert is needed to eat all your veggies.',
+    'enough-P': 'Getting dessert is enough to know you ate all your veggies.',
+  },
+  library: {
+    'needed-Q': 'Having a library card is needed to take a book home.',
+    'enough-Q': 'Having a library card is enough to take a book home.',
+    'needed-P': 'Taking a book home is needed to have a library card.',
+    'enough-P': 'Taking a book home is enough to know you have a library card.',
+  },
+  dragons: {
+    'needed-Q': 'Paying a gold coin is needed for a dragon to land in town.',
+    'enough-Q': 'Paying a gold coin is enough for a dragon to land in town.',
+    'needed-P': 'Landing in town is needed for a dragon to pay a gold coin.',
+    'enough-P': 'Landing in town is enough to know a dragon paid a gold coin.',
+  },
+  wizards: {
+    'needed-Q': 'Wearing a helmet is needed to ride a broom.',
+    'enough-Q': 'Wearing a helmet is enough to ride a broom.',
+    'needed-P': 'Riding a broom is needed to wear a helmet.',
+    'enough-P': 'Riding a broom is enough to know you wear a helmet.',
+  },
+  letters: {
+    'needed-Q': 'An even number is needed for a card to have a vowel.',
+    'enough-Q': 'An even number is enough for a card to have a vowel.',
+    'needed-P': 'A vowel is needed for a card to have an even number.',
+    'enough-P': 'A vowel is enough to know a card has an even number.',
+  },
+  pq: { 'needed-Q': 'Q is needed for P.', 'enough-Q': 'Q is enough for P.', 'needed-P': 'P is needed for Q.', 'enough-P': 'P is enough for Q.' },
+};
+/** What a needed or enough sentence says about the rule's parts. */
+const NEED_SAYS: Record<NeedId, string> = {
+  'needed-Q': 'It says the THEN part is needed for the IF part.',
+  'enough-P': 'It says the IF part is enough for the THEN part.',
+  'enough-Q': 'It says the THEN part is enough for the IF part.',
+  'needed-P': 'It says the IF part is needed for the THEN part.',
+};
+/** A wrong needed or enough sentence: the gap, by what it says. */
+const NEED_HEAD: Record<'enough-Q' | 'needed-P', string> = {
+  'enough-Q': 'Your answer reads “needed” as “enough.”',
+  'needed-P': 'Your answer turns the rule around. It calls the IF part needed.',
+};
+export const NEEDED_TERM = { word: 'Needed', meaning: 'the other part can’t happen without this part.' };
+export const ENOUGH_TERM = { word: 'Enough', meaning: 'when this part happens, the other part happens for sure.' };
+export const NEED_RULE = 'In an if–then rule, the IF part is enough for the THEN part. The THEN part is needed for the IF part.';
+const NEED_REMEMBER = ['The IF part is enough. The THEN part is needed.', 'Ask: “Can the THEN part happen without the IF part?” If it can, the THEN part is needed, not enough.'];
+
+/** The smallest worked example for one needed or enough sentence against the rule. */
+function needSteps(skin: NeedSkin, id: NeedId): string[] {
+  const s = SKINS[skin];
+  const c = needCond(id);
+  const t = telltaleRow(c);
+  const said = `“${bare(NEED_WORDS[skin][id])}”`;
+  if (!t) {
+    const only = brokenRows(RULE)[0];
+    return [`Only ${s.kase[rowKey(only)]} breaks the rule.`, `It is also the only case that breaks ${said}.`.replace(/”\.$/, '.”'), 'No other case breaks the rule or this sentence. So they mean the same.'];
+  }
+  return [
+    `Think of ${s.kase[rowKey(t.row)]}.`,
+    `Does it break the rule? ${ruleHolds(t.row) ? 'No' : 'Yes'}.`,
+    `Does it break ${said}? ${condHolds(c, t.row) ? 'No' : 'Yes'}.`,
+    'One case breaks one sentence but not the other. So they do not mean the same.',
+  ];
+}
+
+/** The teaching of a needed or enough question: the four cases with the rule and one sentence, each kept or broken. */
+function needTeach(skin: NeedSkin, id: NeedId, who: string, name: string, trap: NeedId): Teach {
+  const s = SKINS[skin];
+  return {
+    rule: NEED_RULE,
+    terms: [ENOUGH_TERM, NEEDED_TERM],
+    meaning: `${ruleMeaning(s)} ${cap(name)} is “${NEED_WORDS[skin][id]}”`,
+    casesTitle: `Which cases break the rule? Which break ${name}?`,
+    cases: sameCases(s, needCond(id), who, name),
+    remember: NEED_REMEMBER,
+    simpler: needSteps(skin, trap),
+  };
+}
+
+/** One wrong needed or enough sentence's feedback, from the case that tells it apart from the rule. */
+function needFeedback(skin: NeedSkin, id: 'enough-Q' | 'needed-P', yours: string): ChoiceFeedback {
+  const s = SKINS[skin];
+  const c = needCond(id);
+  const t = telltaleRow(c);
+  if (!t) throw new Error('needFeedback: this sentence means the same as the rule');
+  const apart = apartLine(t.row, c, yours);
+  return {
+    headline: NEED_HEAD[id],
+    detail: [`${cap(yours)} is “${NEED_WORDS[skin][id]}” ${NEED_SAYS[id]}`, `Think of ${s.kase[rowKey(t.row)]}. ${apart}`, `So ${yours} does not mean the same as the rule.`],
+    example: { label: sentence(cap(s.kase[rowKey(t.row)])), truths: [{ who: RULE_WHO, value: ruleHolds(t.row) }, { who: yours === 'your sentence' ? YOURS_WHO : THIS_WHO, value: condHolds(c, t.row) }], note: apart },
+    simpler: needSteps(skin, id),
+  };
+}
+
+/** "Which sentence means the same as the rule?" One right needed or enough sentence, “needed” read as “enough”, and the rule turned around. */
+export function needPickItem(rng: Rng, o: { skin: NeedSkin }): FormMade {
+  const s = SKINS[o.skin];
+  const right = rng.pick<NeedId>(['needed-Q', 'enough-P']);
+  const order = rng.shuffle<NeedId>([right, 'enough-Q', 'needed-P']);
+  const choices = order.map((id) => ({ id, label: NEED_WORDS[o.skin][id] }));
+  const same = order.filter((id) => sameMeaning(needCond(id), RULE));
+  if (same.length !== 1) throw new Error('needPickItem: exactly one sentence must mean the same as the rule');
+  const feedback: Record<string, ChoiceFeedback> = {};
+  for (const id of order) if (id !== same[0]) feedback[id] = needFeedback(o.skin, id as 'enough-Q' | 'needed-P', 'your sentence');
+  const off = order.find((id) => id !== same[0])!;
+  const offRow = telltaleRow(needCond(off))!.row;
+  const only = brokenRows(RULE)[0];
+  const item: ChooseCore = {
+    kind: 'choose',
+    prompt: 'Which sentence means the same as the rule? Look at the words “needed” and “enough.”',
+    scene: ruleScene(o.skin, 'compare'),
+    choices,
+    answer: same[0],
+    explain: `“${bare(NEED_WORDS[o.skin][same[0]])}” ${NEED_SAYS[same[0]].replace(/^It says/, 'says')} Only ${s.kase[rowKey(only)]} breaks it, just like the rule.`,
+    feedback,
+    hint: `Here is one sentence, checked for you: “${NEED_WORDS[o.skin][off]}” Check the others the same way.`,
+    hintCase: {
+      label: sentence(cap(s.kase[rowKey(offRow)])),
+      truths: [{ who: RULE_WHO, value: ruleHolds(offRow) }, { who: THIS_WHO, value: condHolds(needCond(off), offRow) }],
+      note: `${apartLine(offRow, needCond(off), 'this sentence')} So this sentence does not mean the same as the rule.`,
+    },
+    teach: needTeach(o.skin, same[0], 'The right sentence', 'the right sentence', 'enough-Q'),
+    tags: [NEED_TRAP],
+  };
+  syncWhyWrong(item);
+  return { tag: 'need-enough', item, meta: { story: o.skin, need: Object.fromEntries(order.map((id) => [id, id])) } };
+}
+
+/** "Does this sentence mean the same as the rule?" for one needed or enough sentence. “Needed” read as “enough” is the trap. */
+export function needYesNoItem(rng: Rng, o: { skin: NeedSkin; which?: NeedId }): FormMade {
+  const s = SKINS[o.skin];
+  const which = o.which ?? rng.pick(NEED_IDS);
+  const c = needCond(which);
+  const isSame = sameMeaning(c, RULE);
+  const only = brokenRows(RULE)[0];
+  let fb: ChoiceFeedback;
+  if (isSame) {
+    const k = s.kase[rowKey(only)];
+    fb = {
+      headline: 'Your answer misses that the same case breaks the rule and this sentence.',
+      detail: [`This sentence is “${NEED_WORDS[o.skin][which]}” ${NEED_SAYS[which]}`, `Only ${k} breaks the rule. Only ${k} breaks this sentence too.`, 'So they mean the same.'],
+      example: { label: sentence(cap(k)), truths: [{ who: RULE_WHO, value: ruleHolds(only) }, { who: THIS_WHO, value: condHolds(c, only) }], note: 'This is the only case that breaks the rule. It is also the only case that breaks this sentence.' },
+      simpler: needSteps(o.skin, which),
+    };
+  } else {
+    fb = needFeedback(o.skin, which as 'enough-Q' | 'needed-P', 'this sentence');
+    fb.headline = which === 'enough-Q' ? NEED_HEAD['enough-Q'] : 'Your answer misses that this sentence turns the rule around.';
+  }
+  const tt = rowAt(true, true);
+  const item: ChooseCore = {
+    kind: 'choose',
+    prompt: `Does this sentence with “needed” or “enough” mean the same as the rule? “${NEED_WORDS[o.skin][which]}”`,
+    scene: ruleScene(o.skin, 'compare'),
+    choices: YES_NO,
+    answer: isSame ? 'yes' : 'no',
+    explain: isSame
+      ? `${NEED_SAYS[which]} Only ${s.kase[rowKey(only)]} breaks it, just like the rule. So they mean the same.`
+      : `${NEED_SAYS[which]} Think of ${s.kase[rowKey(telltaleRow(c)!.row)]}. ${apartLine(telltaleRow(c)!.row, c, 'this sentence')} So they do not mean the same.`,
+    feedback: { [isSame ? 'no' : 'yes']: fb },
+    hint: 'Here is one case, checked for you. Check the other three cases the same way.',
+    // A case that keeps the rule and every needed or enough sentence, so the hint never gives the answer.
+    hintCase: {
+      label: sentence(cap(s.kase.TT)),
+      truths: [{ who: RULE_WHO, value: ruleHolds(tt) }, { who: THIS_WHO, value: condHolds(c, tt) }],
+      note: 'This case keeps the rule and this sentence. Now check the other three cases.',
+    },
+    teach: needTeach(o.skin, which, THIS_WHO, 'this sentence', isSame ? 'enough-Q' : which),
+    tags: which === 'enough-Q' ? [NEED_TRAP] : [],
+  };
+  syncWhyWrong(item);
+  if (which === 'enough-Q') item.conflict = true;
+  return { tag: 'need-enough', item, meta: { story: o.skin, need: { one: which } } };
+}
+
+// ----- the closing why items: reasons as choices -----
+
+/** One reason a why item offers: its words, and whether its claim is true (worked out from the table, never asserted). */
+interface Reason {
+  id: string;
+  label: string;
+  holds: boolean;
+}
+
+/** The rule-checker skins with needed and enough words: lesson 5's cards, looked at again in lesson 7. */
+export const WHY_CARD_SKINS: readonly NeedSkin[] = NEED_SKINS.filter((s) => SKINS[s].cards);
+
+/**
+ * Lesson 7, the closing why item: why don't you need to turn over the card that shows the THEN part (the “4”)? The
+ * right reason: the THEN part is needed for the IF part, not enough for it, so every back keeps the rule. The trap
+ * reads “needed” as “enough” (its back must show the IF part).
+ */
+export function whyCardItem(rng: Rng, o: { skin: NeedSkin }): FormMade {
+  const s = SKINS[o.skin];
+  const cards = s.cards;
+  if (!cards) throw new Error(`whyCardItem: ${o.skin} has no cards`);
+  const sym = drawSymbols(rng);
+  const face: Lit = 'Q';
+  const shown = `“${cards.face(face, sym)}”`;
+  const reasons: Reason[] = [
+    { id: 'needed-not-enough', label: 'It shows the THEN part. That part is needed, not enough, so any back keeps the rule.', holds: partOf(face) === 'q' && !mustTurn(face) && statusOf(face, 'P') === 'maybe' },
+    { id: 'back-must', label: `Its back must show ${ending(cards.back('P', sym), ',')} so the rule is kept.`, holds: statusOf(face, 'P') === 'must' },
+    { id: 'only-if-card', label: 'Only the card that shows the IF part can break the rule.', holds: LITS.filter(mustTurn).every((l) => l === 'P') },
+    { id: 'shows-if', label: 'It shows the IF part, and that part already happened.', holds: partOf(face) === 'p' },
+  ];
+  const right = reasons.filter((x) => x.holds);
+  if (right.length !== 1) throw new Error('whyCardItem: exactly one reason must be true');
+  const order = rng.shuffle(reasons);
+  const backCase = (f: Lit, b: Lit): TeachCase => ({
+    label: `A card with “${cards.face(f, sym)}” on the front and ${cards.back(b, sym)} on the back.`,
+    truths: partTruths(cardRow(f, b)),
+    note: rowNote(cardRow(f, b)),
+  });
+  const notQ = `“${cards.face('notQ', sym)}”`;
+  const feedback: Record<string, ChoiceFeedback> = {
+    'back-must': {
+      headline: 'Your reason reads “needed” as “enough.”',
+      detail: [`The card shows ${ending(shown, '.')} That is the THEN part.`, 'The THEN part is needed for the IF part. It is not enough to be sure the IF part happened.', `So its back could show ${ending(cards.back('notP', sym), '.')} The rule is still kept.`],
+      example: backCase(face, 'notP'),
+    },
+    'only-if-card': {
+      headline: 'Your reason leaves out the card that shows the THEN part did not happen.',
+      detail: [`The card that shows ${notQ} can break the rule too.`, `With ${cards.back('P', sym)} on the back, the IF part happened, but the THEN part did not.`, 'So that card must be turned over.'],
+      example: backCase('notQ', 'P'),
+    },
+    'shows-if': {
+      headline: 'Your reason mixes up the parts. This card shows the THEN part, not the IF part.',
+      detail: [`The IF part is “${s.parts.P.if}.” The THEN part is “${s.parts.Q.then ?? s.parts.Q.if}.”`, `The card shows ${ending(shown, '.')} So it shows the THEN part.`, 'The THEN part alone can’t break the rule.'],
+      example: backCase(face, 'P'),
+    },
+  };
+  for (const r of order) if (r.holds) delete feedback[r.id];
+  const item: ChooseCore = {
+    kind: 'choose',
+    prompt: `${cards.intro} The card that shows ${shown} does not need to be turned over. Why not?`,
+    scene: ruleScene(o.skin, 'check'),
+    choices: order.map((r) => ({ id: r.id, label: r.label })),
+    answer: right[0].id,
+    explain: `The card shows the THEN part. The THEN part is needed for the IF part, not enough for it. With ${backs(cards, face, sym)} on the back, the rule is kept.`,
+    feedback,
+    hint: 'Here is another card, checked for you. Check this card the same way.',
+    hintCase: cardHintCase(s, 'P', sym),
+    teach: {
+      rule: CHECK_RULE,
+      terms: [NEEDED_TERM, ENOUGH_TERM],
+      meaning: ruleMeaning(s),
+      casesTitle: `What could be on the back of the card that shows ${shown}?`,
+      cases: otherPart(face).map((b) => backCase(face, b)),
+      remember: ['The THEN part is needed, not enough. A card that shows it can’t break the rule.', ASK_CARD],
+      simpler: cardSteps(s, face, sym),
+    },
+    tags: [WHY_TAG, NEED_TRAP],
+  };
+  syncWhyWrong(item);
+  item.conflict = true;
+  return { tag: 'need-enough', item, meta: { story: o.skin, sym, reasons: Object.fromEntries(reasons.map((r) => [r.id, r.holds])) } };
+}
+
+/**
+ * Lesson 6, the closing why item: why does the rule with “only if” mean “If P, then Q” and not “If Q, then P”? The
+ * right reason: the same one case breaks the rule and “If P, then Q”. The trap reads “only if” as plain “if”.
+ */
+export function whyOnlyIfItem(rng: Rng, o: { story: SkinId }): FormMade {
+  const f: FormKind = 'only-if';
+  const w = storyOf(o.story, f);
+  const forward = FORM_CONDS[f][0];
+  const turned = MISREAD[f];
+  const brk = formBroken(f);
+  if (brk.length !== 1 || !sameAsForm(forward, f) || sameAsForm(turned, f)) throw new Error('whyOnlyIfItem: the rule means its if–then form, not the turned one');
+  const ft = rowAt(false, true);
+  const ff = rowAt(false, false);
+  const reasons: Reason[] = [
+    { id: 'same-break', label: `The same one case breaks the rule and the first sentence: ${w.kase[rowKey(brk[0])]}.`, holds: sameAsForm(forward, f) },
+    { id: 'only-if-is-if', label: '“Only if” works just like “if,” so the part after it is the IF part.', holds: sameAsForm(turned, f) },
+    { id: 'then-alone', label: `${cap(w.kase[rowKey(ft)])} breaks the rule.`, holds: !formHolds(f, ft) },
+    { id: 'neither', label: `${cap(w.kase[rowKey(ff)])} breaks the rule.`, holds: !formHolds(f, ff) },
+  ];
+  const right = reasons.filter((x) => x.holds);
+  if (right.length !== 1) throw new Error('whyOnlyIfItem: exactly one reason must be true');
+  const order = rng.shuffle(reasons);
+  const FIRST = 'The first sentence';
+  const SECOND = 'The second sentence';
+  const kaseCase = (r: Row, note: string): TeachCase => ({
+    label: sentence(cap(w.kase[rowKey(r)])),
+    truths: [{ who: RULE_WHO, value: formHolds(f, r) }, { who: FIRST, value: condHolds(forward, r) }, { who: SECOND, value: condHolds(turned, r) }],
+    note,
+  });
+  const feedback: Record<string, ChoiceFeedback> = {
+    'only-if-is-if': {
+      headline: 'Your reason reads “only if” as plain “if.”',
+      detail: [`If it did, the rule would mean “${storyIf(w, turned)}”`, `Then ${w.kase[rowKey(ft)]} would break it. But that case keeps the rule.`, 'The part after “only if” is needed. It is the THEN part.'],
+      example: kaseCase(ft, formApart(f, ft, 'the second sentence')),
+    },
+    'then-alone': {
+      headline: `Your reason says ${w.kase[rowKey(ft)]} breaks the rule, but that case keeps it.`,
+      detail: [`${cap(w.kase[rowKey(ft)])}: the part before “only if” did not happen.`, w.onlyAbout, 'So that case keeps the rule.'],
+      example: kaseCase(ft, formNote(f, ft)),
+    },
+    neither: {
+      headline: `Your reason says ${w.kase[rowKey(ff)]} breaks the rule, but that case keeps it.`,
+      detail: [`${cap(w.kase[rowKey(ff)])}: the part before “only if” did not happen.`, w.onlyAbout, 'So that case keeps the rule.'],
+      example: kaseCase(ff, formNote(f, ff)),
+    },
+  };
+  const k = w.kase[rowKey(brk[0])];
+  const item: ChooseCore = {
+    kind: 'choose',
+    prompt: `The rule means “${storyIf(w, forward)}” It does not mean “${storyIf(w, turned)}” Why?`,
+    scene: formScene(w, f),
+    choices: order.map((r) => ({ id: r.id, label: r.label })),
+    answer: right[0].id,
+    explain: `Only ${k} breaks the rule. It is also the only case that breaks the first sentence. So they mean the same.`,
+    feedback,
+    hint: 'Here is one case, checked for you. Check the other cases the same way.',
+    hintCase: kaseCase(rowAt(true, true), 'This case keeps the rule and the two sentences. Now check the other three cases.'),
+    teach: {
+      rule: SAME_RULE,
+      terms: [formTerm(w, f), BREAKS_SENTENCE_TERM],
+      meaning: formMeaning(w, f),
+      casesTitle: 'Which cases break the rule? Which break each sentence?',
+      cases: ROWS.map((r) => kaseCase(r, formNote(f, r))),
+      remember: [FORM_SAY[f], FORM_ASK[f]],
+      simpler: [`Only ${k} breaks the rule.`, `Only ${k} breaks the first sentence too.`, `${cap(w.kase[rowKey(ft)])} breaks the second sentence, but it keeps the rule.`, 'So the rule means the first sentence.'],
+    },
+    tags: [WHY_TAG, ONLY_IF_TRAP],
+  };
+  syncWhyWrong(item);
+  item.conflict = true;
+  return { tag: f, item, meta: { story: o.story, form: f, reasons: Object.fromEntries(reasons.map((r) => [r.id, r.holds])) } };
+}
+
+// ----- lessons 6 and 7: the boards -----
+
+/** Why one box keeps or breaks a form: said when the learner marks it the other way. */
+function formBoxWhy(w: Story, f: FormKind, r: Row): string {
+  const is = `This box is for ${w.kase[rowKey(r)]}.`;
+  if (!formHolds(f, r)) {
+    const line = f === 'only-if' ? 'The part before “only if” happened without the part after it.' : f === 'unless' ? 'Neither part happened.' : 'One part happened without the other.';
+    return `${is} ${line} That breaks the rule, so this box gets a ✗, not a ✓.`;
+  }
+  let line: string;
+  if (f === 'only-if') line = r.p ? 'The part after “only if” happened too.' : `The part before “only if” did not happen. ${w.onlyAbout}`;
+  else if (f === 'unless') line = r.q ? `The part after “unless” happened. ${w.onlyAbout}` : 'The part before “unless” happened.';
+  else line = r.p ? 'The two parts happened together.' : 'Neither part happened, so no part happened alone.';
+  return `${is} ${line} That keeps the rule, so this box gets a ✓, not a ✗.`;
+}
+
+/** The mix-up each form's four boxes can show: the misreading marks the box it gets wrong. */
+function formBoxMix(w: Story, f: FormKind): Misconception {
+  const r = ROWS.find((x) => misreadMatters(f, x) && formHolds(f, x) === (f !== 'iff'))!;
+  const mark = `${litOf('p', r.p)}-${litOf('q', r.q)}`;
+  const k = cap(w.kase[rowKey(r)]);
+  const text: Record<FormKind, string> = {
+    'only-if': `You may be treating “only if” and plain “if” as the same thing. They are two different things: the part after “only if” is needed, not enough. ${k} keeps this rule.`,
+    unless: `You may be treating “${bare(formText(w, f))}” and “${bare(storyIf(w, MISREAD[f]))}” as the same thing. They are two different things: when the part after “unless” happens, the rule makes no promise. ${k} keeps it.`,
+    iff: `You may be treating “if and only if” and plain “if” as the same thing. They are two different things: “if and only if” works each way. ${k} breaks it.`,
+  };
+  return { id: `${f}-misread`, when: 'picks', picks: { [mark]: ynId(!formHolds(f, r)) }, text: text[f] };
+}
+
+/**
+ * Lessons 6 and 7: the four boxes of a rule with “only if”, “unless” or “if and only if”, empty. Rows are the part
+ * before the word and its NOT; columns the part after it and its NOT. ✓ keeps the rule, ✗ breaks it.
+ */
+export function formBoxDrill(w: Story, f: FormKind, t: BoardText): DrillStep {
+  const cols: Lit[] = ['Q', 'notQ'];
+  const rows: DrillRow[] = (['P', 'notP'] as const).map((rl) => ({
+    id: rl,
+    label: w.face[rl],
+    marks: cols.map((cl): DrillMark => {
+      const r = ROWS.find((x) => litHolds(rl, x) && litHolds(cl, x))!;
+      const kept = formHolds(f, r);
+      return { id: `${rl}-${cl}`, label: w.face[cl], options: yesNo(), answer: ynId(kept), why: { [ynId(!kept)]: formBoxWhy(w, f, r) } };
+    }),
+  }));
+  const broken = formBroken(f).map((b) => `“${w.face[litOf('p', b.p)]}” with “${w.face[litOf('q', b.q)]}`);
+  const done =
+    broken.length === 1
+      ? `Right. Only one box breaks the rule: ${broken[0]}.” The other three boxes keep the rule.`
+      : `Right. Two boxes break the rule: ${broken[0]},” and ${broken[1]}.” In each one, one part happened without the other.`;
+  return {
+    id: t.id,
+    title: t.title,
+    body: t.body,
+    scene: formScene(w, f),
+    ...twinOf(t),
+    rows,
+    columns: cols.map((c) => w.face[c]),
+    caption: '✓ keeps the rule. ✗ breaks it.',
+    done,
+    misconceptions: [formBoxMix(w, f)],
+  };
+}
+
+/** One column of a sentence grid: its short name, the sentence's name in words, and when a case keeps it. */
+export interface GridColumn {
+  id: string;
+  label: string;
+  /** "the plain-if rule" */
+  name: string;
+  holds(r: Row): boolean;
+  /** The column is shown marked (the worked case), not tapped. */
+  given?: boolean;
+  /** Why a box of this column keeps or breaks its sentence (starts with the case's label). */
+  why?(r: Row, label: string): string;
+}
+
+/** An if–then column: its marks and the words for a wrong tap come from condHolds() on its IF part and THEN part. */
+export function condColumn(w: Story, id: string, label: string, name: string, c: Cond): GridColumn {
+  return {
+    id,
+    label,
+    name,
+    holds: (r) => condHolds(c, r),
+    why: (r, k) => {
+      const ifp = `“${w.parts[c.a].if},”`;
+      const thenp = `“${thenOf(w, c.b)},”`;
+      const a = litHolds(c.a, r);
+      const b = litHolds(c.b, r);
+      if (a && !b) return `${k}: the IF part, ${ifp} is true. The THEN part, ${thenp} is false. That breaks ${name}, so this box gets a ✗, not a ✓.`;
+      if (!a) return `${k}: the IF part, ${ifp} is false. So ${name} asks for nothing here. It is kept, so this box gets a ✓, not a ✗.`;
+      return `${k}: the IF part, ${ifp} is true. The THEN part, ${thenp} is true too. That keeps ${name}, so this box gets a ✓, not a ✗.`;
+    },
+  };
+}
+
+/** A needed or enough column (lesson 7), with words about the rule's IF part and THEN part. */
+export function needColumn(id: NeedId, label: string, name: string): GridColumn {
+  const c = needCond(id);
+  return {
+    id,
+    label,
+    name,
+    holds: (r) => condHolds(c, r),
+    why: (r, k) => {
+      const needed = id.startsWith('needed');
+      const [part, other] = partOf(id.endsWith('P') ? 'P' : 'Q') === 'p' ? ['IF', 'THEN'] : ['THEN', 'IF'];
+      const a = litHolds(c.a, r);
+      const b = litHolds(c.b, r);
+      if (needed) {
+        if (a && !b) return `${k}: the ${other} part happened without the ${part} part. The needed part is missing, so this box gets a ✗, not a ✓.`;
+        if (!a) return `${k}: the ${other} part did not happen, so nothing was needed. That keeps ${name}, so this box gets a ✓, not a ✗.`;
+        return `${k}: the ${other} part happened, and the needed ${part} part is there. That keeps ${name}, so this box gets a ✓, not a ✗.`;
+      }
+      if (a && !b) return `${k}: the ${part} part happened, but the ${other} part did not. So it was not enough, and this box gets a ✗, not a ✓.`;
+      if (!a) return `${k}: the ${part} part did not happen, so ${name} promises nothing. That keeps it, so this box gets a ✓, not a ✗.`;
+      return `${k}: the ${part} part happened, and the ${other} part did too. That keeps ${name}, so this box gets a ✓, not a ✗.`;
+    },
+  };
+}
+
+/**
+ * A sentence grid (lessons 6 and 7): the four cases as rows, one column per sentence. The given column is the worked
+ * case; the learner marks the others: ✓ when the case keeps that sentence, ✗ when it breaks it. The last words say which
+ * column breaks in the same box as the given one, worked out from the marks' answers.
+ */
+export function sentenceGridDrill(kase: Record<RowKey, string>, scene: Scene, t: BoardText, cols: GridColumn[]): DrillStep {
+  const given = cols.find((c) => c.given);
+  if (!given) throw new Error('sentenceGridDrill: one column is the worked case');
+  const rows: DrillRow[] = ROWS.map((r) => {
+    const label = cap(kase[rowKey(r)]);
+    return {
+      id: rowKey(r),
+      label,
+      marks: cols.map((col): DrillMark => {
+        const kept = col.holds(r);
+        const base = { id: `${rowKey(r)}-${col.id}`, label: col.label, options: yesNo(), answer: ynId(kept) };
+        return col.given ? { ...base, given: true, why: {} } : { ...base, why: { [ynId(!kept)]: col.why!(r, label) } };
+      }),
+    };
+  });
+  const brokenBy = (col: GridColumn) => ROWS.filter((r) => !col.holds(r));
+  const list = (rs: Row[]) => rs.map((r) => kase[rowKey(r)]).join(' and ');
+  const out = [`Right. ${cap(given.name)} breaks only for ${list(brokenBy(given))}.`];
+  for (const col of cols.filter((c) => !c.given)) {
+    const same = JSON.stringify(brokenBy(col)) === JSON.stringify(brokenBy(given));
+    out.push(same ? `${cap(col.name)} breaks in the same box, so it means the same.` : `${cap(col.name)} breaks for ${list(brokenBy(col))} instead, so it does not mean the same.`);
+  }
+  return { id: t.id, title: t.title, body: t.body, scene, ...twinOf(t), rows, columns: cols.map((c) => c.label), caption: '✓ keeps the sentence. ✗ breaks it.', done: out.join(' ') };
+}
+
+// ----- lessons 6 and 7: the distinctions -----
+
+/** “Only if” vs plain “if” (lesson 6): the part after “only if” is needed; the part after plain “if” is enough. */
+export const ONLY_IF_VS_IF: Distinction = {
+  id: 'only-if-vs-if',
+  a: '“P only if Q”: the part after “only if” is needed. It means “If P, then Q.”',
+  b: '“P if Q”: the part after plain “if” is enough. It means “If Q, then P.”',
+};
+
+/** Needed vs enough (lesson 7). */
+export const NEEDED_VS_ENOUGH: Distinction = {
+  id: 'needed-vs-enough',
+  a: 'Needed: the other part can’t happen without this part.',
+  b: 'Enough: when this part happens, the other part happens for sure.',
+};
+
+/** The last line of “I’m confused” on a lesson 6 or 7 board. */
+export const ONLY_IF_CLOSING = 'Those two ideas are apart now. The part after “only if” is needed. The part after plain “if” is enough.';
+export const NEED_CLOSING = 'Those two ideas are apart now. The IF part is enough. The THEN part is needed, not enough.';
+
+/**
+ * “Only if” vs plain “if” (lesson 6): the same case, a kid with a library card who took no book home, under the rule
+ * with “only if” and under the same words with plain “if”. The case did not change; only the words did.
+ */
+export function onlyIfContrast(): Extract<Scene, { kind: 'contrast' }> {
+  const w = storyOf('library', 'only-if');
+  const r = rowAt(false, true);
+  const name = 'Kai';
+  const world = `${w.says(name, r, CLASSIC)}.`;
+  const onlyIf: ContrastPanel = {
+    world,
+    who: 'The only-if rule',
+    says: formText(w, 'only-if'),
+    truth: formHolds('only-if', r),
+    because: `${w.fact('notP', name)}. The part before “only if” did not happen, so the rule asks for nothing.`,
+    then: 'This case keeps the only-if rule.',
+  };
+  const plain: ContrastPanel = {
+    world,
+    who: 'The plain-if rule',
+    says: plainIfText(w),
+    truth: condHolds(MISREAD['only-if'], r),
+    because: `${w.fact('Q', name)}, so this rule needs “${w.parts.P.if}.” But ${lead(w.fact('notP', name))}.`,
+    then: 'This case breaks the plain-if rule.',
+  };
+  if (onlyIf.truth === plain.truth) throw new Error('onlyIfContrast: the two rules must come out apart');
+  return {
+    kind: 'contrast',
+    pairs: [onlyIf, plain],
+    ask: { q: `Did ${name} change?`, a: 'No. Only the words changed. With “only if,” the library card is needed. With plain “if,” the card would be enough.' },
+    words: { worldTag: 'The case', saysWord: 'says:', truth: 'Kept', untruth: 'Broken' },
+  };
+}
+
+/**
+ * Needed vs enough (lesson 7): the same case, Dee ate all the veggies and got no dessert, under “needed” and under
+ * “enough”. Dee did not change; only one word did.
+ */
+export function needContrast(): Extract<Scene, { kind: 'contrast' }> {
+  const s = SKINS.dessert;
+  const r = rowAt(false, true);
+  const name = 'Dee';
+  const world = `${s.says(name, r)}.`;
+  const needed: ContrastPanel = {
+    world,
+    who: 'The needed sentence',
+    says: NEED_WORDS.dessert['needed-Q'],
+    truth: condHolds(needCond('needed-Q'), r),
+    because: `${s.fact('notP', name)}, so nothing was needed.`,
+    then: 'This case keeps the needed sentence.',
+  };
+  const enough: ContrastPanel = {
+    world,
+    who: 'The enough sentence',
+    says: NEED_WORDS.dessert['enough-Q'],
+    truth: condHolds(needCond('enough-Q'), r),
+    because: `${s.fact('Q', name)}, but ${lead(s.fact('notP', name))}. So the veggies were not enough.`,
+    then: 'This case breaks the enough sentence.',
+  };
+  if (needed.truth === enough.truth) throw new Error('needContrast: the two sentences must come out apart');
+  return {
+    kind: 'contrast',
+    pairs: [needed, enough],
+    ask: { q: `Did ${name} change?`, a: 'No. Only one word changed. Needed is not the same as enough.' },
+    words: { worldTag: 'The case', saysWord: 'says:', truth: 'Kept', untruth: 'Broken' },
+  };
+}
+
+/** “I’m confused” on the lesson 6 boards, asked in another story so it never gives a board's own mark. */
+export function onlyIfConfused(): ConfusedQuestion[] {
+  const w = storyOf('dessert', 'only-if');
+  const needed = FORM_CONDS['only-if'][0].b;
+  return [
+    {
+      q: `In “${bare(formText(w, 'only-if'))},” which part is needed?`,
+      options: [opt(cap(w.parts[needed].if), true), opt(cap(w.parts[FORM_CONDS['only-if'][0].a].if)), opt('Not sure')],
+      teach: `The part after “only if” is needed: “${w.parts.Q.if}.” So the rule means “${storyIf(w, FORM_CONDS['only-if'][0])}” It does not mean “${storyIf(w, MISREAD['only-if'])}”`,
+    },
+  ];
+}
+
+/** “I’m confused” on the “unless” boards: what the rule promises when the part after “unless” happens (another story). */
+export function unlessConfused(): ConfusedQuestion[] {
+  const w = storyOf('store', 'unless');
+  const tt = rowAt(true, true);
+  const kept = formHolds('unless', tt);
+  return [
+    {
+      q: `Say the rule is “${bare(formText(w, 'unless'))}.” On a holiday, can the store still be open?`,
+      options: [opt('Yes. On a holiday, the rule makes no promise', kept), opt('No. That breaks the rule', !kept), opt('Not sure')],
+      teach: `${kept ? 'Yes' : 'No'}. The rule means “${storyIf(w, FORM_CONDS.unless[0])}” ${w.onlyAbout} On a holiday, an open store keeps it, and a closed store keeps it too.`,
+    },
+  ];
+}
+
+/** “I’m confused” on the “if and only if” boards and the needed and enough board (another story than the board's). */
+export function iffConfused(): ConfusedQuestion[] {
+  const w = storyOf('library', 'iff');
+  const ft = rowAt(false, true);
+  const kept = formHolds('iff', ft);
+  return [
+    {
+      q: `Say the rule is “${bare(formText(w, 'iff'))}.” Can a kid with a library card take no book home?`,
+      options: [opt('Yes. That keeps the rule', kept), opt('No. That breaks the rule', !kept), opt('Not sure')],
+      teach: `${kept ? 'Yes' : 'No'}. “If and only if” works each way. It also means “${storyIf(w, FORM_CONDS.iff[1])}” So a kid with a card must take a book home.`,
+    },
+  ];
+}
+
+export function needConfused(): ConfusedQuestion[] {
+  const s = 'library';
+  const enough = sameMeaning(needCond('enough-Q'), RULE);
+  return [
+    {
+      q: `The rule is “${bare(ruleText(s))}.” Is having a library card enough to take a book home?`,
+      options: [opt('No. It is needed, not enough', !enough), opt('Yes. It is enough', enough), opt('Not sure')],
+      teach: `${enough ? 'Yes' : 'No'}. ${cap(SKINS[s].kase.FT)} keeps the rule. So a card is needed for a book, but it is not enough to get one.`,
+    },
+  ];
+}

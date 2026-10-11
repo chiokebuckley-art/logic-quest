@@ -1,5 +1,33 @@
 # LOGIC QUEST
 
+**v0.11.0 — First principles, every idea defined before it is used:** the changes in the Logic Quest Curriculum
+Review (October 11, 2026). The Journey now runs the whole chain of logic, each new word named before it is used, and
+every stop is built.
+
+- **A new stop, Arguments,** right after True or False? (shown as Stop 2; every later stop’s shown number moves up
+  by one, while ids and saves stay as they were): givens and the claim; does it follow (Must, Might, Can’t); follows
+  even when silly (the shape, not the content, makes it follow); solid arguments (follows, and the givens are true).
+  It names premise, conclusion, argument, valid and sound.
+- **Six stops built.** All, Some, None (rings around things; “some” is true when all are; “not all” means “some are
+  not”; the empty ring). Truth Tables (rows are every case; tables for NOT, AND, OR; the IF table; same meaning when
+  the columns match in every row; always true, never true). Circuit Lab (in a line is AND, side by side is OR, the
+  flipper is NOT, from a table to a circuit, two circuits with the same table). Proof (four ways to prove; every step
+  cites; cover every case; suppose and crash; one counterexample is enough; it opens after Circuit Lab and Proof
+  Lantern, whose methods it names). Spot the Trick and Clues & Chances on the side track after All, Some, None (flip
+  tricks; the middle trick and the swap; going in circles and only two doors; too few and everybody says; likely, not
+  certain; each draw is new; out of 100; would I see this clue if I were wrong).
+- **If… then grows.** Only if, and unless; Both ways: needed and enough (necessary, sufficient, if and only if). The
+  lesson that turns a rule around now names converse, inverse and contrapositive next to Flip only, NOT only and Flip
+  and NOT.
+- **Every stop closes with a why.** The last question of every stop check asks for the reason, not the answer.
+- **Warm-ups.** Every stop after the first opens with one question from the earlier idea it builds on, never graded.
+- **Words.** A Words tab in the Library collects each term once its lesson is done: statement, premise, conclusion,
+  valid, sound, transitive (Line Up), symmetric (Grid Detective), equivalent, necessary, sufficient, proof,
+  contradiction, counterexample, axiom, definition, fallacy and more.
+- **The Observatory rings open after the stops they build on:** Ring 1 after Stop 1, Rings 2 and 3 after Ring 1,
+  Ring 4 after Knights & Knaves, Ways to Think and Ring 2. A stop a player had already started or passed never locks.
+- **Pattern Lab** Trickster Market and Chance Dock now lead to built stops. The spec is `docs/CURRICULUM-PLAN.md`.
+
 **v0.10.0 — The Pattern Observatory:** a side constellation of pattern recognition, from the owner’s handoff
 *Pattern Recognition from First Principles* (v2). Four rings, ten places, one routine. It opens from the start and
 never blocks the main track.

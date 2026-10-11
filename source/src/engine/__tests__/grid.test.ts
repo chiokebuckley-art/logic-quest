@@ -45,6 +45,7 @@ import {
   type SkinId,
   type Sol,
   type Spec,
+  WHY_SKILL,
 } from '../puzzles/grid';
 import { createRng } from '../rng';
 import type { ChooseItem, DrillMark, DrillStep, GridClue, Item, Scene, TeachCase } from '../types';
@@ -519,7 +520,7 @@ describe('stop 4 content', () => {
     }
     expect([...skills].sort()).toEqual([
       's4.enough-clues', 's4.grid-marks', 's4.grid-one', 's4.grid-two', 's4.link', 's4.not-decided', 's4.not-link',
-      's4.only-one-left', 's4.proof-clue', 's4.spread-column', 's4.spread-tick',
+      's4.only-one-left', 's4.proof-clue', 's4.spread-column', 's4.spread-tick', 's4.why-only-one',
     ]);
   });
 
@@ -1504,7 +1505,9 @@ describe('See -> Do -> Quiz (the skill-drill handoff)', () => {
 
   it('the quiz only asks the families its lesson’s See and Do taught: practice, check, Arcade, new examples and the Notebook', () => {
     const ok = (it: Item, where: string) => {
-      expect(TAUGHT[it.lesson], `${where} ${it.id}`).toContain(it.skill);
+      // The check's closing why item (tag why) asks for the reason behind lesson 2's “only one left”.
+      const taught = it.tags?.includes('why') && it.lesson === 's4.l2' ? [...TAUGHT[it.lesson], WHY_SKILL] : TAUGHT[it.lesson];
+      expect(taught, `${where} ${it.id}`).toContain(it.skill);
       // Proofs and “enough clues” are taught on one-part grids only.
       if (it.lesson === 's4.l5') expect(twoPart(it), `${where} ${it.id}: ${it.prompt}`).toBe(false);
     };
@@ -1885,8 +1888,8 @@ describe('distinctions: a cross in this line vs a cross elsewhere (lesson 2), ba
   });
 
   it('back and forth on a lesson 4 board: a worked-out cross carried across, the last box, and the check mark carried back', () => {
-    expect(l4.ideas.map((c) => c.title)).toEqual(['Two parts to the grid', 'A linking clue', 'Use what you know', 'A “not” link', 'Links work both ways', 'Back and forth']);
-    expect(l4.ideas[5].scene).toBe(CARD_CLUES.backForth);
+    expect(l4.ideas.map((c) => c.title)).toEqual(['Two parts to the grid', 'A linking clue', 'Use what you know', 'A “not” link', 'Links work both ways', 'A pair works both ways', 'Back and forth']);
+    expect(l4.ideas[6].scene).toBe(CARD_CLUES.backForth);
     expect(l4.drill![3]).toBe(L4_BACK_FORTH);
     const clues = (CARD_CLUES.backForth.kind === 'clues' ? CARD_CLUES.backForth.clues : []).map(readClue);
     // Neither part is known: clue 1 (an “or” clue) crosses out Mia – fish; clue 2 carries it to Mia – popcorn; with clue
@@ -1895,7 +1898,7 @@ describe('distinctions: a cross in this line vs a cross elsewhere (lesson 2), ba
     expect(status(fit(TWO, clues.slice(0, 2)), 'mia', 'snack', 'popcorn')).toBe('no');
     expect(status(fit(TWO, clues), 'ava', 'snack', 'popcorn')).toBe('yes');
     expect(status(fit(TWO, clues), 'ava', 'pet', 'fish')).toBe('yes');
-    expect(l4.ideas[5].body.join(' ')).toContain('Here clue 1 leaves out the fish, so Mia – fish gets a cross. Mia is not the kid with the fish. So clue 2 gives Mia – popcorn a cross.');
+    expect(l4.ideas[6].body.join(' ')).toContain('Here clue 1 leaves out the fish, so Mia – fish gets a cross. Mia is not the kid with the fish. So clue 2 gives Mia – popcorn a cross.');
     // The carries name their link and the mark they carry, worked out from the clues.
     const carries = L4_BACK_FORTH.rows.flatMap((r) => r.marks.filter((m) => m.compare).map((m) => [r.id, m.label, m.compare!.world]));
     // The shown carry says its other box's mark; the one to tap names the box only (Ava – popcorn is marked in the row
@@ -2003,7 +2006,7 @@ describe('distinctions: a cross in this line vs a cross elsewhere (lesson 2), ba
     // The linking-clue line moved from lesson 5's “Stuck? Read again” into lesson 4's “Back and forth”.
     const stuck = lessonOf('s4.l5').ideas.find((c) => c.title === 'Stuck? Read again')!;
     expect(stuck.body.join(' ')).not.toMatch(/linking/);
-    expect(l4.ideas[5].body).toContain('Stuck? Read the linking clues again. A linking clue may give you a new cross.');
+    expect(l4.ideas[6].body).toContain('Stuck? Read the linking clues again. A linking clue may give you a new cross.');
     // Lesson 4's real-life line no longer says to save a link for later.
     expect(WORLD.s4.lessons['s4.l4'].why).not.toMatch(/later/);
     expect(WORLD.s4.lessons['s4.l4'].why).toMatch(/Read it again each time/);

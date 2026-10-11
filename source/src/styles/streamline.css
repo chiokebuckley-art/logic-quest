@@ -67,8 +67,10 @@
 .sl-chip[aria-selected='true'], .sl-chip[aria-pressed='true'], .sl-chip[aria-checked='true'] { background: var(--gold); color: var(--bg); }
 .sl-chip.c-violet[aria-checked='true'] { background: var(--violet); color: var(--bg); }
 .sl-seg { display: flex; flex-wrap: wrap; gap: 6px; }
-/* The Library's six kinds: two even rows of three. */
-.sl-seg.sl-seg--grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+/* The Library's kind tabs (six or seven of them): rows that wrap and fill the width, each tab as wide as its word,
+   so no tab is cut off and nothing scrolls sideways at 320 px. */
+.sl-seg.sl-seg--grid { display: flex; flex-wrap: wrap; gap: 6px; }
+.sl-seg.sl-seg--grid .sl-seg-btn { flex: 1 1 auto; min-width: 52px; padding: 0 10px; }
 .sl-seg-btn { flex: 1 1 auto; min-height: 34px; padding: 0 8px; border-radius: 10px; border: 0; background: var(--bg-3); font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sl-seg-btn.c-gold { color: var(--gold); } .sl-seg-btn.c-cyan { color: var(--cyan); } .sl-seg-btn.c-lime { color: var(--lime); }
 .sl-seg-btn.c-violet { color: var(--violet); } .sl-seg-btn.c-muted { color: var(--muted); }
@@ -260,6 +262,7 @@ button.sl-row:disabled { cursor: default; }
 .sl-find-row { display: flex; align-items: center; gap: 12px; min-height: 46px; padding: 0 4px; background: none; border: 0; border-bottom: 1px solid var(--line-soft); color: var(--text); text-align: left; }
 .sl-find-row:hover { background: var(--bg-2); }
 .sl-find-title { flex: 1; min-width: 0; font-size: 14px; }
+.sl-find-sub { display: block; font-size: 12px; color: var(--muted); line-height: 1.35; padding-bottom: 6px; }
 .sl-find-meta { flex-shrink: 0; font-size: 12px; color: var(--muted); }
 
 /* ---------- Pattern Lab panel inside the Library ---------- */
@@ -380,3 +383,16 @@ button.sl-row:disabled { cursor: default; }
 .sl-real-title { margin: 0; font-size: 14.5px; font-weight: 700; color: var(--text); }
 .sl-real-why { margin: 0; font-size: 13.5px; line-height: 1.45; color: var(--text-2); }
 .sl-real-why-label { color: var(--mint); font-weight: 700; margin-right: 4px; }
+
+/* The Library's Words tab: one card per word, the word in bold, what it means, and the lesson it came from. */
+.sl-words { display: flex; flex-direction: column; gap: 8px; margin: 0; }
+.sl-word { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; background: var(--bg-2); border: 1px solid var(--line-soft); border-radius: 12px; min-width: 0; }
+.sl-word dt { font-size: 15px; color: var(--text); overflow-wrap: anywhere; }
+.sl-word-also { font-size: 13px; color: var(--text-2); font-weight: 400; }
+.sl-word dd { margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.sl-word-means { font-size: 14px; color: var(--text); line-height: 1.4; }
+.sl-word-from { font-size: 12px; color: var(--muted); }
+
+/* The stop page's warm-up card (a bridge item from the stop before), and its one-line done state. */
+.sl-warm { display: flex; flex-direction: column; gap: 10px; padding: 14px; background: var(--bg-2); border: 1px solid var(--gold); border-radius: 14px; min-width: 0; }
+.sl-warm-done { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: var(--bg-2); border: 1px solid var(--line-soft); border-radius: 12px; color: var(--mint); font-size: 14px; font-weight: 600; }

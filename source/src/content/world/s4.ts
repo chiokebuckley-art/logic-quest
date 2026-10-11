@@ -60,6 +60,11 @@ export const S4_WORLD: StopWorld = {
       'Three friends each order a different smoothie: berry, mango or banana. If all you know is that Zoe did not order mango, she could have berry or banana. You can’t tell yet.',
       'Three new kids get lockers 1, 2 and 3, one each. If all you know is that Eva’s locker is not 2, it could be 1 or 3. You can’t tell yet.',
     ],
+    // The check's closing why item: the reason a box gets the check mark is that it is the only one left.
+    's4.why-only-one': [
+      'Four families sign up to bring salad, soup, bread or fruit. Three are taken already, so the last family brings fruit, the only one left.',
+      'A florist has three vases for three bunches. Two vases are already full, so the last bunch goes in the empty vase. No guessing needed.',
+    ],
     // s4.l3 Spread the check mark
     's4.spread-tick': [
       'At the start of a board game, each player takes one color. Once you take blue, you can’t take another color, and no one else can take blue.',

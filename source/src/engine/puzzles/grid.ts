@@ -1432,6 +1432,172 @@ export function onlyOnePuzzle(rng: Rng, o: OnlyOpts): Built<ChooseItem> & { mark
   throw new Error('onlyOnePuzzle: no puzzle found');
 }
 
+// ---------- the closing why item: why must this box get the check mark? (only one left) ----------
+//
+// docs/CURRICULUM-PLAN.md, "the closing why item": the stop check ends with one item whose choices are reasons. Here a
+// partly marked grid leaves one empty box in a row or a column, and the learner picks why that box gets the check mark.
+// Each reason is a claim the engine checks by listing every way to fill the grid that keeps the marks: how many boxes of
+// the line are empty, whether one cross on its own decides it, and what the asked box holds. Exactly one reason holds.
+// No symbols in the words: a check mark and a cross are named, never drawn in the text.
+
+/** The tag of the stop check's closing item (its choices are reasons), and its skill. */
+export const WHY_TAG = 'why';
+export const WHY_SKILL = 's4.why-only-one';
+
+/** A reason on the why item: its words, and whether the marks make it true and enough. */
+export interface GridReason {
+  id: string;
+  label: string;
+  holds: boolean;
+}
+
+export interface WhyOnlyOpts {
+  id: string;
+  skin: SkinId;
+  /** The line with one empty box: a column ("Leo must have the cat": every other kid is crossed out) or a row. */
+  ask?: 'col' | 'row';
+  /** How many people (3 or 4 by default; the stop check uses 3). */
+  n?: number;
+}
+
+/**
+ * “Look at the grid. Leo must have the cat. Which reason shows why?” The asked line (the cat column, or Leo's row) has a
+ * cross in every box but one. One more cross sits off the line, where it tempts the box-vs-kid mix-up. The right reason
+ * is “only one left”; the wrong ones: the cross off the line decides it, two boxes are left (a guess), a cross means yes.
+ */
+export function whyOnlyOneItem(rng: Rng, o: WhyOnlyOpts): Built<ChooseItem> & { marks: Marks; ask: 'col' | 'row'; p: string; val: string; reasons: GridReason[] } {
+  const skin = SKINS[o.skin];
+  const ask = o.ask ?? (rng.chance(0.6) ? 'col' : 'row');
+  for (let tries = 0; tries < 500; tries++) {
+    const n = o.n ?? rng.pick([3, 3, 4]);
+    const cast = makeCast(rng, skin, n, [rng.int(0, 1)]);
+    const sol = randomSol(rng, cast);
+    const c = cast.cats[0].cat.id;
+    const vals = cast.spec.cats[0].values;
+    const ppl = cast.spec.people;
+    const w = wordsFor(cast);
+    const tw = teachWords(cast);
+    const nm = cast.nm;
+    const p = rng.pick(ppl);
+    const val = sol[p][c];
+    const marks: Marks = Object.fromEntries(ppl.map((q) => [q, {}]));
+    if (ask === 'col') for (const q of ppl) { if (q !== p) marks[q][val] = 'no'; }
+    else for (const x of vals) { if (x !== val) marks[p][x] = 'no'; }
+    // The cross off the line: in the answer's own row under another thing (a column question), or in the asked thing's
+    // column for another kid (a row question). It is true, and it says nothing about the asked box.
+    const off = ask === 'col' ? { q: p, x: rng.pick(vals.filter((x) => x !== val)) } : { q: rng.pick(ppl.filter((q) => q !== p)), x: val };
+    marks[off.q][off.x] = 'no';
+    const sols = fittingMarks(cast.spec, c, marks);
+    const decided = ask === 'col' ? holders(sols, c, val, ppl) : options(sols, p, c, vals);
+    if (decided.length !== 1 || decided[0] !== (ask === 'col' ? p : val)) continue;
+    const openLine = ask === 'col' ? ppl.filter((q) => marks[q][val] !== 'no') : vals.filter((x) => marks[p][x] !== 'no');
+    /** What the cross off the line decides on its own (a grid with only that cross). */
+    const offOnly: Marks = Object.fromEntries(ppl.map((q) => [q, q === off.q ? { [off.x]: 'no' as Mark } : {}]));
+    const offSols = fittingMarks(cast.spec, c, offOnly);
+    const offDecides = ask === 'col' ? holders(offSols, c, val, ppl).length === 1 : options(offSols, p, c, vals).length === 1;
+    const P = nm(p);
+    const label = w.val(c, val).label;
+    const thing = w.obj(c, val);
+    const reasons: GridReason[] = ask === 'col'
+      ? [
+        { id: 'only-one', label: `Every other box in the ${label} column has a cross. ${P}’s box is the only one left.`, holds: openLine.length === 1 && openLine[0] === p },
+        { id: 'off-line', label: `${P} has a cross under ${w.obj(c, off.x)}, so ${P} must ${w.base(c, val)}.`, holds: offDecides },
+        { id: 'two-left', label: `Two boxes in the ${label} column are still empty, so ${P} is a good guess.`, holds: openLine.length === 2 },
+        { id: 'cross-yes', label: `${P}’s box for ${thing} has a cross, and a cross means yes.`, holds: marks[p][val] === 'no' },
+      ]
+      : [
+        { id: 'only-one', label: `Every other box in ${P}’s row has a cross. The box for ${thing} is the only one left.`, holds: openLine.length === 1 && openLine[0] === val },
+        { id: 'off-line', label: `${nm(off.q)} has a cross for ${thing}, so ${P} must ${w.base(c, val)}.`, holds: offDecides },
+        { id: 'two-left', label: `Two boxes in ${P}’s row are still empty, so ${thing} is a good guess.`, holds: openLine.length === 2 },
+        { id: 'cross-yes', label: `${P}’s box for ${thing} has a cross, and a cross means yes.`, holds: marks[p][val] === 'no' },
+      ];
+    const right = reasons.filter((r) => r.holds);
+    if (right.length !== 1 || right[0].id !== 'only-one') continue;
+    const others = ppl.filter((q) => q !== p);
+    const crossed = ask === 'col'
+      ? `${joinNames(others.map(nm))} ${others.length === 1 ? 'has' : 'have'} a cross in the ${label} column. ${P}’s box is empty.`
+      : `${P}’s boxes for ${joinNames(vals.filter((x) => x !== val).map((x) => w.obj(c, x)))} have a cross. The box for ${thing} is empty.`;
+    const must = tw.must(sols, p, c, val);
+    const lineName = ask === 'col' ? `the ${label} column` : `${P}’s row`;
+    const nowCase: TeachCase = { label: `In this grid, ${crossed}`, truths: [must], note: `One empty box is left in ${lineName}, so it gets the check mark.` };
+    // The boundary: the same line with one cross fewer, in a grid with no other marks. Two boxes are empty there.
+    const freed = ask === 'col' ? rng.pick(others) : rng.pick(vals.filter((x) => x !== val));
+    const boundary: Marks = Object.fromEntries(ppl.map((q) => [q, {}]));
+    if (ask === 'col') for (const q of others) { if (q !== freed) boundary[q][val] = 'no'; }
+    else for (const x of vals) { if (x !== val && x !== freed) boundary[p][x] = 'no'; }
+    const solsB = fittingMarks(cast.spec, c, boundary);
+    const thenCase: TeachCase = {
+      label: ask === 'col' ? `In a grid with no other marks, ${P} and ${nm(freed)} both have an empty box in the ${label} column.` : `In a grid with no other marks, ${P}’s boxes for ${thing} and ${w.obj(c, freed)} are empty.`,
+      truths: ask === 'col' ? [tw.could(solsB, p, c, val), tw.could(solsB, freed, c, val)] : [tw.could(solsB, p, c, val), tw.could(solsB, p, c, freed)],
+      note: 'Two boxes are empty, and each could still get the check mark. So you can’t tell yet.',
+    };
+    const offCase: TeachCase = ask === 'col'
+      ? { label: `In a grid with only one cross, ${P}’s cross under ${w.obj(c, off.x)}.`, truths: [tw.must(offSols, p, c, val)], note: `That cross is about ${w.obj(c, off.x)} only. It does not decide who has ${thing}.` }
+      : { label: `In a grid with only one cross, ${nm(off.q)}’s cross for ${thing}.`, truths: [tw.must(offSols, p, c, val)], note: `That cross is in ${nm(off.q)}’s row. It does not decide what ${P} has.` };
+    const lastBox = ask === 'col' ? `${P}’s box is the only one left in the ${label} column` : `the box for ${thing} is the only one left in ${P}’s row`;
+    const feedback: Record<string, ChoiceFeedback> = {
+      'off-line': ask === 'col'
+        ? {
+          headline: `${P}’s cross under ${w.obj(c, off.x)} is about ${w.obj(c, off.x)} only.`,
+          detail: [`A cross means no for its own box. It says ${w.not(p, c, off.x)}. It says nothing about ${thing}.`, `What decides it: ${lastBox}.`],
+          example: offCase,
+        }
+        : {
+          headline: `${nm(off.q)}’s cross for ${thing} is in ${nm(off.q)}’s row, not ${P}’s.`,
+          detail: [`It says ${w.not(off.q, c, val)}. On its own, it does not decide what ${P} has.`, `What decides it: ${lastBox}.`],
+          example: offCase,
+        },
+      'two-left': {
+        headline: `Only one box in ${lineName} is empty, not two.`,
+        detail: [crossed, `So ${lastBox}. No guess is needed: ${P} must ${w.base(c, val)}.`],
+        example: nowCase,
+      },
+      'cross-yes': {
+        headline: `${P}’s box for ${thing} is empty, and a cross means no.`,
+        detail: ['A cross in a box means no. A check mark means yes.', `${cap(lastBox)}, so it gets the check mark.`],
+        example: nowCase,
+      },
+    };
+    const [hq, hx] = ask === 'col' ? [others[0], val] : [p, vals.find((x) => x !== val)!];
+    const item: ChooseItem = {
+      kind: 'choose',
+      id: o.id,
+      stop: STOP,
+      lesson: 's4.l2',
+      skill: WHY_SKILL,
+      prompt: `${settingText(cast)} Look at the grid. ${P} must ${w.base(c, val)}. Which reason shows why?`,
+      scene: gridScene(cast, 0, marks),
+      choices: rng.shuffle(reasons.map((r) => ({ id: r.id, label: r.label }))),
+      answer: 'only-one',
+      feedback,
+      explain: `${crossed} It is the only box left, so ${P} must ${w.base(c, val)}.`,
+      hint: `Here is one box in ${lineName}, checked for you. Now count the empty boxes there.`,
+      hintCase: { label: `In this grid, ${nm(hq)}’s box for ${w.obj(c, hx)} has a cross.`, truths: [tw.could(sols, hq, c, hx)], note: `A cross means no. So ${nm(hq)} can’t ${w.base(c, hx)}.` },
+      teach: {
+        rule: 'When every other box in a row or column has a cross, the last empty box gets the check mark.',
+        terms: [
+          { word: 'A cross in a box', meaning: `no. The ${skin.noun} in its row does not go with the ${w.cat(c).noun} in its column.` },
+          { word: 'A check mark in a box', meaning: `yes. The ${skin.noun} in its row goes with the ${w.cat(c).noun} in its column.` },
+          { word: '“Only one left”', meaning: 'every other box in a row or column has a cross. The last empty box gets the check mark.' },
+        ],
+        meaning: ask === 'col'
+          ? `Each ${w.cat(c).noun} goes to one ${skin.noun}. So count the empty boxes in the ${label} column.`
+          : `${w.one(p, c)}. So count the empty boxes in ${P}’s row.`,
+        casesTitle: 'One empty box, or more than one?',
+        cases: [nowCase, thenCase],
+        remember: ['One empty box left: it gets the check mark.', 'Ask: “How many empty boxes are left in this row or column?”'],
+        simpler: ask === 'col'
+          ? [`Start with the ${label} column. Each cross there says one ${skin.noun} can’t ${w.base(c, val)}.`, `If one box is left, the ${skin.noun} in its row must ${w.base(c, val)}.`, `If two boxes are left in the ${label} column, it can’t tell you yet on its own.`]
+          : [`Start with ${P}’s row. Each cross there rules out one ${w.cat(c).noun} for ${P}.`, `If one box is left, the ${w.cat(c).noun} in its column is the one.`, `If two boxes are left in ${P}’s row, it can’t tell you yet on its own.`],
+      },
+      tags: [WHY_TAG],
+    };
+    syncWhyWrong(item);
+    return { item, cast, sol, marks, ask, p, val, reasons };
+  }
+  throw new Error('whyOnlyOneItem: no puzzle found');
+}
+
 // ---------- lesson 3: spread the tick ----------
 
 export interface SpreadOpts {

@@ -53,6 +53,8 @@ import {
   sayRow,
   speakersScene,
   supposeItem,
+  whyCrashItem,
+  WHY_SKILL,
   truthConfused,
   whoCanSayItem,
   wordsItem,
@@ -68,6 +70,7 @@ import {
   type SupposeAnswer,
   type WordsOpts,
 } from '../engine/puzzles/knights';
+import { SKIN_IDS as GRID_SKINS, onlyOnePuzzle } from '../engine/puzzles/grid';
 import type { Claim, Distinction, DrillStep, IdeaCard, Item, LessonDef, Rng, Scene, StopDef } from '../engine/types';
 
 const L1 = 's5.l1';
@@ -780,6 +783,10 @@ const lessons: LessonDef[] = [
     ],
     drill: L3_DRILL,
     distinctions: [fromL1(KIND_VS_TRUTH), GUESS_VS_KNOWN],
+    terms: [
+      { term: 'suppose', means: 'To pretend something is true, just to test it. That is your guess.' },
+      { term: 'crash', also: 'suppose and crash', means: 'A guess crashes when no way makes it work. Then the islander you picked is the other kind.' },
+    ],
     // Two guesses to crash-test (one always crashes) and two puzzles, all with the words the boards check. No "us"
     // counting words and no silent islander: lesson 4 teaches those.
     practice: (rng) => {
@@ -986,7 +993,18 @@ function check(rng: Rng): Item[] {
     () => anyAndOr(rng, 'c7', skin()),
     () => (rng.chance(0.5) ? anyAndOr(rng, 'c8', skin()) : puzzle(rng, 'c8', skin(), L5)),
     () => (rng.chance(0.5) ? anySay(rng, 'c9', skin()) : anySuppose(rng, 'c9', skin())),
+    // The closing why item (tag why): one islander must be a knave, and the reason to pick is suppose and crash.
+    () => whyCrashItem(rng, { id: 'c10', skin: skin() }).item,
   ]);
+}
+
+/**
+ * The warm-up on the stop page, from Grid Detective: a grid with one box left in a row or column (only one left). It is
+ * a Stop 4 item, so it never counts for this stop. Its prompt says it is a warm-up from Grid Detective.
+ */
+function bridge(rng: Rng): Item {
+  const it = onlyOnePuzzle(rng, { id: 's5-warm', skin: rng.pick(GRID_SKINS), mode: rng.pick(['col', 'row'] as const) }).item;
+  return { ...it, prompt: `A warm-up from “Grid Detective.” ${it.prompt}` };
 }
 
 /** One Arcade item from anywhere in the stop. */
@@ -1061,6 +1079,8 @@ function fresh(missed: Item, rng: Rng): Item[] {
       ];
     }
     case L3: {
+      // The check's closing why item: a new one to explain, then a guess to crash-test on its own.
+      if (missed.skill === WHY_SKILL) return [whyCrashItem(rng, { id, skin: skin() }).item, supposeItem(rng, { id: `${id}b`, skin: skin(), target: 'crash', pool: PUZZLE_POOL[L3] }).item];
       const ans = missed.answer as SupposeAnswer;
       return [
         supposeItem(rng, { id, skin: skin(), target: ans, pool: PUZZLE_POOL[L3] }).item,
@@ -1087,4 +1107,6 @@ export const stop5: StopDef = {
   check,
   practice: arcade,
   fresh,
+  bridge,
+  skillNames: { [WHY_SKILL]: 'Why someone must be a knave: suppose and crash' },
 };

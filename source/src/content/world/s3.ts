@@ -55,6 +55,11 @@ export const S3_WORLD: StopWorld = {
       'Your friend is taller than you, and so is your cousin. Who is taller, your friend or your cousin? You can’t tell until they stand back to back.',
       'A swim coach knows two swimmers are both faster than a third. That does not show which of the two is fastest. She has them race each other to find out.',
     ],
+    // The check's closing why item: the reason is the chain through a middle person.
+    's3.why-chain': [
+      'At a pet show, the rabbit weighs more than the cat, and the cat weighs more than the hamster. So the rabbit weighs more than the hamster. No scale is needed for that pair.',
+      'Shipping workers know box A goes on the truck before box B, and box B before box C. So box A goes before box C, with no extra note.',
+    ],
     // s3.l2 Before vs right before
     's3.right-before': [
       'On a playlist, your song plays before your sister’s. Does it play right before hers? It might, but not if another song plays in between.',

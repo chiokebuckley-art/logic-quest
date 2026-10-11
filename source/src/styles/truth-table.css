@@ -1,0 +1,115 @@
+/* ---------- a truth table (Truth Tables): a key, then a table of True and False words; fits a 320 px phone ---------- */
+.play-tt {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.play-tt-key {
+  list-style: none;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line, rgba(154, 163, 209, 0.25));
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--text-2, #c9cff0);
+}
+.play-tt-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: auto;
+  font-size: 14px;
+}
+.play-tt-table--many {
+  font-size: 13px;
+}
+.play-tt-cap {
+  caption-side: bottom;
+  text-align: left;
+  padding-top: 6px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--text-2, #c9cff0);
+}
+.play-tt-table th,
+.play-tt-table td {
+  padding: 5px 4px;
+  border-bottom: 1px solid var(--line-soft, rgba(154, 163, 209, 0.2));
+  text-align: center;
+  vertical-align: middle;
+}
+.play-tt-table thead th {
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.25;
+  color: var(--text, #f1f3ff);
+  overflow-wrap: anywhere;
+  border-bottom: 2px solid var(--line, rgba(154, 163, 209, 0.25));
+}
+.play-tt-table .play-tt-rowhead {
+  width: 2.6em;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted, #9aa3d1);
+}
+.play-tt-table .is-first {
+  border-left: 2px solid var(--line, rgba(154, 163, 209, 0.25));
+}
+.play-tt-table thead th.is-sentence {
+  color: var(--gold-soft, #ffe08a);
+}
+.play-tt-v {
+  display: inline-block;
+  min-width: 3.2em;
+  padding: 2px 4px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 800;
+}
+.play-tt-v.is-true {
+  background: rgba(60, 255, 157, 0.14);
+  color: var(--teal-soft, #7dffbf);
+}
+.play-tt-v.is-false {
+  background: rgba(255, 77, 109, 0.14);
+  color: #ff8fa3;
+}
+.play-tt-blank {
+  display: inline-block;
+  width: 3.2em;
+  height: 1.5em;
+  border: 2px dashed var(--line, rgba(154, 163, 209, 0.35));
+  border-radius: 6px;
+  vertical-align: middle;
+}
+.play-tt-table tr.is-marked {
+  background: rgba(255, 201, 60, 0.12);
+  outline: 2px solid var(--gold, #ffc93c);
+  outline-offset: -2px;
+}
+.play-tt-mark {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.1;
+  color: var(--gold, #ffc93c);
+}
+@media (max-width: 360px) {
+  .play-tt-table th,
+  .play-tt-table td {
+    padding: 4px 2px;
+  }
+  .play-tt-v,
+  .play-tt-blank {
+    min-width: 2.9em;
+    width: auto;
+  }
+  .play-tt-blank {
+    width: 2.9em;
+  }
+}

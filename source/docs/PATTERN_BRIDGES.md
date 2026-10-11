@@ -3,7 +3,7 @@
 Pattern Lab remains an Engineering Quest module. This release implements the Logic Quest portion of Part A of `Pattern-Lab-Tweaked-LQ-Bridge-Handoff-Openable.pdf`.
 
 - Optional Explorer Workshop: notice, stated-rule sorting, smallest repeats, and another-case reasoning.
-- Thirteen preparation events across Signal Camp, Switch Caverns, Fog Marsh, Ladder Cliffs, optional Bridge of Rules/Twin Isles, Trickster Market, and Chance Dock.
+- Thirteen preparation events across Signal Camp, Switch Caverns, Fog Marsh, Ladder Cliffs, optional Bridge of Rules/Twin Isles, Trickster Market, and Chance Dock. (Since v0.11.0 Trickster Market and Chance Dock lead to built stops: Spot the Trick and Clues & Chances.)
 - Exact shared routine: Notice → Describe → Compare → Test → Predict → Explain. (Re-ordered in v0.10.0 with the owner’s OK
   to match the Pattern Observatory; it was Notice → Compare → Describe → Predict → Test → Revise. Each investigation keeps
   its questions: Describe asks, Compare is a line, Test asks how to check, Predict commits before the test result shows,

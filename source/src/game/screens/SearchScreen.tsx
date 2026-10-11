@@ -1,25 +1,29 @@
 /**
- * Find anything (1l). Indexes every key-idea card, lesson, stop title and idea, practice, Pattern Lab event,
- * repair card and setting. Word-prefix and substring matching, with one-typo tolerance on longer words.
+ * Find anything (1l). Indexes every key-idea card, lesson, stop title and idea, collected glossary word, practice,
+ * Pattern Lab event, repair card and setting. Stop numbers are the shown ones (stopNumber), never the ids. Word-prefix and substring matching, with one-typo tolerance on longer words.
  * The best stop match is the top hit. Recent searches show while the field is empty.
  */
 import { useMemo, useState } from 'react';
 import { viewAll } from '../../engine/journey/mastery';
 import type { SaveData } from '../../engine/save/save';
-import { STOPS } from '../../content/stops';
+import { STOPS, stopLabel, stopLabelOf, stopNumber } from '../../content/stops';
+import type { StopDef } from '../../engine/types';
+import { glossaryEntries } from '../glossary';
 import { DESTINATIONS } from '../pattern/bridges';
 import { skillName } from '../progressStats';
 import { useStore, type Route } from '../store';
 import { GIcon, StopArt, type GameIcon } from '../components/kit';
 import { lessonWorld, stopWorld } from '../../content/world';
 
-type Group = 'stop' | 'ideas' | 'practice' | 'lab' | 'fix' | 'settings';
+type Group = 'stop' | 'ideas' | 'words' | 'practice' | 'lab' | 'fix' | 'settings';
 
 export interface Entry {
   group: Group;
   title: string;
   /** Extra text that matches but is not shown. */
   body: string;
+  /** A second line shown under the title (a word's meaning). */
+  sub?: string;
   meta: string;
   route: Route;
   stopId?: string;
@@ -27,38 +31,46 @@ export interface Entry {
 
 const GROUPS: { group: Exclude<Group, 'stop'>; label: string; tone: string; icon: GameIcon }[] = [
   { group: 'ideas', label: 'Ideas', tone: 'cyan', icon: 'scroll' },
+  { group: 'words', label: 'Words', tone: 'gold', icon: 'book' },
   { group: 'practice', label: 'Practice', tone: 'lime', icon: 'target' },
   { group: 'lab', label: 'Pattern Lab', tone: 'violet', icon: 'medal' },
   { group: 'fix', label: 'Fix', tone: 'orange', icon: 'repair' },
   { group: 'settings', label: 'Settings', tone: 'muted', icon: 'settings' },
 ];
 
+/** The short stop tag on a result: "S3", or "Ring 1" for the Observatory. */
+const shortStop = (stop: StopDef) => (stop.observatory ? `Ring ${stop.observatory.ring}` : `S${stopNumber(stop)}`);
+
 /** Everything that can be found, for one save. */
 export function searchIndex(save: SaveData, today: string): Entry[] {
   const out: Entry[] = [];
   const views = viewAll(STOPS, save.stops, today);
   for (const { stop, view } of views) {
-    out.push({ group: 'stop', title: `Stop ${stop.n} · ${stop.title}`, body: stop.idea, meta: view.label, route: { name: 'stop', stopId: stop.id }, stopId: stop.id });
+    out.push({ group: 'stop', title: `${stopLabel(stop)} · ${stop.title}`, body: stop.idea, meta: view.label, route: { name: 'stop', stopId: stop.id }, stopId: stop.id });
     stop.lessons.forEach((lesson, k) => {
       const go: Route = view.status === 'locked' ? { name: 'stop', stopId: stop.id } : { name: 'lesson', stopId: stop.id, lessonId: lesson.id, from: 'library' };
-      out.push({ group: 'ideas', title: lesson.title, body: `${stop.title} lesson ${k + 1}`, meta: `S${stop.n} · L${k + 1}`, route: go });
-      for (const card of lesson.ideas) out.push({ group: 'ideas', title: card.title, body: `${card.body.join(' ')} ${lesson.title}`, meta: `S${stop.n} · L${k + 1}`, route: go });
+      out.push({ group: 'ideas', title: lesson.title, body: `${stop.title} lesson ${k + 1}`, meta: `${shortStop(stop)} · L${k + 1}`, route: go });
+      for (const card of lesson.ideas) out.push({ group: 'ideas', title: card.title, body: `${card.body.join(' ')} ${lesson.title}`, meta: `${shortStop(stop)} · L${k + 1}`, route: go });
       const w = lessonWorld(lesson.id);
-      if (w) out.push({ group: 'ideas', title: `${lesson.title}: in real life`, body: `real life used jobs ${w.why} ${w.uses.map((u) => `${u.who} ${u.text}`).join(' ')}`, meta: `S${stop.n} · L${k + 1}`, route: { name: 'library', kind: 'real', stop: stop.id } });
+      if (w) out.push({ group: 'ideas', title: `${lesson.title}: in real life`, body: `real life used jobs ${w.why} ${w.uses.map((u) => `${u.who} ${u.text}`).join(' ')}`, meta: `${shortStop(stop)} · L${k + 1}`, route: { name: 'library', kind: 'real', stop: stop.id } });
     });
     const line = stopWorld(stop.id);
-    if (line && !stop.lessons.length) out.push({ group: 'ideas', title: `${stop.title}: in real life`, body: `real life used ${line}`, meta: `S${stop.n}`, route: { name: 'library', kind: 'real', stop: stop.id } });
+    if (line && !stop.lessons.length) out.push({ group: 'ideas', title: `${stop.title}: in real life`, body: `real life used ${line}`, meta: shortStop(stop), route: { name: 'library', kind: 'real', stop: stop.id } });
     if (stop.practice) {
       const open = !!save.stops[stop.id]?.passDay;
       out.push({ group: 'practice', title: `${stop.title} puzzles`, body: `practice arcade ${stop.idea}`, meta: open ? 'open' : 'opens at pass', route: open ? { name: 'arcade', practice: stop.id } : { name: 'stop', stopId: stop.id } });
     }
+  }
+  // Glossary words already collected (their lesson is done): the word and what it means. They open the Words tab.
+  for (const { stop, terms } of glossaryEntries(save)) {
+    for (const t of terms) out.push({ group: 'words', title: t.term, sub: t.means, body: `${t.also ?? ''} ${t.means} word glossary meaning`, meta: `${shortStop(stop)} · L${t.lessonNumber}`, route: { name: 'library', kind: 'words' } });
   }
   for (const d of DESTINATIONS) {
     for (const id of d.events) out.push({ group: 'lab', title: `${d.name} · ${id}`, body: `${d.purpose} pattern lab bridge`, meta: save.patternBridge.completed.includes(id) ? 'done ✓' : 'event', route: { name: 'pattern', event: id } });
   }
   out.push({ group: 'lab', title: 'Pattern Workshop', body: 'explorer workshop pattern scout badge notice sort repeat', meta: save.patternBridge.workshop ? 'Pattern Scout ✓' : 'workshop', route: { name: 'pattern', workshop: true } });
   for (const c of Object.values(save.notebook ?? {})) {
-    out.push({ group: 'fix', title: skillName(c.skill), body: 'repair quest notebook missed', meta: `Stop ${c.stop}`, route: { name: 'notebook' } });
+    out.push({ group: 'fix', title: skillName(c.skill), body: 'repair quest notebook missed', meta: stopLabelOf(c.stop), route: { name: 'notebook' } });
   }
   const settings: [string, string, Route][] = [
     ['Read aloud', 'speech voice listen', { name: 'settings' }],
@@ -166,7 +178,7 @@ export function SearchScreen({ route }: { route: Extract<Route, { name: 'search'
               {list.map(({ e }, k) => (
                 <button key={`${e.title}-${k}`} type="button" className="sl-find-row" onClick={() => open(e)}>
                   <GIcon name={g.icon} size={16} color={`var(--${g.tone === 'orange' ? 'amber' : g.tone === 'muted' ? 'muted' : g.tone})`} />
-                  <span className="sl-find-title">{e.title}</span>
+                  <span className="sl-find-title">{e.title}{e.sub && <span className="sl-find-sub">{e.sub}</span>}</span>
                   <span className="sl-find-meta">{e.meta}</span>
                 </button>
               ))}

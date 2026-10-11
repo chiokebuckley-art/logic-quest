@@ -263,6 +263,10 @@ const machine: LessonDef = {
   primer: rulePrimer,
   ideas: machineIdeas(),
   drill: [testBoard('s15.l2-do'), buildBoard('s15.l2-do3'), { ...backBoard('s15.l2-do2'), afterCard: 4 }],
+  terms: [
+    { term: 'rule', means: 'What a function machine does to every input, like add 2 or double.' },
+    { term: 'test', also: 'a separating input', means: 'An input that picks a rule. A good test is an input where the rules give different outputs.' },
+  ],
   practice: (rng) => ids(machinePack(rng, 2), 's15.l2-p'),
   practiceAt: (rng, level) => ids(machinePack(rng, level), 's15.l2-p'),
   pass: { firstTry: 3, include: [{ tag: 'first-fit', label: 'a test that splits two rules that both fit' }] },
@@ -292,7 +296,14 @@ const clock: LessonDef = {
 // The ring check, the Arcade, new examples, the diagnostic
 // ======================================================================================================
 
-/** The Ring Check: 9 fresh items, three per place; the identify item is always a conflict item. */
+/** A place's Explain item as the check's closing why item: its choices are reasons, one right (tag `why`). */
+const asWhy = (it: ChooseItem): ChooseItem => ({ ...it, tags: [...(it.tags ?? []), 'why'] });
+
+/**
+ * The Ring Check: 9 fresh items, three per place; the identify item is always a conflict item. Last comes the closing
+ * why item (docs/CURRICULUM-PLAN.md): one place's Explain item, whose choices are reasons (why the stated construction
+ * gives any step, why one input tells two rules apart, or why a cycle lands where it does).
+ */
 function check(rng: Rng): Item[] {
   const one = distinct();
   const items: Made[] = [
@@ -305,6 +316,7 @@ function check(rng: Rng): Item[] {
     one(() => positionAt(rng)),
     one(() => elapsedAt(rng)),
     one(() => (rng.chance(0.5) ? countAt(rng) : cycleTransferAt(rng))),
+    one(() => asWhy(rng.pick([stairWhyAt, machineWhyAt, cycleWhyAt])(rng))),
   ];
   return ids(items, 's15-c');
 }
@@ -371,7 +383,7 @@ export const stop15: StopDef = {
   check,
   practice: arcade,
   fresh,
-  requires: [],
+  requires: ['s14'],
   lessonOrder: 'free',
   observatory: { ring: 2, track: 2, plain: 'Growth rules, functions and cycles', diagnostic },
   skillNames: {

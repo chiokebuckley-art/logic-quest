@@ -549,10 +549,10 @@ describe('every place generates its contract shapes (seeds 1-40)', () => {
     ]);
     expect(L1.primer).toBeTypeOf('function');
     expect(stop17.ready).toBe(true);
-    expect(stop17.requires).toEqual([]);
+    expect(stop17.requires).toEqual(['s5', 's7', 's15']);
     expect(stop17.lessonOrder).toBe('free');
-    // The card line recommends Stop 7, Lesson 1 (Pattern guesses), never a lock.
-    expect(L1.ideas.some((c) => c.body.some((b) => /Stop 7, Pattern guesses/.test(b)))).toBe(true);
+    // The card line recommends Ways to Think (shown as Stop 8), Lesson 1 (Pattern guesses), never a lock.
+    expect(L1.ideas.some((c) => c.body.some((b) => /Stop 8, Pattern guesses/.test(b)))).toBe(true);
     expect(L1.requires).not.toContain('s7.l1');
   });
 });
@@ -705,6 +705,9 @@ describe('the Ring Check, the Arcade, new examples and the diagnostic', () => {
     for (let seed = 1; seed <= 300; seed++) {
       const items = stop17.check!(createRng(seed));
       expect(items).toHaveLength(9);
+      // The listed terms close the check: the closing why item (tag why), whose right reason is the stated rule.
+      expect(items[8].skill).toBe('s17.why-continue');
+      expect(items[8].tags).toContain('why');
       for (const l of stop17.lessons) expect(items.some((x) => x.lesson === l.id)).toBe(true);
       expect(items.filter((x) => x.conflict).length).toBeGreaterThanOrEqual(1);
       expect(new Set(items.map(looks)).size).toBe(9);

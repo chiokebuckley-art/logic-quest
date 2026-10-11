@@ -144,6 +144,20 @@ fair choices and gut feelings. Each lesson is its own module (`src/content/stop7
 - **Gut feelings are not always wrong.** Some items have the count agree with the gut: the feeling was a good start,
   and only the count showed it was right.
 
+## The Journey, warm-ups, why items and words
+
+- **Shown numbers.** A stop's id (`s2`) and `n` never change; what the player sees is its place on the Journey
+  (`stopNumber`, `stopLabel` in `src/content/stops.ts`; Observatory stops read "Ring k"). Arguments is `s18`, shown
+  as Stop 2. Never show `stop.n`.
+- **Prerequisites.** `StopDef.requires` lists stop ids; undefined means the stop before it in the list. The side
+  track (`sideTrack: true`) opens after All, Some, None. A started or passed stop never locks again.
+- **Warm-up.** `StopDef.bridge(rng)` gives one item from the idea of the stop before (or `bridgeFrom`); the stop page
+  shows it as "Warm up · from Stop N", never graded, never in the Notebook.
+- **The closing why item.** The last item of `check(rng)` carries the tag `why` and asks for the reason: a choose
+  item whose choices are reasons, with feedback for every wrong reason.
+- **Words.** `LessonDef.terms` lists the words a lesson introduces (`term`, `means`, `also`); each is named once on a
+  card of that lesson, kid words first, and shows in the Library's Words tab once the lesson is done.
+
 ## Question kinds
 
 - `choose`: one right choice. Give `feedback` (and so `whyWrong`) for each wrong choice.
@@ -157,8 +171,10 @@ fair choices and gut feelings. Each lesson is its own module (`src/content/stop7
     crossing out and "only one left", without guessing.
 - `multi`: text cards; pick every one that must be chosen. Use `missTips` for needed cards that were left out and
   `pickTips` for cards that should not be picked.
-- Scenes: `things`, `boxes`, `clues`, `text`, `speakers` (speech bubbles) and `grid` (a half-filled grid, drawn as
-  a picture for worked examples).
+- Scenes: `things`, `boxes`, `clues`, `text`, `speakers` (speech bubbles), `grid` (a half-filled grid, drawn as a
+  picture for worked examples), `contrast` (two cases side by side), `cases` (the case board), `argument` (givens and
+  a claim), `rings` (sets drawn as rings around things), `table` (a truth table), `circuit` (switches, an inverter and
+  a lamp), `counts` (a 2-by-2 count picture out of 100), and the Observatory kinds in `src/engine/scenes/`.
 - `seconds`: a longer check time for big items (150–180 for grids and three islanders; 120–150 for the long
   explanation stories in Stop 7, Lesson 2).
 

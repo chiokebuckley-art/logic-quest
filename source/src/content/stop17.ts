@@ -150,7 +150,7 @@ const L1_IDEAS: IdeaCard[] = [
       'A fair coin has two sides with the same chance: 1 in 2.',
       'After 5 heads in a row, tails is not due. The coin has no memory, so each flip is new.',
       'A few good days work the same way. They are examples, not a proof that things will stay that way.',
-      'Want more on good guesses? Visit Stop 7, Pattern guesses.',
+      'Want more on good guesses? Visit Stop 8, Pattern guesses.',
     ],
   },
 ];
@@ -294,6 +294,7 @@ const proved: LessonDef = {
   primer: counterPrimer,
   ideas: L1_IDEAS,
   drill: [L1_BOARD_A, L1_BOARD_B, L1_BOARD_C],
+  terms: [{ term: 'proved', means: 'A claim is proved when a stated rule gives a reason for every case. Examples alone only make a good guess.' }],
   practice: l1Pack,
   review: (rng) =>
     ids(asReview(distinct([
@@ -576,6 +577,7 @@ const breakIt: LessonDef = {
   requires: [L1],
   ideas: L2_IDEAS,
   drill: [L2_BOARD_A, L2_BOARD_B],
+  terms: [{ term: 'counterexample', means: 'One case that breaks a claim about every case. It shows the claim is false.' }],
   practice: l2Pack,
   review: (rng) =>
     ids(asReview(distinct([
@@ -827,7 +829,11 @@ const mustGoOn: LessonDef = {
 // The Ring Check, the Arcade, new examples, the diagnostic
 // =====================================================================================================================
 
-/** The Ring Check: 9 fresh items, three per place. The circle, the coin and the listed terms are conflict items. */
+/**
+ * The Ring Check: 9 fresh items, three per place. The circle, the coin and the listed terms are conflict items. The
+ * listed terms close the check (tag `why`): their choices are reasons, and the right one is the stated rule, not the
+ * examples (docs/CURRICULUM-PLAN.md, the closing why item).
+ */
 function check(rng: Rng): Item[] {
   const made = distinct([
     () => statusItem(rng),
@@ -836,9 +842,12 @@ function check(rng: Rng): Item[] {
     () => counterItem(rng),
     () => separateItem(rng),
     () => (rng.chance(0.5) ? ruleOutItem(rng) : reasonsTestItem(rng)),
-    () => ({ ...whyContinueItem(rng), conflict: true }),
     () => parityItem(rng),
     () => rng.pick([() => jumpsItem(rng), () => chainItem(rng), () => mustContinueItem(rng)])(),
+    () => {
+      const it = whyContinueItem(rng);
+      return { ...it, conflict: true, tags: [...(it.tags ?? []), 'why'] };
+    },
   ]);
   return ids(made, `s${STOP}-c`);
 }
@@ -938,7 +947,7 @@ export const stop17: StopDef = {
   check,
   practice: arcade,
   fresh,
-  requires: [],
+  requires: ['s5', 's7', 's15'],
   lessonOrder: 'free',
   skillNames: SKILL_NAMES_S17,
   observatory: { ring: 4, track: 4, plain: 'Evidence', diagnostic },

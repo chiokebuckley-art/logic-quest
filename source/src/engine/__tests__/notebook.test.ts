@@ -47,12 +47,12 @@ describe('the Wrong-Answer Notebook', () => {
 });
 
 describe('cards this version cannot ask about', () => {
-  it('a due card for a stop that is not ready is not counted as fixable', () => {
+  it('a due card for a stop this version cannot ask about (an unknown stop) is not counted as fixable', () => {
     const day = '2026-09-30';
     let nb = addMiss({}, { skill: 's1.cant-tell', stop: 1, lesson: 's1.l1' }, day);
-    nb = addMiss(nb, { skill: 's8.some', stop: 8, lesson: 's8.l1' }, day);
+    nb = addMiss(nb, { skill: 's99.some', stop: 99, lesson: 's99.l1' }, day);
     expect(dueCards(nb, day)).toHaveLength(2);
     expect(fixableCards(nb, day, STOPS).map((c) => c.skill)).toEqual(['s1.cant-tell']);
-    expect(canFix(nb['s8.some'], STOPS)).toBe(false);
+    expect(canFix(nb['s99.some'], STOPS)).toBe(false);
   });
 });
