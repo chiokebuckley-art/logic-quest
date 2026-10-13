@@ -1,5 +1,21 @@
 # LOGIC QUEST
 
+**v0.12.0 — The logic the audit found missing:** from the Logic Quest Curriculum and Logic Audit (October 13,
+2026). Ten lessons across six stops, each with a trap item, real-life lines and glossary words:
+
+- **All, Some, None:** Two givens, one picture (syllogisms tested on three rings, every placement tried) and Every
+  and some: who comes first (nested quantifiers on a picture of kids, friends and lines).
+- **Truth Tables:** Both ways, and one but not both (if and only if; exclusive or as its own operator) and Say it with
+  symbols, the one lesson where a kid reads logic symbols, meant for Grade 8 and up.
+- **Circuit Lab:** The two-way switch (exclusive or in wires).
+- **Proof:** Rules with names (modus ponens, modus tollens, disjunctive syllogism, the chain rule, proof by
+  contrapositive) and Dominoes (induction), plus the liar sentence as a card.
+- **Spot the Trick:** Tricks about people (attacking the person, straw man, appeal to authority) and Tricks about
+  time (slippery slope, after-therefore-because).
+- **Clues & Chances:** And, or, with chances (both and either, as counts out of 100).
+
+Not built, on purpose: the teacher view. The brief is `docs/AUDIT-ADDITIONS.md`.
+
 **v0.11.0 — First principles, every idea defined before it is used:** the changes in the Logic Quest Curriculum
 Review (October 11, 2026). The Journey now runs the whole chain of logic, each new word named before it is used, and
 every stop is built.

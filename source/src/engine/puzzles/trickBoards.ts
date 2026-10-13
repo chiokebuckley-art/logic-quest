@@ -10,6 +10,12 @@
  *    doors vs every door (contrast, and a board of either-ors: a third door? true?).
  *  - Lesson 4: too few worked on Ava’s apples; its board asks which reasons prove all, or some. Then what most people
  *    say vs what is true (contrast, and a board of votes and claims about the world).
+ *  - Lesson 5: attacking the person worked on Mia and the pool; its board is the twin with a reason about the pool sign.
+ *    Then who says it vs whether it is true (contrast, and a board of Mia’s and Kim’s claims about the library). The
+ *    twisted claim and the famous name are worked too; their board asks what each trick’s reason leaves out.
+ *  - Lesson 6: the slippery slope worked on Ana’s fish; its board is a chain with a rule for each step (a snow day).
+ *    After-therefore-because worked on the car wash. Then after vs cause (contrast, and a board of four stories: did one
+ *    thing come right after the other, and does the reason prove the cause?).
  */
 import type { BoardWords, ConfusedQuestion, ContrastPanel, Distinction, DrillOption, DrillRow, DrillStep, Misconception, Scene } from '../types';
 import {
@@ -27,7 +33,23 @@ import {
   W_SUN,
   W_SWAP,
   W_VOTE,
+  W_BELL,
+  W_CAR,
+  W_CEREAL,
+  W_FISH,
+  W_LAKE,
+  W_POOL,
+  W_SNOW,
+  LEAVES_OUT,
+  NOT_HERE,
+  TRICK_NAME,
+  afterArg,
   allCases,
+  cap,
+  leavesLine,
+  peopleArg,
+  stepArg,
+  verdictOf,
   argScene,
   breaks,
   caseFacts,
@@ -54,8 +76,11 @@ import {
   swapArg,
   twoArg,
   voteArg,
+  type AfterTopic,
   type Arg,
   type Case,
+  type PeopleTopic,
+  type TrickKind,
   type DoorTopic,
   type MiddleTwoTopic,
   type PopularTopic,
@@ -601,6 +626,266 @@ export function sayBoard(): DrillStep {
     confused: [FAMILY_Q.popular, TRUE_PROVED_Q],
     distinction: SAY_VS_TRUE.id,
     done: 'Right. Both votes prove what the group picked. The other two are tricks, even though the sun really is a star.',
+  };
+}
+
+// ---------- Lesson 5: tricks about people ----------
+
+/** Lesson 5: who says a claim vs whether it is true. */
+export const WHO_VS_WHAT: Distinction = { id: 'who-vs-what', a: 'Who says the claim.', b: 'Whether the claim is true.' };
+export const L5_CARDS = { person: 0, contrast: 1, twist: 2, authority: 3, reminder: 4 } as const;
+
+/** Lesson 5’s reminder: a famous name on a claim that is really true. */
+export const W_OCTOPUS: PeopleTopic = {
+  id: 'w-octopus',
+  skin: 'everyday',
+  family: 'authority',
+  speaker: 'Rosa',
+  setting: 'A famous singer talks about sea animals.',
+  reason: 'The famous singer says an octopus has eight arms.',
+  claim: ['An octopus has eight arms.', 'An octopus does not have eight arms.'],
+  other: 'A singer knows about songs, not about sea animals.',
+  leaves: 'whether the singer knows about sea animals',
+  truth: true,
+};
+
+export const POOL = peopleArg(W_POOL);
+export const POOL_GOOD = peopleArg(W_POOL, true);
+export const LAKE = peopleArg(W_LAKE);
+export const CEREAL = peopleArg(W_CEREAL);
+export const OCTOPUS = peopleArg(W_OCTOPUS);
+
+const markedTrick = (arg: Arg) => argScene(arg, { cases: 'marked', caption: `${statusReason(arg, false)} So it is a trick.` });
+export const personWorkedScene = () => markedTrick(POOL);
+export const twistWorkedScene = () => markedTrick(LAKE);
+export const authorityWorkedScene = () => markedTrick(CEREAL);
+export const octopusScene = () => argScene(OCTOPUS, { real: true });
+
+/** Do, right after the worked attack on Mia: its twin, a reason about the pool itself, which proves its claim. */
+export function personBoard(): DrillStep {
+  const arg = POOL_GOOD;
+  return caseBoard(arg, {
+    id: 's12.l5-do',
+    title: 'Check each case',
+    body: ['Leo’s reason changed. Now it is about the pool sign, not about Mia.', 'Cross out each case that breaks a given. For each case left, is the claim true?', 'Then say: does the reason prove the claim, or is it a trick?'],
+    scene: argScene(arg, { cases: 'blank' }),
+    twin: 'Leo’s reason changed. Now it is about the pool sign, not about Mia.',
+    afterCard: L5_CARDS.person,
+    confused: [CASES_LEFT_Q, FAMILY_Q.person],
+    done: `Right. ${statusReason(arg, false)} A reason about the pool can prove a claim about the pool.`,
+  });
+}
+
+/** The library on the who-says-it card and board: what is really true there. */
+export const LIBRARY = { opens: 'nine', tank: 'yes', sundays: 'shut' } as const;
+type LibraryKey = keyof typeof LIBRARY;
+/** One kid’s claim about the library: who says it, what it says (a key and a value), and the fact that settles it. */
+export interface LibraryRow {
+  id: string;
+  who: string;
+  habit: string;
+  says: string;
+  key: LibraryKey;
+  value: string;
+  fact: string;
+}
+const MIA = { who: 'Mia', habit: 'late for everything' };
+const KIM = { who: 'Kim', habit: 'never late' };
+export const LIBRARY_ROWS: readonly LibraryRow[] = [
+  { id: 'r1', ...MIA, says: 'The library opens at nine.', key: 'opens', value: 'nine', fact: 'The library sign says it opens at nine.' },
+  { id: 'r2', ...KIM, says: 'The library opens at ten.', key: 'opens', value: 'ten', fact: 'The library sign says it opens at nine.' },
+  { id: 'r3', ...MIA, says: 'The library has a fish tank.', key: 'tank', value: 'yes', fact: 'A fish tank sits by the library door.' },
+  { id: 'r4', ...KIM, says: 'The library is open on Sundays.', key: 'sundays', value: 'open', fact: 'The library sign says it is shut on Sundays.' },
+];
+/** A claim about the library is true when it matches the library. Who says it plays no part. */
+export const libraryTrue = (r: Pick<LibraryRow, 'key' | 'value'>) => LIBRARY[r.key] === r.value;
+
+/** Card 2: Mia and Kim say the same words about the library. The sign decides, for both. */
+export function whoContrast(): Extract<Scene, { kind: 'contrast' }> {
+  const row = LIBRARY_ROWS[0];
+  const panel = (p: { who: string; habit: string }): ContrastPanel => ({
+    world: row.fact,
+    who: `${p.who}, who is ${p.habit}`,
+    says: row.says,
+    truth: libraryTrue(row),
+    because: `${p.who} says ${row.value}. The sign says ${LIBRARY[row.key]}. ${libraryTrue(row) ? 'They match.' : 'They do not match.'}`,
+  });
+  return {
+    kind: 'contrast',
+    pairs: [panel(MIA), panel(KIM)],
+    ask: { q: 'Mia is late a lot. Kim never is. Can the same words be true for one and false for the other?', a: 'No. The words are about the library, not about who says them. The sign decides.' },
+    words: { worldTag: 'The facts', truth: 'True', untruth: 'False' },
+  };
+}
+
+const WHO_AS_WHAT =
+  'You may be treating “who says it” and “whether it is true” as the same thing. They are two different things. A kid who is often late can be right. A kid who is never late can be wrong. The facts decide.';
+
+/** Do, right after the contrast: Mia and Kim each make a claim about the library. Is it true? Only the facts decide. */
+export function whoBoard(): DrillStep {
+  const rows: DrillRow[] = LIBRARY_ROWS.map((r): DrillRow => {
+    const t = libraryTrue(r);
+    const id = `${r.id}-true`;
+    return {
+      id: r.id,
+      label: `${r.who}, who is ${r.habit}, says, “${r.says}” ${r.fact}`,
+      marks: [
+        {
+          id,
+          label: 'Is the claim true?',
+          options: YES_NO,
+          answer: yn(t),
+          why: { [yn(!t)]: `${r.who} says ${mid(r.says)}. ${r.fact} ${t ? 'They match, so the claim is true.' : 'They do not match, so the claim is false.'} Who says it does not change that.` },
+          compare: { says: r.says, world: r.fact },
+        },
+      ],
+    };
+  });
+  return {
+    id: 's12.l5-do-who',
+    title: 'Who says it, or the facts?',
+    body: ['Mia is late for everything. Kim is never late.', 'Each of them makes a claim about the library. Is the claim true? Check the facts.'],
+    scene: whoContrast(),
+    afterCard: L5_CARDS.contrast,
+    rows,
+    scaffold: 'full',
+    words: { says: 'Claim', world: 'The facts', so: 'So', ask: 'Do the claim and the facts match?', closing: 'Those two ideas are apart now. Check the facts, not the person.' },
+    // Judging the claim by the kid: Mia’s true claims marked false, or Kim’s false claims marked true.
+    misconceptions: LIBRARY_ROWS.filter((r) => (r.who === MIA.who) === libraryTrue(r)).map((r) => ({ id: 'who-as-what', when: 'picks' as const, picks: { [`${r.id}-true`]: yn(!libraryTrue(r)) }, text: WHO_AS_WHAT })),
+    confused: [FAMILY_Q.person, TRUE_PROVED_Q],
+    distinction: WHO_VS_WHAT.id,
+    done: 'Right. Mia was right twice, and Kim was wrong twice. The facts decided, not the person.',
+  };
+}
+
+/** The three tricks of Lesson 5, each as an option on the what-does-it-leave-out board. */
+export const LEAVES_OPTIONS: DrillOption[] = (['person', 'twist', 'authority'] as const).map((k) => ({ id: k, label: `${cap(LEAVES_OUT[k]!)}.` }));
+/** The worked tricks the board sorts, one of each kind. */
+export const LEAVES_ROWS: readonly Arg[] = [POOL, LAKE, CEREAL];
+/** “Mia says the pool opens at noon today. Leo: “Mia is late for everything. So the pool does not open at noon today.”” */
+export const sayLine = (arg: Arg) => `${arg.setting}${arg.retell ? ` ${arg.retell}` : ''} ${arg.speaker}: “${arg.givens.map((g) => g.text).join(' ')} So ${arg.claimMid}.”`;
+
+/** Do, right after the famous-name card: for each worked trick, what does its reason leave out? */
+export function leavesBoard(): DrillStep {
+  const rows: DrillRow[] = LEAVES_ROWS.map((arg, k): DrillRow => {
+    const v = verdictOf(arg) as TrickKind;
+    const id = `trick${k + 1}`;
+    const why: Record<string, string> = {};
+    for (const o of LEAVES_OPTIONS) if (o.id !== v) why[o.id] = `${NOT_HERE[o.id as TrickKind]} This is ${TRICK_NAME[v]}.${leavesLine(arg)}`;
+    return { id, label: sayLine(arg), marks: [{ id, label: 'What does the reason leave out?', options: LEAVES_OPTIONS, answer: v, why }] };
+  });
+  return {
+    id: 's12.l5-do-leaves',
+    title: 'What does it leave out?',
+    body: ['Each reason is one of the three tricks about people.', 'For each one, what does the reason leave out?'],
+    scene: authorityWorkedScene(),
+    afterCard: L5_CARDS.authority,
+    rows,
+    scaffold: 'full',
+    words: { closing: 'Those ideas are apart now. Ask what the reason leaves out.' },
+    confused: [FAMILY_Q.twist, FAMILY_Q.authority],
+    done: 'Right. Each trick leaves out something the claim needs. Leo talks about Mia, not the pool. Mia answers a claim Leo never made. The singer may know nothing about food.',
+  };
+}
+
+// ---------- Lesson 6: tricks about time ----------
+
+/** Lesson 6: one thing came after another vs the first thing caused it. */
+export const AFTER_VS_CAUSE: Distinction = { id: 'after-vs-cause', a: 'One thing came right after another.', b: 'The first thing made the second one happen.' };
+export const L6_CARDS = { slope: 0, after: 1, contrast: 2, reminder: 3 } as const;
+
+/** The board’s second good reason, and Lesson 6’s reminder: an after-therefore claim that is really true. */
+export const W_FAN: AfterTopic = { id: 'w-fan', skin: 'everyday', speaker: 'Gus', setting: 'Gus presses the button on his desk fan.', after: 'The fan started right after Gus pressed its button.', cause: 'Gus’s press started the fan.', other: 'Something else started the fan.', only: 'Nothing but its button can start this fan.' };
+export const W_SUNSCREEN: AfterTopic = { id: 'w-sunscreen', skin: 'everyday', speaker: 'Kim', setting: 'Kim puts on sunscreen at the beach.', after: 'Kim did not get a sunburn after she put on sunscreen.', cause: 'The sunscreen kept Kim from a sunburn.', other: 'Clouds hid the sun all day, so Kim did not burn.', truth: true };
+
+export const FISH = stepArg(W_FISH);
+export const SNOW = stepArg(W_SNOW);
+export const CAR = afterArg(W_CAR);
+export const BELL = afterArg(W_BELL);
+export const FAN = afterArg(W_FAN);
+export const SUNSCREEN = afterArg(W_SUNSCREEN);
+
+export const slopeWorkedScene = () => markedTrick(FISH);
+export const afterWorkedScene = () => markedTrick(CAR);
+export const sunscreenScene = () => argScene(SUNSCREEN, { real: true });
+
+/** Do, right after the worked slippery slope: a chain whose every step has its rule, which proves its claim. */
+export function chainBoard(): DrillStep {
+  const arg = SNOW;
+  return caseBoard(arg, {
+    id: 's12.l6-do',
+    title: 'Check each case',
+    body: ['A new chain of steps. This time, each step comes with a rule.', 'Cross out each case that breaks a given. For each case left, is the claim true?', 'Then say: does the reason prove the claim, or is it a trick?'],
+    scene: argScene(arg, { cases: 'blank' }),
+    twin: 'A new chain of steps. This time, each step comes with a rule.',
+    afterCard: L6_CARDS.slope,
+    confused: [CASES_LEFT_Q, FAMILY_Q.slope],
+    done: `Right. ${statusReason(arg, false)} Each step has its rule, so the chain proves its claim.`,
+  });
+}
+
+/** Card 3: the same order in both stories; only the doorbell has a rule that nothing else can ring it. */
+export function afterContrast(): Extract<Scene, { kind: 'contrast' }> {
+  return {
+    kind: 'contrast',
+    pairs: [
+      { world: BELL.givens.map((g) => g.text).join(' '), who: 'The claim', says: BELL.claim.text, truth: provesOf(BELL), because: 'Nothing else can ring it. So the press must be the cause.' },
+      { world: CAR.givens.map((g) => g.text).join(' '), who: 'The claim', says: CAR.claim.text, truth: provesOf(CAR), because: `Coming first does not make it the cause. ${cap(caseMid(CAR, leakCase(CAR)!))}.` },
+    ],
+    ask: { q: 'In both, one thing came right after another. Why is only one proved to be the cause?', a: 'Coming first is not causing. Only the doorbell has a rule that nothing else can ring it.' },
+    words: { worldTag: 'The reason', truth: 'Proved', untruth: 'Not proved' },
+  };
+}
+
+/** The rows of the after-or-cause board: two good reasons with a rule, and two after-therefore tricks. */
+export const AFTER_ROWS: readonly { id: string; arg: Arg }[] = [
+  { id: 'bell', arg: BELL },
+  { id: 'car', arg: CAR },
+  { id: 'fan', arg: FAN },
+  { id: 'sun', arg: SUNSCREEN },
+];
+/** The after-as-cause words for one story: the distinction, then that story’s order and the case where something else caused it. */
+const afterAsCause = (arg: Arg) =>
+  `You may be treating “it came right after” and “it was the cause” as the same thing. They are two different things. ${arg.givens[0].text} That still fits a case where ${caseMid(arg, leakCase(arg)!)}.`;
+
+/** Do, right after the contrast: did one thing come right after the other? Does the reason prove the first caused it? */
+export function afterBoard(): DrillStep {
+  const rows: DrillRow[] = AFTER_ROWS.map(({ id, arg }): DrillRow => {
+    // The order is true in the story, in every case: given 1 never crosses one out.
+    const came = allCases(arg).every((c) => arg.givens[0].holds(c));
+    const proves = provesOf(arg);
+    const leak = leakCase(arg);
+    return {
+      id,
+      label: `${arg.givens.map((g) => g.text).join(' ')} So ${arg.claimMid}.`,
+      marks: [
+        { id: `${id}-after`, label: 'Did one thing come right after the other?', options: YES_NO, answer: yn(came), why: { [yn(!came)]: `Given 1 says so: ${mid(arg.givens[0].text)}.` } },
+        {
+          id: `${id}-proves`,
+          label: 'Does the reason prove the first thing caused it?',
+          options: YES_NO,
+          answer: yn(proves),
+          why: proves
+            ? { no: `${statusReason(arg)} So the reason forces the claim.` }
+            : { yes: `Picture ${caseName(arg, leak!).toLowerCase()}: ${caseMid(arg, leak!)}. The order is the same, and the claim is false.` },
+          compare: { says: arg.claim.text, world: arg.givens.map((g) => g.text).join(' ') },
+        },
+      ],
+    };
+  });
+  return {
+    id: 's12.l6-do-after',
+    title: 'After, or a cause?',
+    body: ['In each story, one thing came right after another.', 'First say if it came right after. Then say if the reason proves the first thing caused it.'],
+    scene: afterContrast(),
+    afterCard: L6_CARDS.contrast,
+    rows,
+    scaffold: 'full',
+    words: { says: 'Claim', world: 'Reason', so: 'So', ask: 'Does the reason force the claim?', closing: 'Those two ideas are apart now. After is not the same as because.' },
+    misconceptions: AFTER_ROWS.filter((r) => !provesOf(r.arg)).map((r) => ({ id: 'after-as-cause', when: 'picks' as const, picks: { [`${r.id}-proves`]: 'yes' }, text: afterAsCause(r.arg) })),
+    confused: [FAMILY_Q.after, TRUE_PROVED_Q],
+    distinction: AFTER_VS_CAUSE.id,
+    done: 'Right. In every story, one thing came right after the other. Only the bell and the fan have a rule that nothing else could cause it.',
   };
 }
 

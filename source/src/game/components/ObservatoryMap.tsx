@@ -15,18 +15,18 @@ export interface MapPlace {
   ringLocked?: string;
 }
 
-/** Positions of the ten places (ring by ring, left to right), on a 200 × 130 canvas. */
+/** Positions of the twelve places (ring by ring, left to right), on a 200 × 130 canvas. */
 const SPOTS: [number, number][] = [
   [28, 108], [60, 96], [92, 112], // Ring 1
   [52, 68], [96, 78], [136, 86], // Ring 2
   [86, 40], [128, 48], [166, 62], // Ring 3
-  [170, 22], // Ring 4
+  [158, 18], [176, 30], [188, 14], // Ring 4
 ];
 const RINGS: { cx: number; cy: number; r: number; label: string; x: number; y: number }[] = [
   { cx: 60, cy: 104, r: 36, label: 'Ring 1', x: 8, y: 126 },
   { cx: 95, cy: 78, r: 48, label: 'Ring 2', x: 8, y: 70 },
   { cx: 127, cy: 48, r: 46, label: 'Ring 3', x: 60, y: 14 },
-  { cx: 170, cy: 22, r: 16, label: 'Ring 4', x: 150, y: 8 },
+  { cx: 174, cy: 21, r: 20, label: 'Ring 4', x: 146, y: 8 },
 ];
 const STARS: [number, number][] = [[12, 20], [40, 12], [120, 8], [190, 40], [18, 60], [182, 104], [140, 120], [70, 26], [110, 124], [196, 76]];
 

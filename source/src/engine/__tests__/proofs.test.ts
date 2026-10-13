@@ -5,7 +5,13 @@
  *  - a proof by cases: the options read from given 1, the ones a given rules out, the boxes the proof checks, and the
  *    claim checked against fact tables written here (or the number itself);
  *  - suppose and crash: every way to make each islander a knight or a knave, checked speaker by speaker;
- *  - a counterexample: the claim read from the prompt, each card's color, shape and size checked against it.
+ *  - a counterexample: the claim read from the prompt, each card's color, shape and size checked against it;
+ *  - a named rule (lesson 6): each sentence read back from its words, the step's shape told by comparing its parts
+ *    (which given is the IF part, which is NOT the THEN part, and so on), and whether it follows by trying every way to
+ *    set its facts, counted in binary;
+ *  - a domino proof (lesson 7): the start and the amount added read from the setting, the claim's property read from
+ *    its words, every case up to 100 added up here, and the step to the next settled by arithmetic (an even jump keeps
+ *    odd and even, any jump keeps “more than”, no jump keeps “fewer than”), never by the engine's search.
  */
 import { describe, expect, it } from 'vitest';
 import { stop11 } from '../../content/stop11';
@@ -14,6 +20,8 @@ import { checkDrill, marksToTap } from '../drill';
 import { freshCheckSet, looks } from '../fresh';
 import { claimTrue } from '../grade';
 import * as PB from '../puzzles/proofBoards';
+import * as PI from '../puzzles/proofInduction';
+import * as PR from '../puzzles/proofRules';
 import * as P from '../puzzles/proofs';
 import { READING, fkGrade, longestSentence } from '../readability';
 import { createRng } from '../rng';
@@ -170,6 +178,112 @@ const SEQ_TESTS: Record<string, { inG: (xs: number[]) => boolean; holds: (xs: nu
   'Every growing number sequence adds the same number each time.': { inG: (xs) => xs.every((x, i) => i === 0 || x > xs[i - 1]), holds: (xs) => xs.every((x, i) => i < 2 || x - xs[i - 1] === xs[1] - xs[0]) },
   'Every number sequence that starts with an odd number has only odd numbers.': { inG: (xs) => xs[0] % 2 === 1, holds: (xs) => xs.every((x) => x % 2 === 1) },
 };
+
+// ---------- named rules (lesson 6): read each sentence back, compare its parts, try every way to set its facts ----------
+
+/** Each fact's two forms, from the stories' words (data, not answers): its sentence, and its sentence with NOT. */
+const FACT_OF = new Map<string, { key: string; pos: boolean }>();
+for (const t of PR.RULE_TOPICS) for (const f of [...t.chain, ...t.or]) {
+  FACT_OF.set(f.yes.toLowerCase(), { key: f.yes, pos: true });
+  FACT_OF.set(f.no.toLowerCase(), { key: f.yes, pos: false });
+}
+type Sen = { t: 'lit'; key: string; pos: boolean } | { t: 'if'; a: Sen; b: Sen } | { t: 'or'; a: Sen; b: Sen };
+function readSen(text: string): Sen {
+  const x = text.trim().replace(/^So /, '').replace(/\.$/, '');
+  let m = /^if (.+), then (.+)$/i.exec(x);
+  if (m) return { t: 'if', a: readSen(m[1]), b: readSen(m[2]) };
+  m = /^either (.+) or (.+)$/i.exec(x);
+  if (m) return { t: 'or', a: readSen(m[1]), b: readSen(m[2]) };
+  const f = FACT_OF.get(x.toLowerCase());
+  if (!f) throw new Error(`not a fact: ${x}`);
+  return { t: 'lit', ...f };
+}
+/** A step's line, split into its givens and its claim (the sentence after “So”). */
+function readStep(line: string): { givens: Sen[]; claim: Sen } {
+  const parts = line.split(/(?<=\.)\s+/);
+  return { givens: parts.slice(0, -1).map(readSen), claim: readSen(parts[parts.length - 1]) };
+}
+const factKeys = (x: Sen): string[] => (x.t === 'lit' ? [x.key] : [...factKeys(x.a), ...factKeys(x.b)]);
+const keysOf = (ss: Sen[]): string[] => [...new Set(ss.flatMap(factKeys))];
+function truth(x: Sen, v: Record<string, boolean>): boolean {
+  if (x.t === 'lit') return v[x.key] === x.pos;
+  if (x.t === 'if') return !truth(x.a, v) || truth(x.b, v);
+  return truth(x.a, v) || truth(x.b, v);
+}
+/** Does the claim follow: every way to set the facts (counted in binary) that makes the givens true makes it true? */
+function forced(givens: Sen[], claim: Sen): boolean {
+  const ks = keysOf([...givens, claim]);
+  for (let m = 0; m < 1 << ks.length; m++) {
+    const v = Object.fromEntries(ks.map((k, i) => [k, !!((m >> i) & 1)]));
+    if (givens.every((g) => truth(g, v)) && !truth(claim, v)) return false;
+  }
+  return true;
+}
+const sameSen = (x: Sen, y: Sen) => JSON.stringify(x) === JSON.stringify(y);
+const notSen = (x: Sen): Sen => {
+  if (x.t !== 'lit') throw new Error('NOT goes on a fact');
+  return { ...x, pos: !x.pos };
+};
+/** The move a step makes, told by comparing its parts. */
+function shapeOf(givens: Sen[], claim: Sen): string | null {
+  if (givens.length === 1) {
+    const g = givens[0];
+    return g.t === 'if' && claim.t === 'if' && sameSen(g.a, notSen(claim.b)) && sameSen(g.b, notSen(claim.a)) ? 'contra' : null;
+  }
+  const either = givens.find((g) => g.t === 'or');
+  if (either?.t === 'or') {
+    const fact = givens.find((g) => g !== either)!;
+    return (sameSen(fact, notSen(either.a)) && sameSen(claim, either.b)) || (sameSen(fact, notSen(either.b)) && sameSen(claim, either.a)) ? 'ds' : null;
+  }
+  if (givens.every((g) => g.t === 'if')) {
+    const [p, q] = givens as Extract<Sen, { t: 'if' }>[];
+    return claim.t === 'if' && sameSen(p.b, q.a) && sameSen(claim.a, p.a) && sameSen(claim.b, q.b) ? 'chain' : null;
+  }
+  const rule = givens.find((g) => g.t === 'if') as Extract<Sen, { t: 'if' }> | undefined;
+  const other = givens.find((g) => g !== rule);
+  if (!rule || !other) return null;
+  if (sameSen(other, rule.a) && sameSen(claim, rule.b)) return 'mp';
+  if (sameSen(other, notSen(rule.b)) && sameSen(claim, notSen(rule.a))) return 'mt';
+  if (sameSen(other, rule.b) && sameSen(claim, rule.a)) return 'ac';
+  if (sameSen(other, notSen(rule.a)) && sameSen(claim, notSen(rule.b))) return 'da';
+  return null;
+}
+const NAMED = ['mp', 'mt', 'ds', 'chain', 'contra'];
+
+// ---------- domino proofs (lesson 7): read the setting and the claim, add up the cases, settle the step by arithmetic ----------
+
+/** The count of case 1 and the amount each case adds, read from the setting. */
+function readSetting(text: string): { a: number; d: number } {
+  let m = /start at (\d+) and add (\d+) each time/.exec(text);
+  if (m) return { a: Number(m[1]), d: Number(m[2]) };
+  m = /Step 1 has (\d+) tiles/.exec(text);
+  if (m) return { a: Number(m[1]), d: /adds one pair/.test(text) ? 2 : Number(/adds one group of (\d+)/.exec(text)![1]) };
+  m = /has (\d+) \w+ (?:in|on) \w+ 1\. Each .*?(?:adds|finds|has) (\d+)/.exec(text);
+  if (!m) throw new Error(`no setting: ${text}`);
+  return { a: Number(m[1]), d: Number(m[2]) };
+}
+interface Prop7 {
+  holds: (x: number) => boolean;
+  /** Does adding d keep the claim? By arithmetic: an even jump keeps odd and even; any jump keeps “more than”; none keeps “fewer than”. */
+  keeps: (d: number) => boolean;
+}
+function readClaim(claim: string): Prop7 {
+  if (/odd/.test(claim)) return { holds: (x) => x % 2 === 1, keeps: (d) => d % 2 === 0 };
+  if (/even/.test(claim)) return { holds: (x) => x % 2 === 0, keeps: (d) => d % 2 === 0 };
+  let m = /more than (\d+)/.exec(claim);
+  if (m) { const k = Number(m[1]); return { holds: (x) => x > k, keeps: (d) => d >= 0 }; }
+  m = /(?:fewer|less) than (\d+)/.exec(claim);
+  if (m) { const k = Number(m[1]); return { holds: (x) => x < k, keeps: () => false }; }
+  throw new Error(`no claim: ${claim}`);
+}
+/** The first 100 cases, added up one at a time. */
+const casesOf = (a: number, d: number) => { const out = [a]; while (out.length < 100) out.push(out[out.length - 1] + d); return out; };
+const claimIn = (it: Item) => /Claim: “(.+?)”/.exec(it.prompt)?.[1] ?? textLines(it.scene).find((l) => l.startsWith('Claim: '))!.replace(/^Claim: /, '');
+const partsOf = (lines: readonly string[]) => ({
+  first: lines.some((l) => l.startsWith('First case:')),
+  step: lines.some((l) => l.startsWith('Step to the next: if')),
+  checks: lines.some((l) => /were checked/.test(l)),
+});
 
 // =====================================================================================================================
 
@@ -460,6 +574,180 @@ describe('Lesson 1 · four ways to prove', () => {
   });
 });
 
+describe('Lesson 6 · rules with names', () => {
+  it('the number story: every case the givens leave can happen for a real number, so a look-alike’s breaking case is real', () => {
+    const t = PR.ruleTopic('number');
+    // What each fact says of a number (data, written here). A fact with no test, like “circled”, can go either way.
+    const test: Record<string, (n: number) => boolean> = {
+      'the number is 8': (n) => n === 8,
+      'the number is even': (n) => n % 2 === 0,
+      'the number is more than 5': (n) => n > 5,
+      'the number splits into two equal groups': (n) => n % 2 === 0,
+    };
+    const free = new Set(['the number is circled']);
+    for (const f of [...t.chain, ...t.or]) expect(f.yes in test || free.has(f.yes), f.yes).toBe(true);
+    for (const move of PR.MOVES) for (const link of [0, 1] as const) for (const deny of [0, 1] as const) {
+      const st = PR.makeStep(t, move, { link, deny });
+      for (const w of PR.worldsOf(st).filter((x) => PR.givensHold(st, x))) {
+        const can = Array.from({ length: 20 }, (_, i) => i + 1).some((n) => st.words.every((f, i) => !test[f.yes] || test[f.yes](n) === w[i]));
+        expect(can, `${move} ${link} ${deny}: ${PR.worldText(st, w)}`).toBe(true);
+      }
+    }
+  });
+
+  it('every move in every story: its shape (told by comparing parts) is the move, and only the five named rules follow (every way listed)', () => {
+    for (const t of PR.RULE_TOPICS) for (const move of PR.MOVES) for (const link of [0, 1] as const) for (const deny of [0, 1] as const) {
+      const st = PR.makeStep(t, move, { link, deny });
+      const { givens, claim } = readStep(PR.stepLine(st));
+      expect(shapeOf(givens, claim), `${t.id} ${move}`).toBe(move);
+      expect(forced(givens, claim), `${t.id} ${move}`).toBe(NAMED.includes(move));
+    }
+  });
+
+  it('which rule: the shape the step makes, or no rule when a case breaks it; a look-alike is tagged and offers the rule it looks like', () => {
+    for (const skin of SKINS) for (const move of PR.MOVES) for (let seed = 1; seed <= 40; seed++) {
+      const it = choose(PR.ruleNameItem(createRng(seed), { skin, move }));
+      const sc = it.scene as Extract<Scene, { kind: 'argument' }>;
+      const givens = sc.givens.map(readSen);
+      const claim = readSen(sc.claim);
+      const shape = shapeOf(givens, claim)!;
+      const ok = forced(givens, claim);
+      expect(it.answer, `${skin} ${move} ${seed}`).toBe(ok ? shape : 'none');
+      expect(ok).toBe(NAMED.includes(shape));
+      expect(labelOf(it, it.answer)).toBe(ok ? PR.MOVE_LABEL[shape as PR.MoveId] : PR.NO_RULE_LABEL);
+      if (!ok) {
+        expect(it.tags).toEqual([P.TRAPS.rules.tag]);
+        expect(it.conflict).toBe(true);
+        expect(it.choices.map((c) => c.id)).toContain(shape === 'ac' ? 'mp' : 'mt');
+      } else expect(it.tags).toBeUndefined();
+    }
+  });
+
+  it('what may you claim: the one choice every way forces, or nothing for sure when the givens allow both; nothing is a look-alike’s givens', () => {
+    for (const skin of SKINS) for (const move of PR.MOVES) for (let seed = 1; seed <= 40; seed++) {
+      const it = choose(PR.ruleConcludeItem(createRng(seed), { skin, move }));
+      const givens = textLines(it.scene).map((l) => readSen(l.replace(/^Given \d: /, '')));
+      const claims = it.choices.filter((c) => c.label !== PR.NOTHING_LABEL);
+      const ok = claims.filter((c) => forced(givens, readSen(c.label)));
+      expect(ok.length, `${skin} ${move} ${seed}`).toBeLessThanOrEqual(1);
+      expect(it.answer).toBe(ok[0]?.id ?? 'nothing');
+      expect(it.answer === 'nothing').toBe(!NAMED.includes(move));
+      if (it.answer === 'nothing') {
+        // A look-alike is what claiming one of the offered choices would be.
+        expect(claims.some((c) => ['ac', 'da'].includes(shapeOf(givens, readSen(c.label)) ?? ''))).toBe(true);
+        expect(it.tags).toEqual([P.TRAPS.rules.tag]);
+      } else expect(NAMED).toContain(shapeOf(givens, readSen(labelOf(it, it.answer))));
+    }
+  });
+
+  it('the trap (and a conflict item): of four steps, exactly one is broken by a case, and it is a look-alike; the other three are named rules', () => {
+    for (const skin of SKINS) for (let seed = 1; seed <= SEEDS; seed++) {
+      const it = choose(PR.ruleTrapItem(createRng(seed), { skin }));
+      const steps = textLines(it.scene).map((l) => readStep(l.replace(/^Step \d: /, '')));
+      expect(steps.length).toBe(4);
+      const bad = steps.map((x, k) => (forced(x.givens, x.claim) ? -1 : k)).filter((k) => k >= 0);
+      expect(bad.length, `${skin} ${seed}`).toBe(1);
+      expect(it.answer).toBe(`s${bad[0] + 1}`);
+      steps.forEach((x, k) => expect(k === bad[0] ? ['ac', 'da'] : NAMED).toContain(shapeOf(x.givens, x.claim)));
+      expect(new Set(steps.map((x) => shapeOf(x.givens, x.claim))).size).toBe(4);
+      expect(it.tags).toEqual([P.TRAPS.rules.tag]);
+      expect(it.conflict).toBe(true);
+    }
+  });
+
+  it('why a proof may use a rule: the step follows, the prompt names its rule, and the right reason is every case', () => {
+    for (const skin of SKINS) for (let seed = 1; seed <= 80; seed++) {
+      const it = choose(PR.ruleWhyItem(createRng(seed), { skin }));
+      const sc = it.scene as Extract<Scene, { kind: 'argument' }>;
+      const givens = sc.givens.map(readSen);
+      const claim = readSen(sc.claim);
+      expect(forced(givens, claim)).toBe(true);
+      expect(it.prompt).toContain(`“${PR.MOVE_LABEL[shapeOf(givens, claim) as PR.MoveId]}.”`);
+      expect(labelOf(it, it.answer)).toBe('Because in every case where the givens are true, the claim is true too.');
+      expect(it.tags).toEqual(['why']);
+    }
+  });
+});
+
+describe('Lesson 7 · dominoes', () => {
+  it('two parts: the right pair is the first case and the step to the next, and the claim holds for every case up to 100', () => {
+    for (const skin of SKINS) for (let seed = 1; seed <= SEEDS; seed++) {
+      const it = choose(PI.twoPartsItem(createRng(seed), { skin }));
+      const { a, d } = readSetting(it.prompt);
+      const pr = readClaim(claimIn(it));
+      const cases = casesOf(a, d);
+      expect(cases.every(pr.holds), `${skin} ${seed}`).toBe(true);
+      expect(pr.keeps(d)).toBe(true);
+      const lines = textLines(it.scene).map((l) => l.replace(/^Line \d: /, ''));
+      const stepAt = lines.findIndex((l) => l.startsWith('If '));
+      const checksAt = lines.findIndex((l) => /were checked/.test(l));
+      const numbered = lines.map((l, i) => (i === stepAt || i === checksAt ? null : /(?:step|term|week|day|floor) (\d+)/i.exec(l)));
+      const firstAt = numbered.findIndex((m) => m && m[1] === '1');
+      const farAt = numbered.findIndex((m, i) => m && i !== firstAt);
+      expect([stepAt, checksAt, firstAt, farAt].sort()).toEqual([0, 1, 2, 3]);
+      // Each case line shows the count the cases added up here give.
+      const far = Number(numbered[farAt]![1]);
+      expect(lines[firstAt]).toContain(` ${cases[0]} `);
+      expect(lines[farAt]).toContain(` ${cases[far - 1]} `);
+      const [i, j] = [firstAt + 1, stepAt + 1].sort((x, y) => x - y);
+      expect(labelOf(it, it.answer)).toBe(`Lines ${i} and ${j}`);
+    }
+  });
+
+  it('which part is missing: the part the lines never show; the part shown is true', () => {
+    for (const skin of SKINS) for (const shape of ['nofirst', 'nostep'] as const) for (let seed = 1; seed <= 80; seed++) {
+      const it = choose(PI.missingPartItem(createRng(seed), { skin, shape }));
+      const { a, d } = readSetting(it.prompt);
+      const pr = readClaim(claimIn(it));
+      const parts = partsOf(textLines(it.scene));
+      expect(parts.first !== parts.step, `${skin} ${shape} ${seed}`).toBe(true);
+      expect(parts.checks).toBe(false);
+      expect(it.answer).toBe(parts.first ? 'step' : 'first');
+      if (parts.first) expect(pr.holds(a)).toBe(true);
+      else expect(pr.keeps(d)).toBe(true);
+    }
+  });
+
+  it('does it prove every case: only with both parts; checked cases are never the step, and sometimes the claim breaks soon after them', () => {
+    let breaksLater = 0;
+    let holdsAll = 0;
+    for (const skin of SKINS) for (const shape of ['both', 'nofirst', 'nostep', 'checks'] as const) for (let seed = 1; seed <= 80; seed++) {
+      const it = choose(PI.provesEveryItem(createRng(seed), { skin, shape }));
+      const { a, d } = readSetting(it.prompt);
+      const pr = readClaim(claimIn(it));
+      const cases = casesOf(a, d);
+      const parts = partsOf(textLines(it.scene));
+      expect(it.answer, `${skin} ${shape} ${seed}`).toBe(parts.first && parts.step ? 'yes' : !parts.first ? 'nofirst' : 'nostep');
+      if (it.answer === 'yes') expect(cases.every(pr.holds) && pr.keeps(d)).toBe(true);
+      if (parts.first) expect(pr.holds(a)).toBe(true);
+      if (parts.step) expect(pr.keeps(d)).toBe(true);
+      expect(parts.checks).toBe(shape === 'checks');
+      if (shape === 'checks') {
+        expect(cases.slice(0, 5).every(pr.holds)).toBe(true);
+        if (cases.every(pr.holds)) holdsAll++;
+        else breaksLater++;
+        expect(it.tags).toEqual([P.TRAPS.induction.tag]);
+        expect(it.conflict).toBe(true);
+        expect(labelOf(it, 'checked')).toBe('Yes. Every case it checked fits the claim.');
+      } else expect(it.tags).toBeUndefined();
+    }
+    expect(breaksLater, 'some checked claims break after the checking stops').toBeGreaterThan(0);
+    expect(holdsAll, 'and some hold, but are still not proved').toBeGreaterThan(0);
+  });
+
+  it('why the two parts prove every case: the claim really holds for every case, and the right reason names both parts', () => {
+    for (const skin of SKINS) for (let seed = 1; seed <= 80; seed++) {
+      const it = choose(PI.inductionWhyItem(createRng(seed), { skin }));
+      const { a, d } = readSetting(it.prompt);
+      const pr = readClaim(claimIn(it));
+      expect(casesOf(a, d).every(pr.holds) && pr.keeps(d)).toBe(true);
+      expect(partsOf(textLines(it.scene))).toEqual({ first: true, step: true, checks: false });
+      expect(labelOf(it, it.answer)).toBe('Because the first case holds, and each case passes the claim to the next.');
+      expect(it.tags).toEqual(['why']);
+    }
+  });
+});
+
 describe('the closing why item', () => {
   it('each family: the right reason names what makes the proof work, and the proof works (second method)', () => {
     for (const family of P.WAYS) for (let seed = 1; seed <= 80; seed++) {
@@ -515,6 +803,14 @@ describe('every item', () => {
     ['examples', (rng, skin) => P.examplesTrapItem(rng, { skin })],
     ['one', (rng, skin) => P.oneBreaksItem(rng, { skin })],
     ...P.WAYS.map((family) => [`why-${family}`, (rng: ReturnType<typeof createRng>, skin: P.ProofSkin) => P.whyItem(rng, { family, skin })] as [string, (rng: ReturnType<typeof createRng>, skin: P.ProofSkin) => P.ProofMade]),
+    ...PR.MOVES.map((move) => [`rule-name-${move}`, (rng: ReturnType<typeof createRng>, skin: P.ProofSkin) => PR.ruleNameItem(rng, { skin, move })] as [string, (rng: ReturnType<typeof createRng>, skin: P.ProofSkin) => P.ProofMade]),
+    ...PR.MOVES.map((move) => [`rule-conclude-${move}`, (rng: ReturnType<typeof createRng>, skin: P.ProofSkin) => PR.ruleConcludeItem(rng, { skin, move })] as [string, (rng: ReturnType<typeof createRng>, skin: P.ProofSkin) => P.ProofMade]),
+    ['rule-trap', (rng, skin) => PR.ruleTrapItem(rng, { skin })],
+    ['why-rules', (rng, skin) => PR.ruleWhyItem(rng, { skin })],
+    ['two-parts', (rng, skin) => PI.twoPartsItem(rng, { skin })],
+    ['missing', (rng, skin) => PI.missingPartItem(rng, { skin })],
+    ...(['both', 'nofirst', 'nostep', 'checks'] as const).map((shape) => [`proves-${shape}`, (rng: ReturnType<typeof createRng>, skin: P.ProofSkin) => PI.provesEveryItem(rng, { skin, shape })] as [string, (rng: ReturnType<typeof createRng>, skin: P.ProofSkin) => P.ProofMade]),
+    ['why-induction', (rng, skin) => PI.inductionWhyItem(rng, { skin })],
   ];
 
   it('2-5 distinct choices, feedback for every wrong choice (in step with whyWrong) and none for the right one, a hint with its case, and teaching', () => {
@@ -574,7 +870,8 @@ describe('every item', () => {
   });
 
   it('the answer is not always in the same place (for the items whose choices are shuffled)', () => {
-    for (const [name, make] of MAKERS.filter(([n]) => !n.startsWith('method-') && !['broken', 'left', 'which'].includes(n))) {
+    // Choices in a fixed order (the ways, the rules, the parts) keep their places: their answers move with the model.
+    for (const [name, make] of MAKERS.filter(([n]) => !n.startsWith('method-') && !n.startsWith('rule-name-') && !n.startsWith('proves-') && !['broken', 'left', 'which'].includes(n))) {
       const at = new Set<number>();
       for (let seed = 1; seed <= 80; seed++) {
         const it = choose(make(createRng(seed), SKINS[seed % 3]));
@@ -600,6 +897,15 @@ describe('every item', () => {
       const left = P.leftOutItem(rng(), { skin: 'everyday', left: 'holds' });
       const out = P.leftOut(left.cases!)[0];
       expect(choose(left).hintCase!.label).not.toBe(left.cases!.topic.is(left.cases!.who, out));
+      // Lesson 6: the hint is another rule's example, never the answer's; a trap's hint is a step that follows.
+      const named = choose(PR.ruleNameItem(rng(), { skin: 'fantasy' }));
+      if (named.answer !== 'none') expect(named.hintCase!.label).not.toBe(PR.RULE_CASES[named.answer as PR.MoveId].label);
+      const trap = choose(PR.ruleTrapItem(rng(), { skin: 'abstract' }));
+      const hinted = readStep(trap.hintCase!.label);
+      expect(forced(hinted.givens, hinted.claim)).toBe(true);
+      // Lesson 7: the hint is one case, checked; never the parts themselves.
+      const parts = choose(PI.twoPartsItem(rng(), { skin: 'everyday' }));
+      expect(parts.hintCase!.label).not.toMatch(/First case|Step to the next/);
     }
   });
 });
@@ -614,6 +920,17 @@ function skinOf(it: Item): P.ProofSkin {
   if (/baby dragons|potion|elves|The wizards|tile/.test(text)) return 'fantasy';
   if (/stand in a line|number on the card|are islanders\.|in the deck|number list|Claim: “Every (growing|sequence|number)/.test(text)) return 'abstract';
   return 'everyday';
+}
+
+/** The skin of a lesson 6 or 7 item: the story its sentences come from, or its setting. */
+function newSkinOf(it: Item): P.ProofSkin {
+  const text = [it.prompt, ...textLines(it.scene), JSON.stringify(it.scene ?? '')].join(' ').toLowerCase();
+  if (/coin jar|block tower/.test(text)) return 'everyday';
+  if (/a dragon has|wizard’s tower/.test(text)) return 'fantasy';
+  if (/staircase of tiles|number list/.test(text)) return 'abstract';
+  const topic = PR.RULE_TOPICS.find((t) => [...t.chain, ...t.or].some((f) => text.includes(f.yes.toLowerCase()) || text.includes(f.no.toLowerCase())));
+  if (!topic) throw new Error(`no skin: ${text}`);
+  return topic.skin;
 }
 
 describe('the lessons', () => {
@@ -651,8 +968,52 @@ describe('the lessons', () => {
     }
   });
 
+  it('Lessons 6 and 7: the planned kinds, the trap in every pack, the why item last, at least two skins', () => {
+    const plans: Record<string, RegExp[]> = {
+      [P.LESSONS.rules]: [/Which rule does it use\?/, /What may you claim for sure\?/, /Which step uses no rule\?/, /Which rule does it use\?|What may you claim for sure\?/, /Why may a proof use it\?/],
+      [P.LESSONS.induction]: [/Which two prove the claim/, /Which part is missing\?/, /Does this argument prove the claim/, /Does this argument prove the claim/, /Why does it prove the claim/],
+    };
+    const traps: Record<string, string> = { [P.LESSONS.rules]: P.TRAPS.rules.tag, [P.LESSONS.induction]: P.TRAPS.induction.tag };
+    for (const [id, plan] of Object.entries(plans)) for (let seed = 1; seed <= SEEDS; seed++) {
+      const items = pack(id, seed);
+      expect(items.length).toBe(5);
+      items.forEach((it, k) => expect(it.prompt, `${id} ${seed} item ${k + 1}`).toMatch(plan[k]));
+      expect(items[2].tags, `${id} ${seed} trap`).toEqual([traps[id]]);
+      expect(items[4].skill).toBe('s11.why');
+      expect(items.slice(0, 4).every((it) => it.skill === (id === P.LESSONS.rules ? 's11.rules' : 's11.induction'))).toBe(true);
+      expect(new Set(items.map(newSkinOf)).size).toBeGreaterThanOrEqual(2);
+      expect(pack(id, seed)).toEqual(items);
+    }
+  });
+
+  it('Lesson 4: the liar card crashes both ways and is no statement; it is a card only, with no quiz item', () => {
+    const l4 = lessonById(P.LESSONS.crash);
+    const card = l4.ideas.find((c) => c.body.join(' ').includes('“This sentence is false.”'))!;
+    expect(card).toBeDefined();
+    expect(l4.ideas[l4.ideas.length - 1]).toBe(card);
+    const text = card.body.join(' ');
+    for (const s of ['Suppose it is true.', 'Suppose it is false.', 'Both guesses crash.', 'it is not a statement']) expect(text).toContain(s);
+    expect(card.scene).toBeUndefined();
+    for (let seed = 1; seed <= 40; seed++) for (const it of l4.practice(createRng(seed))) expect(it.prompt).not.toContain('This sentence is false');
+    // The two guesses, worked out here: the sentence says it is false, so a guess holds up only if its truth equals
+    // the opposite of itself. Neither true nor false does, so both crash.
+    const holdsUp = (guess: boolean) => guess === !guess;
+    expect([true, false].filter(holdsUp)).toEqual([]);
+  });
+
+  it('Lesson 7, card 5: the number lists that show each missing part, added up here', () => {
+    const card = lessonById(P.LESSONS.induction).ideas.find((c) => c.title === 'Both parts are needed')!;
+    const [noFirst, noStep] = card.body.filter((b) => /Start at/.test(b)).map((b) => /Start at (\d+) and add (\d+)/.exec(b)!.slice(1).map(Number));
+    const odd = readClaim('odd');
+    expect(casesOf(noFirst[0], noFirst[1]).some(odd.holds), 'no first case: no term is odd').toBe(false);
+    expect(odd.keeps(noFirst[1])).toBe(true);
+    const cs = casesOf(noStep[0], noStep[1]);
+    expect(odd.holds(cs[0]) && !odd.holds(cs[1])).toBe(true);
+    expect(card.body.join(' ')).toContain(`term 2 is ${cs[1]}`);
+  });
+
   it('every pass rule asks for its lesson’s trap', () => {
-    const want = [P.TRAPS.method, P.TRAPS.cite, P.TRAPS.cases, P.TRAPS.crash, P.TRAPS.counter];
+    const want = [P.TRAPS.method, P.TRAPS.cite, P.TRAPS.cases, P.TRAPS.crash, P.TRAPS.counter, P.TRAPS.rules, P.TRAPS.induction];
     L.forEach((l, k) => expect(l.pass).toEqual({ firstTry: 3, include: [want[k]] }));
   });
 
@@ -663,6 +1024,8 @@ describe('the lessons', () => {
       [P.LESSONS.cases]: ['proof by cases'],
       [P.LESSONS.crash]: ['contradiction'],
       [P.LESSONS.counter]: ['counterexample'],
+      [P.LESSONS.rules]: ['modus ponens', 'modus tollens', 'disjunctive syllogism', 'chain rule', 'proof by contrapositive'],
+      [P.LESSONS.induction]: ['induction', 'base case', 'step'],
     };
     for (const l of L) {
       expect((l.terms ?? []).map((t) => t.term)).toEqual(want[l.id]);
@@ -674,6 +1037,8 @@ describe('the lessons', () => {
     }
     expect(lessonById(P.LESSONS.crash).terms![0].also).toBe('suppose and crash');
     expect(lessonById(P.LESSONS.method).terms![1].also).toBe('a chain');
+    expect(lessonById(P.LESSONS.rules).terms!.map((t) => t.also)).toEqual(['the IF part happened', 'the THEN part did not happen', 'one or the other', 'hypothetical syllogism', 'proof by Flip and NOT']);
+    expect(lessonById(P.LESSONS.induction).terms!.map((t) => t.also)).toEqual(['the domino proof', 'the first domino', 'the step to the next']);
   });
 
   it('the distinctions: taught with a contrast where first named; the contrasts’ truths come from the models', () => {
@@ -681,6 +1046,18 @@ describe('the lessons', () => {
     expect(lessonById(P.LESSONS.cases).distinctions).toEqual([PB.RULED_VS_LEFT, { ...PB.STEP_TRUE_VS_FOLLOWS, taughtIn: P.LESSONS.cite }]);
     expect(lessonById(P.LESSONS.crash).distinctions).toEqual([PB.CRASH_VS_HOLDS]);
     expect(lessonById(P.LESSONS.counter).distinctions).toEqual([PB.FITS_VS_BREAKS]);
+    expect(lessonById(P.LESSONS.rules).distinctions).toEqual([PR.RULE_VS_LOOKALIKE]);
+    expect(lessonById(P.LESSONS.induction).distinctions).toEqual([PI.CHECKS_VS_STEP]);
+    // A rule vs a look-alike: the same rule; the first step follows (every way listed), the second does not.
+    const rl2 = PR.rulesContrast();
+    rl2.pairs.forEach((p) => expect(p.truth).toBe(forced(readStep(`${p.world} ${p.says}`).givens, readStep(`${p.world} ${p.says}`).claim)));
+    expect(rl2.pairs.map((p) => p.truth)).toEqual([true, false]);
+    expect(rl2.pairs[0].world.split('. ')[0]).toBe(rl2.pairs[1].world.split('. ')[0]);
+    // Checked cases vs the step: the same first case; only the step to the next proves every step.
+    const cs = PI.inductionContrast();
+    cs.pairs.forEach((p) => expect(p.truth).toBe(p.says.startsWith('Step to the next: if')));
+    expect(cs.pairs.map((p) => p.truth)).toEqual([true, false]);
+    expect(cs.pairs[0].world).toBe(cs.pairs[1].world);
     // True vs follows: the same true step; once it uses what forces it, once nothing.
     const tf = PB.citeContrast();
     const sh = parseChain(PB.chainWorkedScene().kind === 'text' ? (PB.chainWorkedScene() as { lines: string[] }).lines : []);
@@ -704,7 +1081,10 @@ describe('the lessons', () => {
 
   it('every board: each mark worked out again, the right marks pass, and at most 12 taps', () => {
     const boards = L.flatMap((l) => l.drill ?? []);
-    expect(boards.map((b) => b.id)).toEqual(['s11.l1-do', 's11.l2-do-true', 's11.l2-do-check', 's11.l2-do-uses', 's11.l3-do-left', 's11.l3-do-twin', 's11.l4-do-guess', 's11.l4-do-follow', 's11.l5-do-role', 's11.l5-do-twin']);
+    expect(boards.map((b) => b.id)).toEqual([
+      's11.l1-do', 's11.l2-do-true', 's11.l2-do-check', 's11.l2-do-uses', 's11.l3-do-left', 's11.l3-do-twin', 's11.l4-do-guess', 's11.l4-do-follow', 's11.l5-do-role', 's11.l5-do-twin',
+      's11.l6-do-look', 's11.l6-do-cases', 's11.l6-do-name', 's11.l7-do-parts', 's11.l7-do-twin',
+    ]);
     for (const b of boards) {
       expect(marksToTap(b).length, b.id).toBeLessThanOrEqual(12);
       expect(checkDrill(b, Object.fromEntries(marksToTap(b).map((m) => [m.id, m.answer]))).done, b.id).toBe(true);
@@ -790,6 +1170,48 @@ describe('the lessons', () => {
         expect(roles).toContain('break');
       }
     }
+    // l6 board 1: a case that breaks each step (every way listed), and so a rule or not.
+    for (const r of byId('s11.l6-do-look').rows) {
+      const st = readStep(r.label);
+      const ok = forced(st.givens, st.claim);
+      expect(r.marks.map((m) => m.answer)).toEqual([ok ? 'no' : 'yes', ok ? 'rule' : 'none']);
+    }
+    expect(byId('s11.l6-do-look').rows.map((r) => r.marks[1].answer)).toEqual(['rule', 'none', 'rule', 'none']);
+    // l6 board 2: each case from its facts in the picture; ruled out, the claim there, follows, and the move.
+    const cb = byId('s11.l6-do-cases');
+    const csc = cb.scene as Extract<Scene, { kind: 'argument' }>;
+    const cg = csc.givens.map(readSen);
+    const cc = readSen(csc.claim);
+    csc.cases!.forEach((box, k) => {
+      const v = Object.fromEntries(box.facts.map((f) => readSen(f)).map((x) => [(x as { key: string }).key, (x as { pos: boolean }).pos]));
+      const out = !cg.every((g) => truth(g, v));
+      const r = cb.rows[k];
+      expect(r.marks[0].answer).toBe(out ? 'yes' : 'no');
+      if (!out) expect(r.marks[1].answer).toBe(truth(cc, v) ? 'yes' : 'no');
+      else expect(r.marks.length).toBe(1);
+    });
+    expect(cb.rows.find((r) => r.id === 'follows')!.marks[0].answer).toBe(forced(cg, cc) ? 'yes' : 'no');
+    expect(cb.rows.find((r) => r.id === 'name')!.marks[0].answer).toBe(shapeOf(cg, cc));
+    // l6 board 3: the rule each step's parts make.
+    for (const r of byId('s11.l6-do-name').rows) {
+      const st = readStep(r.label.replace(/^Step \d: /, ''));
+      expect(r.marks[0].answer).toBe(shapeOf(st.givens, st.claim));
+      expect(forced(st.givens, st.claim)).toBe(true);
+    }
+    expect(byId('s11.l6-do-name').rows.map((r) => r.marks[0].answer).sort()).toEqual([...NAMED].sort());
+    // l7 board 1: the parts each try shows; it proves every week only with both.
+    for (const r of byId('s11.l7-do-parts').rows) {
+      const lines = r.label.replace(/^Try \d: /, '').split(/(?<=\.) (?=First case:|Step to the next:|So )/);
+      const parts = partsOf(lines);
+      expect(r.marks.map((m) => m.answer)).toEqual([parts.first ? 'yes' : 'no', parts.step ? 'yes' : 'no', parts.first && parts.step ? 'yes' : 'no']);
+    }
+    // l7 board 2: the first case counted from the drawn tiles; the step settled by arithmetic.
+    const tw = byId('s11.l7-do-twin');
+    const tsc = tw.scene as Extract<Scene, { kind: 'staircase' }>;
+    const tiles = tsc.rows[0].cells.length;
+    const jump = tsc.rows[1].cells.length - tiles;
+    expect(tsc.rows[2].cells.length - tsc.rows[1].cells.length).toBe(jump);
+    expect(tw.rows.map((r) => r.marks[0].answer)).toEqual([String(tiles), tiles % 2 === 1 ? 'yes' : 'no', jump % 2 === 0 ? 'odd' : 'even', tiles % 2 === 1 && jump % 2 === 0 ? 'yes' : 'no']);
   });
 
   it('the distinction boards name the mix-ups their wrong marks show', () => {
@@ -809,7 +1231,13 @@ describe('the lessons', () => {
     expect(diag(rb, { proved: 'yes' })).toBe('examples-as-proof');
     const none = rb.rows.find((r) => r.marks[0].answer === 'none')!;
     expect(diag(rb, { [none.marks[0].id]: 'break' })).toBe('none-as-break');
-    for (const b of [board('s11.l2-do-true'), lb, gb, rb]) {
+    const look = board('s11.l6-do-look');
+    const lookalike = look.rows.find((r) => r.marks[1].answer === 'none')!;
+    expect(diag(look, { [`${lookalike.id}-rule`]: 'rule' })).toBe('sounds-as-rule');
+    const pb = board('s11.l7-do-parts');
+    expect(diag(pb, { 't1-step': 'yes' })).toBe('checks-as-step');
+    expect(diag(pb, { 't2-proves': 'yes' })).toBe('step-as-proof');
+    for (const b of [board('s11.l2-do-true'), lb, gb, rb, look, pb]) {
       expect(b.confused?.length).toBe(1);
       for (const q of b.confused!) expect(q.options.filter((o) => o.right).length).toBe(1);
       for (const m of b.misconceptions!) expect(m.text.startsWith('You may be treating')).toBe(true);
@@ -831,7 +1259,7 @@ describe('the stop', () => {
   it('is ready, opens after Circuit Lab and Proof Lantern, and names every skill it asks about', () => {
     expect(stop11).toMatchObject({ n: 11, id: 's11', title: 'Proof', ready: true, requires: ['s10', 's17'] });
     expect(STOPS.find((s) => s.id === 's11')).toBe(stop11);
-    expect(Object.keys(stop11.skillNames!).sort()).toEqual(['s11.cases', 's11.cite', 's11.counter', 's11.crash', 's11.method', 's11.why']);
+    expect(Object.keys(stop11.skillNames!).sort()).toEqual(['s11.cases', 's11.cite', 's11.counter', 's11.crash', 's11.induction', 's11.method', 's11.rules', 's11.why']);
     const skills = new Set<string>();
     for (let seed = 1; seed <= 40; seed++) {
       for (const it of [...L.flatMap((l) => l.practice(createRng(seed))), ...stop11.check!(createRng(seed)), stop11.practice!(createRng(seed)), stop11.bridge!(createRng(seed))]) skills.add(it.skill);
@@ -839,24 +1267,39 @@ describe('the stop', () => {
     for (const s of skills) expect(stop11.skillNames![s], s).toBeTruthy();
   });
 
-  it('the check: one item from Lesson 1, two from each other lesson in order, the why item last; conflict items in it', () => {
+  it('the check: one item from each of Lessons 1-5, two from Lesson 6, two from Lesson 7, the why item last; the three traps always there', () => {
     const slots = Array.from({ length: 10 }, () => new Set<string>());
+    const families = new Set<string>();
+    const familyOf = (it: ChooseItem) =>
+      it.prompt.includes('crash') ? 'crash'
+      : it.prompt.includes('proof by cases') ? 'cases'
+      : it.prompt.includes('Why may a proof use it') ? 'rules'
+      : it.prompt.includes('domino proof') ? 'induction'
+      : it.scene?.kind === 'things' ? 'counter'
+      : 'chain';
     for (let seed = 1; seed <= 300; seed++) {
       const items = stop11.check!(createRng(seed)) as ChooseItem[];
       expect(items.length).toBe(10);
-      expect(items.slice(0, 9).map((i) => i.lesson)).toEqual(['s11.l1', 's11.l2', 's11.l2', 's11.l3', 's11.l3', 's11.l4', 's11.l4', 's11.l5', 's11.l5']);
+      expect(items.slice(0, 9).map((i) => i.lesson)).toEqual(['s11.l1', 's11.l2', 's11.l3', 's11.l4', 's11.l5', 's11.l6', 's11.l6', 's11.l7', 's11.l7']);
       const last = items[9];
       expect(last.tags).toEqual(['why']);
       expect(last.skill).toBe('s11.why');
-      expect(last.lesson).toBe(P.WHY_LESSON[last.prompt.includes('crash') ? 'crash' : last.prompt.includes('proof by cases') ? 'cases' : last.scene?.kind === 'things' ? 'counter' : 'chain']);
+      const family = familyOf(last) as P.WhyAny;
+      families.add(family);
+      expect(last.lesson).toBe(P.WHY_LESSON[family]);
       expect(items.filter((i) => i.conflict).length).toBeGreaterThanOrEqual(3);
-      // The trap of Lesson 2 (a true claim with a broken chain) is always there.
-      expect(items[2].tags).toEqual([P.TRAPS.cite.tag]);
-      expect(items[2].conflict).toBe(true);
+      // The traps of Lessons 2, 6 and 7 are always there, each a conflict item.
+      for (const [k, tag] of [[1, P.TRAPS.cite.tag], [6, P.TRAPS.rules.tag], [8, P.TRAPS.induction.tag]] as const) {
+        expect(items[k].tags).toEqual([tag]);
+        expect(items[k].conflict).toBe(true);
+      }
+      expect(items[5].skill).toBe('s11.rules');
+      expect(items[7].skill).toBe('s11.induction');
       items.forEach((it, k) => slots[k].add(JSON.stringify([it.prompt, it.scene])));
       expect(stop11.check!(createRng(seed))).toEqual(items);
     }
     for (const s of slots) expect(s.size).toBeGreaterThanOrEqual(30);
+    expect([...families].sort()).toEqual([...P.WHY_FAMILIES].sort());
   });
 
   it('Arcade: a valid item from any lesson, the why item now and then', () => {
@@ -888,6 +1331,16 @@ describe('the stop', () => {
           expect(out[0].tags).toEqual(missed.tags);
           expect(out[1].answer === out[0].answer && JSON.stringify(out[1].tags) === JSON.stringify(out[0].tags)).toBe(false);
         }
+      }
+    }
+  });
+
+  it('new examples after a miss in Lessons 6 and 7: two questions with two different answers, so one answer never passes the set', () => {
+    for (let seed = 1; seed <= 60; seed++) for (const id of [P.LESSONS.rules, P.LESSONS.induction]) {
+      for (const missed of (lessonById(id).practice(createRng(seed)) as ChooseItem[]).filter((it) => it.skill !== 's11.why')) {
+        const raw = stop11.fresh!(missed, createRng(seed + 700)) as ChooseItem[];
+        expect(raw.length, `${missed.skill} ${seed}`).toBe(2);
+        expect(raw[0].answer === raw[1].answer, `${missed.skill} ${seed}: ${missed.prompt}`).toBe(false);
       }
     }
   });

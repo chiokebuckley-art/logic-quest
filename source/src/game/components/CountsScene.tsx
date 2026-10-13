@@ -5,8 +5,9 @@
  * real table: the two rows, the two columns, each box a count, and each row and column in all. The table carries
  * every number in words, so the dots are only a picture (hidden from screen readers) and color never carries the
  * meaning alone: each box shows its own dot as a key. A picked row or column (the group a question counts out of) is
- * outlined and named. Words are 12 px or more, and it fits a 320 px phone. The same picture is read in words by
- * countsSpeech.
+ * outlined and named; a row and a column picked together share one box. A picture to fill shows its counts in all
+ * (`rowTotals`, `colTotals`) beside blank boxes, and draws no dots until every box is known. Words are 12 px or more,
+ * and it fits a 320 px phone. The same picture is read in words by countsSpeech.
  */
 import type { Scene } from '../../engine/types';
 import '../../styles/counts.css';
@@ -53,8 +54,9 @@ function Dots({ cells, total }: { cells: [[number, number], [number, number]]; t
 
 export function CountsPicture({ scene, labelId }: { scene: CountsData; labelId?: string }) {
   const [[a, b], [c, d]] = scene.cells;
-  const rowT = [sum(a, b), sum(c, d)];
-  const colT = [sum(a, c), sum(b, d)];
+  // A count in all is the sum of its boxes, or the one the picture gives when its boxes are blank.
+  const rowT = [scene.rowTotals?.[0] ?? sum(a, b), scene.rowTotals?.[1] ?? sum(c, d)];
+  const colT = [scene.colTotals?.[0] ?? sum(a, c), scene.colTotals?.[1] ?? sum(b, d)];
   const known = a !== null && b !== null && c !== null && d !== null;
   const pickRow = scene.pick?.row;
   const pickCol = scene.pick?.col;

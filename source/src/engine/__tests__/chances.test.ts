@@ -3,6 +3,8 @@
  * set it: a chance as a share (n divided by the total) for the four words, every way the flips can go listed here,
  * the bag after kept-out draws taken out one thing at a time, every count picture spread out into 100 single things
  * and counted by filters, and each clue’s strength as a share when you are right over a share when you are wrong.
+ * Lesson 5’s both and either are counted the same way, one thing at a time (in the row and in the column; in the row or
+ * in the column), and “do not affect each other” is checked as a share (division) that is the same in each row.
  */
 import { describe, expect, it } from 'vitest';
 import { stop13 } from '../../content/stop13';
@@ -10,6 +12,11 @@ import { STOPS, stopById } from '../../content/stops';
 import { SOON_WORLD, WORLD } from '../../content/world';
 import {
   BACK_VS_KEPT,
+  BALLOONS_PIC,
+  BALLOONS_TWIN,
+  BALLOON_PICK_SCENE,
+  BALLOON_SCENE,
+  BOTH_VS_EITHER,
   COUNTS_VS_DRAW,
   EYES_SCENE,
   FARM_PICK_SCENE,
@@ -21,24 +28,31 @@ import {
   L2_BAG,
   RIGHT_VS_FLAG,
   ROW_VS_COLUMN,
+  bothEitherQuestions,
   flagSentences,
   rowColumnSentences,
 } from '../puzzles/chanceBoards';
 import { DRAW_FORMS, DRAW_SPEC, NAMES, SKINS, bagDueItem, coinItem, drawItem, keptItem, pickItem, wordItem, type ChanceMade, type DrawForm, type SkinId } from '../puzzles/chances';
 import {
+  BALLOONS,
   CLUE_TOPICS,
   COUNT_SKINS,
+  EITHER_FORMS,
   EYES_PIC,
   EYES_TWIN,
   FARM_PIC,
   FARM_TWIN,
   GROUP_TOPICS,
+  PAIR_SHARES,
+  PAIR_TOPICS,
   RAIN,
   RAIN_COUNTS,
   TEST_TOPICS,
   WHY_KINDS,
   alarmItem,
   answerItem,
+  bothItem,
+  eitherItem,
   fitsItem,
   moreItem,
   ofItem,
@@ -48,6 +62,7 @@ import {
   type Cells,
   type CountMade,
   type CountSkin,
+  type PairPic,
 } from '../puzzles/counts';
 import { checkDrill, marksToTap } from '../drill';
 import { looks } from '../fresh';
@@ -59,7 +74,7 @@ import { countsSpeech } from '../../game/speech';
 
 const SEEDS = 200;
 const BAG_SKINS = Object.keys(SKINS) as SkinId[];
-const [L1, L2, L3, L4] = stop13.lessons;
+const [L1, L2, L3, L4, L5] = stop13.lessons;
 const ch = (m: ChanceMade | CountMade) => m.item as ChooseItem;
 
 // ---------- the second methods ----------
@@ -478,6 +493,120 @@ describe('Lesson 4 · would I see this clue if I were wrong?', () => {
   });
 });
 
+// ======================= Lesson 5 =======================
+
+describe('Lesson 5 · and, or, with chances', () => {
+  const pairOf = (m: CountMade): PairPic => {
+    if (m.model.t === 'both' || m.model.t === 'either') return m.model.pic;
+    throw new Error('not a pair item');
+  };
+  const label = (it: ChooseItem, id: string) => it.choices.find((c) => c.id === id)!.label;
+  const inRow = (t: { row: number }) => t.row === 0;
+  const inCol = (t: { yes: boolean }) => t.yes;
+
+  it('every pair picture: 100 things, and the second thing is the same share of each row (they do not affect each other)', () => {
+    for (const skin of COUNT_SKINS) for (let seed = 1; seed <= SEEDS; seed++) {
+      const p = pairOf(bothItem(createRng(seed), { skin }));
+      expect(spread(p.cells).length).toBe(100);
+      const rowA = count(p.cells, inRow), rowB = count(p.cells, (t) => !inRow(t));
+      // The share in each row, by division, is the same, and it is the story’s k in every m.
+      const shareA = count(p.cells, (t) => inRow(t) && inCol(t)) / rowA;
+      const shareB = count(p.cells, (t) => !inRow(t) && inCol(t)) / rowB;
+      expect(shareA, `${skin} ${seed}`).toBe(shareB);
+      expect(shareA).toBe(p.k / p.m);
+      expect(PAIR_SHARES.some(([k, m]) => k === p.k && m === p.m)).toBe(true);
+      // Every box holds at least 2; every box, row and column has its own count.
+      for (const n of p.cells.flat()) expect(n).toBeGreaterThanOrEqual(2);
+      const parts = [...p.cells.flat(), rowA, rowB, count(p.cells, inCol), count(p.cells, (t) => !inCol(t))];
+      expect(new Set(parts).size).toBe(8);
+      expect(p.topic.id).not.toBe(BALLOONS.id);
+      expect(PAIR_TOPICS).toContain(p.topic);
+    }
+  });
+
+  it('both: the things in the row and in the column, counted one by one; the picture shows only each row’s count', () => {
+    for (const skin of COUNT_SKINS) for (let seed = 1; seed <= SEEDS; seed++) {
+      const m = bothItem(createRng(seed), { skin });
+      const p = pairOf(m), it = ch(m);
+      const both = count(p.cells, (t) => inRow(t) && inCol(t));
+      const rowA = count(p.cells, inRow), colB = count(p.cells, inCol);
+      expect(label(it, it.answer)).toBe(String(both));
+      // A third way: the row times the share, by division.
+      expect((rowA * p.k) / p.m).toBe(both);
+      // Adding the row and the column is the trap: it is offered, and it is never the count of both.
+      expect(label(it, 'added')).toBe(String(rowA + colB));
+      expect(rowA + colB).toBeGreaterThan(both);
+      for (const c of it.choices) if (c.id !== it.answer) expect(c.label, `${skin} ${seed}`).not.toBe(String(both));
+      // The fifth choice: the number of groups when more than 1 is taken from each (always fewer than the answer), else
+      // the rest of the first row.
+      if (p.k > 1) {
+        expect(label(it, 'groups')).toBe(String(rowA / p.m));
+        expect(rowA / p.m).toBeLessThan(both);
+      } else expect(label(it, 'aOnly')).toBe(String(count(p.cells, (t) => inRow(t) && !inCol(t))));
+      // The story gives the row and the share; the picture gives each row’s count and leaves the boxes blank.
+      expect(it.prompt).toContain(` ${rowA} of them `);
+      expect(it.prompt).toContain(`${p.k} in every ${p.m} `);
+      const sc = it.scene as Extract<Scene, { kind: 'counts' }>;
+      expect(sc.cells.flat()).toEqual([null, null, null, null]);
+      expect(sc.rowTotals).toEqual([rowA, 100 - rowA]);
+      expect(it.tags).toEqual(['add-both']);
+      expect(it.conflict).toBe(true);
+      expect(m.tag).toBe('both');
+      // The hint is a separate small case of ten cards.
+      expect(it.hintCase!.label).toMatch(/^Say 10 cards/);
+      wellFormed(it, `${skin} ${seed}`);
+    }
+  });
+
+  it('either: the things in the row or in the column, counted one by one; adding counts the overlap twice', () => {
+    for (const form of EITHER_FORMS) for (const skin of COUNT_SKINS) for (let seed = 1; seed <= 120; seed++) {
+      const m = eitherItem(createRng(seed), { skin, form });
+      const p = pairOf(m), it = ch(m);
+      const either = count(p.cells, (t) => inRow(t) || inCol(t));
+      const rowA = count(p.cells, inRow), colB = count(p.cells, inCol), both = count(p.cells, (t) => inRow(t) && inCol(t));
+      expect(label(it, it.answer)).toBe(String(either));
+      // Another way: everything but the ones with neither thing.
+      expect(100 - count(p.cells, (t) => !inRow(t) && !inCol(t))).toBe(either);
+      // Adding counts the overlap twice: the sum is the answer and the overlap once more.
+      expect(label(it, 'added')).toBe(String(rowA + colB));
+      expect(rowA + colB - either).toBe(both);
+      // One but not both leaves the overlap out.
+      expect(label(it, 'one')).toBe(String(count(p.cells, (t) => inRow(t) !== inCol(t))));
+      for (const c of it.choices) if (c.id !== it.answer) expect(c.label, `${form} ${skin} ${seed}`).not.toBe(String(either));
+      const sc = it.scene as Extract<Scene, { kind: 'counts' }>;
+      if (form === 'picture') expect(sc.cells).toEqual(p.cells);
+      else {
+        expect(sc.cells.flat()).toEqual([null, null, null, null]);
+        expect(sc.rowTotals).toEqual([rowA, 100 - rowA]);
+        expect(it.prompt).toContain(`${p.k} in every ${p.m} `);
+      }
+      // “Or” is said with “or both”, so it never reads as one but not both.
+      expect(it.prompt).toMatch(/, or both\?$/);
+      expect(it.tags).toEqual(['overlap']);
+      expect(it.conflict).toBe(true);
+      expect(m.tag).toBe('either');
+      expect(it.hintCase!.label).toMatch(/^Say 10 cards/);
+      wellFormed(it, `${form} ${skin} ${seed}`);
+    }
+  });
+
+  it('the hint cases are counted again: 10 cards, red and big that do not affect each other', () => {
+    const it = ch(bothItem(createRng(1), { skin: 'everyday' }));
+    // 4 red of 10, 1 in every 2 big in each row: 2 red and big, 5 big in all.
+    const cards: Cells = [[2, 2], [3, 3]];
+    expect(spread(cards).length).toBe(10);
+    expect(it.hintCase!.label).toContain(`: ${count(cards, (t) => t.row === 0 && t.yes)}.`);
+    // The big count the hint adds is said, not left to work out.
+    expect(it.hintCase!.label).toContain(`so ${count(cards, (t) => t.yes)} are big`);
+    const either = ch(eitherItem(createRng(1), { skin: 'everyday' }));
+    expect(either.hintCase!.note).toContain(`${count(cards, (t) => t.row === 0 || t.yes)} cards are red or big`);
+    // “Explain more simply” uses the same ten cards.
+    expect(it.teach!.simpler!.join(' ')).toContain(`so ${count(cards, (t) => t.yes)} are big`);
+    expect(it.teach!.simpler!.join(' ')).toContain(`So ${count(cards, (t) => t.row === 0 && t.yes)} cards are red and big`);
+    expect(either.teach!.simpler!.join(' ')).toContain(`${count(cards, (t) => t.row === 0 || t.yes)} cards are red or big, or both`);
+  });
+});
+
 // ======================= answer balance =======================
 
 /**
@@ -487,7 +616,8 @@ describe('Lesson 4 · would I see this clue if I were wrong?', () => {
  * labels never change meaning. Left out by design: the coin (a fair coin’s next flip is always just as likely), the
  * one-draw item (the right reason is always the counts, and its Yes or No moves), the why items (the right reason is
  * the stop’s idea), the column counts (always out of the group the question names, while the numbers move), and the
- * traps (moreItem 'common', alarmItem 'rare'), whose new examples bring the other answer.
+ * traps (moreItem 'common', alarmItem 'rare'), whose new examples bring the other answer. Lesson 5’s counts keep their
+ * meaning too (both, either); what moves is the right number’s place, among the choices and by size.
  */
 describe('answer balance: the story moves the right answer across the choices', () => {
   const N = 300;
@@ -546,6 +676,24 @@ describe('answer balance: the story moves the right answer across the choices', 
   it('which group the clue is more common in: the rare group, the common group, or both, by the picture', () => {
     const answers = seeds.map((seed) => ch(fitsItem(createRng(seed), { skin: countSkin(seed) })).answer);
     expectSpread('which group the clue fits', answers, ['a', 'b', 'same']);
+  });
+
+  it('both and either: the right number is not always the smallest, the biggest, or in one place', () => {
+    for (const [name, make] of [['both', bothItem], ['either', eitherItem]] as const) {
+      const rank: string[] = [], place: string[] = [];
+      for (const seed of seeds) {
+        const it = ch(make(createRng(seed), { skin: countSkin(seed) }));
+        const right = Number(it.choices.find((c) => c.id === it.answer)!.label);
+        const smaller = it.choices.filter((c) => Number(c.label) < right).length;
+        // Its place by size: how many choices are smaller. Adding is always bigger, so it is never the biggest.
+        expect(smaller, `${name} ${seed}`).toBeLessThan(it.choices.length - 1);
+        rank.push(String(smaller));
+        place.push(String(it.choices.findIndex((c) => c.id === it.answer)));
+      }
+      expect(new Set(rank).size, `${name}: by size`).toBeGreaterThanOrEqual(2);
+      for (const r of new Set(rank)) expect(rank.filter((x) => x === r).length / N, `${name}: ${r} smaller`).toBeLessThanOrEqual(0.8);
+      expectSpread(`${name} (by place)`, place, ['0', '1', '2', '3', '4']);
+    }
   });
 
   it('the families that already moved still do', () => {
@@ -618,12 +766,12 @@ describe('the closing why item: the right reason is true of the picture, every w
 // ======================= the lessons =======================
 
 describe('the lessons: packs, traps, pass rules, terms', () => {
-  const TRAP: Record<string, string> = { 's13.l1': 'one-draw', 's13.l2': 'due', 's13.l3': 'base-rate', 's13.l4': 'false-alarm' };
+  const TRAP: Record<string, string[]> = { 's13.l1': ['one-draw'], 's13.l2': ['due'], 's13.l3': ['base-rate'], 's13.l4': ['false-alarm'], 's13.l5': ['add-both', 'overlap'] };
 
   it('every pack: 4 items of its rule family, its trap, at least two skins, the same for the same seed', () => {
     const frameOf = (it: Item): string => {
       const s = it.prompt + JSON.stringify(it.scene ?? '');
-      for (const t of [...GROUP_TOPICS, ...TEST_TOPICS]) if (it.prompt.startsWith(t.setting)) return t.skin;
+      for (const t of [...GROUP_TOPICS, ...TEST_TOPICS, ...PAIR_TOPICS]) if (it.prompt.startsWith(t.setting)) return t.skin;
       for (const t of CLUE_TOPICS) if (it.prompt.startsWith(t.question)) return t.skin;
       if (/fair coin|fair spinner|fair cube/.test(s)) return 'coin';
       for (const id of BAG_SKINS) {
@@ -635,12 +783,12 @@ describe('the lessons: packs, traps, pass rules, terms', () => {
     for (const l of stop13.lessons) for (let seed = 1; seed <= 120; seed++) {
       const items = l.practice(createRng(seed));
       expect(items.length).toBe(4);
-      expect(items.filter((i) => i.tags?.includes(TRAP[l.id])).length, `${l.id} ${seed}`).toBeGreaterThanOrEqual(1);
+      for (const tag of TRAP[l.id]) expect(items.filter((i) => i.tags?.includes(tag)).length, `${l.id} ${seed} ${tag}`).toBeGreaterThanOrEqual(1);
       for (const i of items) expect(i.skill.startsWith('s13.')).toBe(true);
       expect(new Set(items.map(looks)).size).toBe(4);
       expect(new Set(items.map(frameOf)).size, `${l.id} ${seed}: skins`).toBeGreaterThanOrEqual(2);
       expect(l.practice(createRng(seed))).toEqual(items);
-      expect(l.pass).toEqual({ firstTry: 3, include: [{ tag: TRAP[l.id], label: expect.any(String) }] });
+      expect(l.pass).toEqual({ firstTry: 3, include: TRAP[l.id].map((tag) => ({ tag, label: expect.any(String) })) });
     }
     // The skills each lesson asks about.
     const skills = (l: (typeof stop13.lessons)[number]) => new Set(Array.from({ length: 30 }, (_, s) => l.practice(createRng(s + 1)).map((i) => i.skill)).flat());
@@ -648,10 +796,11 @@ describe('the lessons: packs, traps, pass rules, terms', () => {
     expect([...skills(L2)]).toEqual(['s13.due']);
     expect([...skills(L3)]).toEqual(['s13.hundred']);
     expect([...skills(L4)].sort()).toEqual(['s13.clue', 's13.why']);
+    expect([...skills(L5)].sort()).toEqual(['s13.both', 's13.either']);
   });
 
   it('terms: each word is on the lesson whose card names it', () => {
-    const want: Record<string, string[]> = { 's13.l1': ['likely', 'certain'], 's13.l2': ['independent'], 's13.l3': ['base rate'], 's13.l4': ['false alarm', 'strong clue'] };
+    const want: Record<string, string[]> = { 's13.l1': ['likely', 'certain'], 's13.l2': ['independent'], 's13.l3': ['base rate'], 's13.l4': ['false alarm', 'strong clue'], 's13.l5': ['both', 'either', 'overlap'] };
     for (const l of stop13.lessons) {
       expect((l.terms ?? []).map((t) => t.term)).toEqual(want[l.id]);
       const cards = l.ideas.flatMap((c) => c.body).join(' ').toLowerCase();
@@ -659,10 +808,11 @@ describe('the lessons: packs, traps, pass rules, terms', () => {
     }
     expect(L2.terms![0].also).toBe('each draw is new');
     expect(L3.terms![0].also).toBe('how common it is');
+    expect(L5.terms!.map((t) => t.also ?? null)).toEqual(['and', 'or', null]);
   });
 
   it('distinctions: each lesson declares one, with its contrast card and a board right after it', () => {
-    const declared = [COUNTS_VS_DRAW, BACK_VS_KEPT, ROW_VS_COLUMN, RIGHT_VS_FLAG];
+    const declared = [COUNTS_VS_DRAW, BACK_VS_KEPT, ROW_VS_COLUMN, RIGHT_VS_FLAG, BOTH_VS_EITHER];
     stop13.lessons.forEach((l, i) => {
       expect(l.distinctions).toEqual([declared[i]]);
       const k = l.ideas.findIndex((c) => c.distinction === declared[i].id);
@@ -675,6 +825,9 @@ describe('the lessons: packs, traps, pass rules, terms', () => {
     // The brief’s distinction: how often the test is right is not how often a yes is right.
     expect(RIGHT_VS_FLAG.a).toContain('How often the test is right');
     expect(RIGHT_VS_FLAG.b).toContain('How often a flag is right');
+    // Lesson 5’s distinction: both is one box; either is a row and a column, the shared box once.
+    expect(BOTH_VS_EITHER.a).toContain('One box');
+    expect(BOTH_VS_EITHER.b).toContain('counted once');
   });
 
   it('card order: the contrast card and its board come first, then the worked example and its board', () => {
@@ -811,25 +964,90 @@ describe('the boards: every mark worked out again, the right marks pass, the mix
   });
 });
 
+describe('the boards of Lesson 5: every count worked out again from 100 balloons', () => {
+  const right = (d: DrillStep) => Object.fromEntries(marksToTap(d).map((m) => [m.id, m.answer]));
+
+  it('the balloons on the cards: 10 red, and big the same share of each row; both, either and the rest counted one by one', () => {
+    const B = BALLOONS_PIC.cells;
+    expect(spread(B).length).toBe(100);
+    expect(count(B, (t) => t.row === 0)).toBe(10);
+    expect(count(B, (t) => t.row === 0 && t.yes) / count(B, (t) => t.row === 0)).toBe(count(B, (t) => t.row === 1 && t.yes) / count(B, (t) => t.row === 1));
+    // The brief’s numbers: 10 of 100 red, 1 in 2 of those big, so 5 of 100 red and big; red or big is 55.
+    expect(count(B, (t) => t.row === 0 && t.yes)).toBe(5);
+    expect(count(B, (t) => t.row === 0 || t.yes)).toBe(55);
+    expect(BALLOON_SCENE.cells).toEqual(B);
+    expect(BALLOON_PICK_SCENE.pick).toEqual({ row: 0, col: 0 });
+    const cards = L5.ideas.flatMap((c) => c.body).join(' ');
+    expect(cards).toContain('5 balloons that are red and big');
+    expect(cards).toContain('take 5 away: 55');
+    // The counts are chances: one balloon picked without looking.
+    expect(cards).toContain(`red and big is ${count(B, (t) => t.row === 0 && t.yes)} in 100`);
+    expect(cards).toContain(`red or big is ${count(B, (t) => t.row === 0 || t.yes)} in 100`);
+  });
+
+  it('board 1 (both or either): each question’s kind and count, counted from the balloons; the mix-ups are caught', () => {
+    const d = L5.drill![0];
+    const B = BALLOONS_PIC.cells;
+    const want: Record<string, { kind: string; n: number }> = {
+      q1: { kind: 'both', n: count(B, (t) => t.row === 0 && t.yes) },
+      q2: { kind: 'either', n: count(B, (t) => t.row === 0 || t.yes) },
+      q3: { kind: 'both', n: count(B, (t) => t.row === 1 && t.yes) },
+    };
+    expect(bothEitherQuestions().map((q) => q.id)).toEqual(Object.keys(want));
+    for (const r of d.rows) {
+      expect(r.marks[0].answer, r.id).toBe(want[r.id].kind);
+      expect(r.marks[1].answer, r.id).toBe(String(want[r.id].n));
+    }
+    expect(d.distinction).toBe(BOTH_VS_EITHER.id);
+    expect(d.scene).toEqual(BALLOON_SCENE);
+    const added = String(count(B, (t) => t.row === 0) + count(B, (t) => t.yes));
+    expect(checkDrill(d, { ...right(d), 'q1-n': added }).diagnosis).toBe('add-both');
+    expect(checkDrill(d, { ...right(d), 'q2-n': added }).diagnosis).toBe('counted-twice');
+    expect(checkDrill(d, { ...right(d), 'q1-kind': 'either' }).diagnosis).toBe('and-as-or');
+  });
+
+  it('board 2 (the twin): 40 red and 1 in every 4 big; the blank boxes worked out, then counted one by one', () => {
+    const d = L5.drill![1];
+    const T = BALLOONS_TWIN.cells;
+    expect(spread(T).length).toBe(100);
+    expect(count(T, (t) => t.row === 0)).toBe(40);
+    expect(count(T, (t) => t.yes)).toBe(100 / 4);
+    expect(count(T, (t) => t.row === 0 && t.yes) / 40).toBe(count(T, (t) => t.row === 1 && t.yes) / 60);
+    expect(d.rows.map((r) => r.marks[0].answer)).toEqual([count(T, (t) => t.yes), count(T, (t) => t.row === 0 && t.yes), count(T, (t) => t.row === 0 || t.yes)].map(String));
+    expect(d.twin?.trim()).toBeTruthy();
+    const sc = d.scene as Extract<Scene, { kind: 'counts' }>;
+    expect(sc.cells.flat()).toEqual([null, null, null, null]);
+    expect(sc.rowTotals).toEqual([40, 60]);
+    const added = String(count(T, (t) => t.row === 0) + count(T, (t) => t.yes));
+    expect(checkDrill(d, { ...right(d), 'both-n': added }).diagnosis).toBe('add-both');
+    expect(checkDrill(d, { ...right(d), 'either-n': added }).diagnosis).toBe('counted-twice');
+    expect(checkDrill(d, { ...right(d), 'either-n': String(count(T, (t) => (t.row === 0) !== t.yes)) }).diagnosis).toBe('or-one-only');
+  });
+});
+
 // ======================= the stop =======================
 
 describe('the stop: check, Arcade, new examples, warm-up, skill names', () => {
-  it('9 items: two per lesson in order (a trap first in each pair), then the why item last; many looks per slot', () => {
-    const slots = Array.from({ length: 9 }, () => new Set<string>());
+  it('10 items: two per lesson for Lessons 1 to 4 in order (a trap first in each pair), one from Lesson 5 (a trap), then the why item last; many looks per slot', () => {
+    const slots = Array.from({ length: 10 }, () => new Set<string>());
+    const l5Skills = new Set<string>();
     for (let seed = 1; seed <= 300; seed++) {
       const items = stop13.check!(createRng(seed));
-      expect(items.map((i) => i.lesson).slice(0, 8)).toEqual(['s13.l1', 's13.l1', 's13.l2', 's13.l2', 's13.l3', 's13.l3', 's13.l4', 's13.l4']);
-      for (const k of [0, 2, 4, 6]) expect(items[k].conflict, `seed ${seed} slot ${k}`).toBe(true);
-      const last = items[8] as ChooseItem;
+      expect(items.length).toBe(10);
+      expect(items.map((i) => i.lesson).slice(0, 9)).toEqual(['s13.l1', 's13.l1', 's13.l2', 's13.l2', 's13.l3', 's13.l3', 's13.l4', 's13.l4', 's13.l5']);
+      for (const k of [0, 2, 4, 6, 8]) expect(items[k].conflict, `seed ${seed} slot ${k}`).toBe(true);
+      l5Skills.add(items[8].skill);
+      const last = items[9] as ChooseItem;
       expect(last.tags).toEqual(['why']);
       expect(last.skill).toBe('s13.why');
       expect(last.kind).toBe('choose');
       for (const c of last.choices) expect(c.label.length).toBeGreaterThan(12);
-      expect(new Set(items.map(looks)).size).toBe(9);
+      expect(new Set(items.map(looks)).size).toBe(10);
       items.forEach((it, k) => slots[k].add(looks(it)));
       expect(stop13.check!(createRng(seed))).toEqual(items);
     }
     for (const s of slots) expect(s.size).toBeGreaterThanOrEqual(100);
+    expect([...l5Skills].sort()).toEqual(['s13.both', 's13.either']);
   });
 
   it('Arcade: valid items from every lesson', () => {
@@ -839,7 +1057,7 @@ describe('the stop: check, Arcade, new examples, warm-up, skill names', () => {
       expect(it.choices.some((c) => c.id === it.answer)).toBe(true);
       lessons.add(it.lesson);
     }
-    expect([...lessons].sort()).toEqual(['s13.l1', 's13.l2', 's13.l3', 's13.l4']);
+    expect([...lessons].sort()).toEqual(['s13.l1', 's13.l2', 's13.l3', 's13.l4', 's13.l5']);
   });
 
   it('new examples: a missed trap gets a pair whose answers differ; others get the same kind about another topic', () => {
@@ -850,13 +1068,15 @@ describe('the stop: check, Arcade, new examples, warm-up, skill names', () => {
         expect(f.skill.startsWith('s13.')).toBe(true);
         expect(looks(f)).not.toBe(looks(missed));
       }
-      if (missed.tags?.some((t) => ['one-draw', 'base-rate', 'false-alarm'].includes(t))) {
+      if (missed.tags?.some((t) => ['one-draw', 'base-rate', 'false-alarm', 'add-both', 'overlap'].includes(t))) {
         expect(out.length).toBe(2);
         const said = out.map((f) => (f.choices.find((c) => c.id === f.answer)!.label.startsWith('Yes') ? 'yes' : f.answer));
         expect(new Set(said).size, `${missed.id} ${seed}: the pair's answers differ`).toBe(2);
       }
       if (missed.tags?.includes('due') && missed.kind === 'choose' && missed.choices.some((c) => c.id === 'streak')) expect(new Set(out.map((f) => f.answer)).size).toBe(2);
       if (missed.skill === 's13.why') expect(out.map((f) => f.tags)).toEqual([['why'], ['why']]);
+      // A missed both or either gets one of each, so adding never passes the set.
+      if (missed.skill === 's13.both' || missed.skill === 's13.either') expect(out.map((f) => f.skill).sort()).toEqual(['s13.both', 's13.either']);
     }
   });
 
@@ -864,8 +1084,8 @@ describe('the stop: check, Arcade, new examples, warm-up, skill names', () => {
     // “A deck has 100 cards.” opens a group picture (gold edges) and a test picture (a light that blinks).
     const head = (it: Item) => JSON.stringify([it.prompt.split('.')[0], it.scene?.kind === 'counts' ? it.scene.cols : null]);
     for (const skin of COUNT_SKINS) for (let seed = 1; seed <= 40; seed++) {
-      for (const m of [alarmItem(createRng(seed), { skin, want: 'rare' }), answerItem(createRng(seed), { skin }), readItem(createRng(seed), { skin }), moreItem(createRng(seed), { skin, want: 'common' })]) {
-        const missed = { id: 'x', stop: 13, lesson: m.tag === 'clue' ? 's13.l4' : 's13.l3', skill: `s13.${m.tag}`, ...m.item } as Item;
+      for (const m of [alarmItem(createRng(seed), { skin, want: 'rare' }), answerItem(createRng(seed), { skin }), readItem(createRng(seed), { skin }), moreItem(createRng(seed), { skin, want: 'common' }), bothItem(createRng(seed), { skin }), eitherItem(createRng(seed), { skin })]) {
+        const missed = { id: 'x', stop: 13, lesson: m.tag === 'clue' ? 's13.l4' : m.tag === 'both' || m.tag === 'either' ? 's13.l5' : 's13.l3', skill: `s13.${m.tag}`, ...m.item } as Item;
         const [first] = stop13.fresh!(missed, createRng(seed + 900));
         expect(head(first), `${skin} ${seed} ${missed.prompt}`).not.toBe(head(missed));
       }
@@ -901,20 +1121,21 @@ describe('the stop: check, Arcade, new examples, warm-up, skill names', () => {
       skills.add(stop13.practice!(createRng(seed)).skill);
       skills.add(stop13.bridge!(createRng(seed)).skill);
     }
-    expect([...skills].sort()).toEqual(['s13.clue', 's13.due', 's13.guess', 's13.hundred', 's13.likely', 's13.why']);
+    expect([...skills].sort()).toEqual(['s13.both', 's13.clue', 's13.due', 's13.either', 's13.guess', 's13.hundred', 's13.likely', 's13.why']);
     for (const s of skills) expect(stop13.skillNames?.[s], s).toBeTruthy();
     expect(WORLD.s13).toBeDefined();
     expect(SOON_WORLD.s13).toBeUndefined();
   });
 
-  it('no quiz, check or Arcade item shows a card’s picture (the jar, the worked bag, the farm, the eye check, the rain)', () => {
+  it('no quiz, check or Arcade item shows a card’s picture (the jar, the worked bag, the farm, the eye check, the rain, the balloons)', () => {
     const cards = new Set(stop13.lessons.flatMap((l) => l.ideas.flatMap((c) => (c.scene ? [JSON.stringify(c.scene)] : []))));
     expect(cards.has(JSON.stringify(FARM_PICK_SCENE))).toBe(true);
+    expect(cards.has(JSON.stringify(BALLOON_PICK_SCENE))).toBe(true);
     for (let seed = 1; seed <= 80; seed++) {
       const items = [...stop13.lessons.flatMap((l) => l.practice(createRng(seed))), ...stop13.check!(createRng(seed)), stop13.practice!(createRng(seed))];
       for (const it of items) {
         expect(cards.has(JSON.stringify(it.scene ?? null)), it.id).toBe(false);
-        expect(it.prompt).not.toMatch(/sheep|eye check|Did it rain|lemon/);
+        expect(it.prompt).not.toMatch(/sheep|eye check|Did it rain|lemon|balloon/);
       }
     }
   });
@@ -957,19 +1178,33 @@ describe('words: the reading level, curly quotes, no symbols', () => {
   });
 
   it('a count picture reads aloud every box, row and column, and adds up to 100', () => {
-    for (const s of [FARM_SCENE, EYES_SCENE]) {
+    for (const s of [FARM_SCENE, EYES_SCENE, BALLOON_SCENE, BALLOON_PICK_SCENE]) {
       const lines = countsSpeech(s).join(' ');
       for (const r of s.cells.flat()) expect(lines).toContain(String(r));
       for (const label of [...s.rows, ...s.cols]) expect(lines).toContain(label);
       expect(s.cells.flat().reduce((a, b) => a! + b!, 0)).toBe(s.total);
     }
     for (const skin of COUNT_SKINS) for (let seed = 1; seed <= 20; seed++) {
-      for (const m of [readItem(createRng(seed), { skin }), alarmItem(createRng(seed), { skin })]) {
+      for (const m of [readItem(createRng(seed), { skin }), alarmItem(createRng(seed), { skin }), eitherItem(createRng(seed), { skin, form: 'picture' })]) {
         const s = ch(m).scene as Extract<Scene, { kind: 'counts' }>;
         expect(s.kind).toBe('counts');
         expect(s.cells.flat().reduce((a, b) => a! + b!, 0)).toBe(100);
         for (const n of s.cells.flat()) expect(n!).toBeGreaterThanOrEqual(0);
       }
+    }
+    // A row and a column picked together are both named.
+    expect(countsSpeech(BALLOON_PICK_SCENE).join(' ')).toContain('Picked out: Red and Big.');
+  });
+
+  it('a picture to fill reads aloud each row’s count in all, every box as blank, and the columns as blank too', () => {
+    for (const skin of COUNT_SKINS) for (let seed = 1; seed <= 20; seed++) {
+      const s = ch(bothItem(createRng(seed), { skin })).scene as Extract<Scene, { kind: 'counts' }>;
+      const lines = countsSpeech(s);
+      const [ra, rb] = s.rowTotals!;
+      expect(ra! + rb!).toBe(100);
+      expect(lines[2]).toBe(`${s.rows[0]}: ${s.cols[0]} blank, ${s.cols[1]} blank. In all: ${ra}.`);
+      expect(lines[3]).toBe(`${s.rows[1]}: ${s.cols[0]} blank, ${s.cols[1]} blank. In all: ${rb}.`);
+      expect(lines[4]).toBe(`In all: ${s.cols[0]} blank, ${s.cols[1]} blank. All together: 100.`);
     }
   });
 
@@ -977,9 +1212,14 @@ describe('words: the reading level, curly quotes, no symbols', () => {
     const texts: string[] = [];
     for (const skin of COUNT_SKINS) for (let seed = 1; seed <= 60; seed++) {
       const r = () => createRng(seed);
-      for (const m of [moreItem(r(), { skin, want: 'common' }), moreItem(r(), { skin, want: 'rare' }), alarmItem(r(), { skin, want: 'common' }), answerItem(r(), { skin }), strongItem(r(), { skin }), ...WHY_KINDS.map((kind) => whyItem(r(), { skin, kind }))]) texts.push(...itemText(m.item as Item));
+      for (const m of [moreItem(r(), { skin, want: 'common' }), moreItem(r(), { skin, want: 'rare' }), alarmItem(r(), { skin, want: 'common' }), answerItem(r(), { skin }), strongItem(r(), { skin }), bothItem(r(), { skin }), eitherItem(r(), { skin }), ...WHY_KINDS.map((kind) => whyItem(r(), { skin, kind }))]) texts.push(...itemText(m.item as Item));
     }
     const text = texts.join('\n');
+    // “1 in every 4 kids wears glasses”, “3 in every 4 kids wear glasses”: the verb agrees with the 1, or with the 3.
+    expect(text).not.toMatch(/\b1 in every \d+ (\S+ )?(are|have|wear|glow)\b/);
+    expect(text).not.toMatch(/\b[2-9] in every \d+ (\S+ )?(is|has|wears|glows)\b/);
+    expect(text).toMatch(/\b1 in every \d+ \S+ (is|has|wears|glows|can)\b/);
+    expect(text).toMatch(/\b[2-9] in every \d+ \S+ (are|have|wear|glow|can)\b/);
     expect(text).not.toMatch(/\ban (uni|use|one)/i);
     expect(text).not.toMatch(/(?<![\d.,])\b1 (are|times|ways)\b|\bThose 1\b|\b1 false alarms\b/);
     // The cases the rules are for do come up.

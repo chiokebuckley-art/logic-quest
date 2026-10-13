@@ -8,11 +8,16 @@
  *  l3 The IF table              false only when the IF part is true and the THEN part false; trap: P false, Q false
  *  l4 Same meaning              columns match in every row (NOT (A AND B), flip and NOT); trap: NOT A AND NOT B
  *  l5 Always true, never true   all True, all False, or some of each; trap: true in most rows is not always true
+ *  l6 Both ways, and one but     IF AND ONLY IF (true when the parts match, Stop 6's rule each way) and BUT NOT BOTH
+ *     not both                   (exactly one part true); the same as OR, and not both; trap: both true marked True
+ *  l7 Say it with symbols        ¬ ∧ ∨ → ↔, words to symbols and back, the table beside each; trap: → read as ↔. The
+ *                                one lesson where a kid reads symbols (LessonDef.symbols), meant for the oldest readers
  *
  * Every lesson is See -> Do -> Quiz. Every answer, explanation, hint case and board mark comes from the table model in
- * ../engine/puzzles/tables.ts (with Stop 6's ROWS for the IF table and Stop 2's rules.ts for card rules); the boards
- * and contrast cards are in ../engine/puzzles/tableBoards.ts. The check ends with a why item. The warm-up (bridge) is a
- * Stop 2 card case: does this card fit NOT (A AND B)?
+ * ../engine/puzzles/tables.ts (with Stop 6's ROWS for the IF table and its two rules for IF AND ONLY IF, and Stop 2's
+ * rules.ts for card rules); a translation is the words read to a sentence and printed in symbols, or the symbols read
+ * back and said in words. The boards and contrast cards are in ../engine/puzzles/tableBoards.ts. The check ends with a
+ * why item. The warm-up (bridge) is a Stop 2 card case: does this card fit NOT (A AND B)?
  */
 import {
   ALWAYS_SEN,
@@ -27,6 +32,32 @@ import {
   COUNT_VS_CASES,
   IF_FALSE_VS_BROKEN,
   WORKED_ALWAYS,
+  BOTH_TRUE_ROW,
+  IFF_SEN,
+  IFF_STORY,
+  L6_TOPIC,
+  ONE_WAY_VS_BOTH,
+  OR_NOT_BOTH,
+  OR_VS_ONE,
+  SYM_WORKED,
+  XOR_SEN,
+  arrowBoard,
+  arrowContrastCard,
+  arrowsScene,
+  bothWaysBoard,
+  falseRowsOf,
+  iffScene,
+  iffStoryScene,
+  orNotBothBoard,
+  orNotBothScene,
+  symBasicScene,
+  symWorkedScene,
+  symbolWordBoard,
+  translateBoard,
+  trueRowsOf,
+  xorBoard,
+  xorContrastCard,
+  xorScene,
   alwaysBoard,
   alwaysScene,
   andOrBoard,
@@ -61,7 +92,31 @@ import {
 } from '../engine/puzzles/tableBoards';
 import {
   ABC,
+  AND,
+  ARROW_BOTH,
+  A as PART_A,
+  B as PART_B,
+  IF,
   IF_FALSE,
+  OP_WORD,
+  SYMBOL,
+  SYM_OPS,
+  XOR_BOTH,
+  bothWaysColumnItem,
+  bothWaysSameItem,
+  holds,
+  iffCellItem,
+  lookAlikeRowItem,
+  rowWords,
+  rowsFor,
+  say,
+  sym,
+  symCellItem,
+  toSymbols,
+  toWords,
+  toSymbolsItem,
+  toWordsItem,
+  xorCellItem,
   MOST_ROWS,
   NOT_EACH,
   OR_BOTH,
@@ -401,33 +456,207 @@ const l5: LessonDef = {
   pass: { firstTry: 3, include: [MOST_ROWS] },
 };
 
-const lessons = [l1, l2, l3, l4, l5];
+const L6 = 's9.l6', L7 = 's9.l7';
+const [bell, leo] = L6_TOPIC.parts;
+/** The rows that break the story rule (both ways), and the one of them a plain IF rule would allow. */
+const storyBreaks = falseRowsOf(IFF_STORY);
+const plainAllows = storyBreaks.filter((k) => holds(IF(PART_A, PART_B), rowsFor(2)[k]));
+const storyRow = (k: number) => `Row ${k + 1}: ${rowWords(rowsFor(2)[k], ABC, L6_TOPIC)}.`;
+
+const l6: LessonDef = {
+  id: L6,
+  title: 'Both ways, and one but not both',
+  ideas: [
+    {
+      title: 'Both ways',
+      scene: iffScene(),
+      body: [
+        'In If… then, you met “if and only if.” It puts two IF rules together, one each way.',
+        `A IF AND ONLY IF B is True only where both rules are True: ${rowsWord(trueRowsOf(IFF_SEN))}. There, A and B match.`,
+        `It is False where the parts differ: ${rowsWord(falseRowsOf(IFF_SEN))}. Grown-ups call it a biconditional.`,
+      ],
+    },
+    {
+      title: 'One but not both',
+      scene: xorScene(),
+      body: [
+        'In NOT, AND, OR, you saw that people often say OR to mean one but not both. Here that idea gets its own words.',
+        `A OR B BUT NOT BOTH is true when exactly one part is true. That is ${rowsWord(trueRowsOf(XOR_SEN))}.`,
+        'Grown-ups call it exclusive or. Plain OR still includes both.',
+      ],
+    },
+    xorContrastCard(),
+    {
+      title: 'OR, and not both',
+      scene: orNotBothScene(),
+      body: [
+        `You can say one but not both with words you know: ${quote(OR_NOT_BOTH, ABC, '.')}`,
+        'A OR B allows one part or both. NOT (A AND B) takes away the row where both are true.',
+        'The two columns match in every row. So the two sentences mean the same.',
+      ],
+    },
+    {
+      title: 'Example: a rule both ways',
+      scene: iffStoryScene(),
+      body: [
+        `Here is a rule: ${leo.yes} IF AND ONLY IF ${bell.yes}.`,
+        ...storyBreaks.map((k) => `${storyRow(k)} That breaks it.`),
+        ...plainAllows.map((k) => `A plain rule, “IF ${bell.yes}, THEN ${leo.yes},” would allow row ${k + 1}. Both ways is stricter.`),
+      ],
+    },
+  ],
+  drill: [bothWaysBoard(), xorBoard(), orNotBothBoard()],
+  distinctions: [OR_VS_ONE],
+  terms: [
+    { term: 'biconditional', means: 'A sentence with IF AND ONLY IF. It is true when its two parts match.', also: 'if and only if' },
+    { term: 'exclusive or', means: 'A sentence with BUT NOT BOTH. It is true when exactly one part is true.', also: 'one but not both' },
+  ],
+  // The quiz: the trap (both parts true for one but not both), the IF AND ONLY IF column, one but not both against OR
+  // (same meaning, or the one row where they differ), then one more of either.
+  practice: practiceOf(L6, (rng) => {
+    const one = distinctItems();
+    const used = new Set<string>();
+    const s = packSkins(rng, 4);
+    return [
+      one(() => xorCellItem(rng, { skin: s[0], avoid: used, row: BOTH_TRUE_ROW })),
+      one(() => bothWaysColumnItem(rng, { skin: s[1], avoid: used, which: 'iff' })),
+      one(() => (rng.chance(0.5) ? bothWaysSameItem(rng, { skin: s[2], avoid: used, which: 'xor' }) : lookAlikeRowItem(rng, { skin: s[2], avoid: used, which: 'xor' }))),
+      one(() =>
+        rng.pick([
+          () => iffCellItem(rng, { skin: s[3], avoid: used }),
+          () => bothWaysColumnItem(rng, { skin: s[3], avoid: used, which: 'xor' }),
+          () => bothWaysSameItem(rng, { skin: s[3], avoid: used, which: 'iff' }),
+          () => lookAlikeRowItem(rng, { skin: s[3], avoid: used, which: 'iff' }),
+        ])(),
+      ),
+    ];
+  }),
+  pass: { firstTry: 3, include: [XOR_BOTH] },
+};
+
+const [EX1, EX2] = SYM_WORKED;
+const IF_AB = IF(PART_A, PART_B);
+const l7: LessonDef = {
+  id: L7,
+  title: 'Say it with symbols',
+  symbols: true,
+  ideas: [
+    {
+      title: 'Five words, five symbols',
+      body: [
+        'Books for older students often write logic words as symbols. A symbol is a short sign that stands for a word.',
+        ...[SYM_OPS.slice(0, 3), SYM_OPS.slice(3)].map((ops) => ops.map((op) => `${SYMBOL[op]} means ${OP_WORD[op]}.`).join(' ')),
+        'A sentence means the same in words or in symbols. Only the way it looks changes.',
+      ],
+    },
+    {
+      title: 'NOT, AND, OR',
+      scene: symBasicScene(),
+      body: [
+        `“${sym({ op: 'not', a: PART_A }, ABC)}” says ${toWords(sym({ op: 'not', a: PART_A }, ABC), ABC)}. It flips A in each row.`,
+        `“${sym(AND(PART_A, PART_B), ABC)}” says ${toWords(sym(AND(PART_A, PART_B), ABC), ABC)}. “${sym({ op: 'or', a: PART_A, b: PART_B }, ABC)}” says ${toWords(sym({ op: 'or', a: PART_A, b: PART_B }, ABC), ABC)}.`,
+        'These are the columns you filled before. Only the headings changed.',
+      ],
+    },
+    {
+      title: 'The two arrows',
+      scene: arrowsScene(),
+      body: [
+        `“${sym(IF_AB, ABC)}” says ${toWords(sym(IF_AB, ABC), ABC)}. The arrow points from the IF part to the THEN part.`,
+        `“${sym(IFF_SEN, ABC)}” says ${toWords(sym(IFF_SEN, ABC), ABC)}. It points both ways, so it works both ways.`,
+      ],
+    },
+    arrowContrastCard(),
+    {
+      title: 'Example: words to symbols',
+      scene: symWorkedScene(),
+      body: [
+        `Take ${quote(EX1, ABC, '.')} Do the bracket first: A AND B is “${sym(AND(PART_A, PART_B), ABC)}.”`,
+        `Then put ¬ in front of the bracket: “${toSymbols(say(EX1, ABC), ABC)}.” The brackets stay where they are.`,
+        `Now take ${quote(EX2, ABC, '.')} With each NOT as ¬ and the arrow, it is “${toSymbols(say(EX2, ABC), ABC)}.”`,
+        'The table does not change. In words or in symbols, the column is the same.',
+      ],
+    },
+  ],
+  drill: [symbolWordBoard(), arrowBoard(), translateBoard()],
+  distinctions: [ONE_WAY_VS_BOTH],
+  terms: [
+    { term: 'symbol', means: 'A short sign that stands for a word.', also: 'sign' },
+    ...SYM_OPS.map((op) => ({ term: SYMBOL[op], means: `The symbol for ${OP_WORD[op]}.`, also: OP_WORD[op] })),
+  ],
+  // The quiz: words to symbols with an IF sentence (the trap: ↔ for →), symbols to words, one box read in symbols, then
+  // one more translation either way.
+  practice: practiceOf(L7, (rng) => {
+    const one = distinctItems();
+    const used = new Set<string>();
+    const s = packSkins(rng, 4);
+    return [
+      one(() => toSymbolsItem(rng, { skin: s[0], avoid: used, trap: true })),
+      one(() => toWordsItem(rng, { skin: s[1], avoid: used })),
+      one(() => symCellItem(rng, { skin: s[2], avoid: used })),
+      one(() => (rng.chance(0.5) ? toWordsItem(rng, { skin: s[3], avoid: used, trap: true }) : toSymbolsItem(rng, { skin: s[3], avoid: used }))),
+    ];
+  }),
+  pass: { firstTry: 3, include: [ARROW_BOTH] },
+};
+
+const lessons = [l1, l2, l3, l4, l5, l6, l7];
 
 // ---------- check, Arcade, new examples, warm-up ----------
 
 /**
- * 10 items: two from each of Lessons 1 to 4 and one from Lesson 5, then the why item last. The conflict items: the
- * table with a row twice, OR when both parts are true, a row where the IF part is false, and the NOT on each part.
+ * 10 items: one from each lesson (the trap of Lessons 1 to 4 among them), one more from Lesson 6 (both of its words are
+ * asked), one more from a lesson in 1 to 5, in lesson order, then the why item last. The conflict items: the table with
+ * a row twice, OR when both parts are true, a row where the IF part is false, and the NOT on each part.
  */
 function check(rng: Rng): Item[] {
   const one = distinctItems();
   const used = new Set<string>();
   const skin = () => rng.pick(SKINS);
-  const why = rng.pick<WhyKind>(['same', 'differ', 'if-row', 'always']);
+  const why = rng.pick<WhyKind>(['same', 'differ', 'if-row', 'always', 'xor-row']);
   const plan: [string, () => Made][] = [
-    [L1, () => (rng.chance(0.5) ? countItem(rng, { skin: skin(), avoid: used }) : missingItem(rng, { skin: skin(), avoid: used }))],
     [L1, () => repeatItem(rng, { skin: skin(), avoid: used })],
-    [L2, () => columnItem(rng, { skin: skin(), avoid: used })],
     [L2, () => orBothItem(rng, { skin: skin(), avoid: used })],
     [L3, () => ifCellItem(rng, { skin: skin(), avoid: used, row: rng.pick([2, 3]) })],
-    [L3, () => (rng.chance(0.5) ? ifColumnItem(rng, { skin: skin(), avoid: used }) : breakRowItem(rng, { skin: skin(), avoid: used }))],
     [L4, () => (rng.chance(0.7) ? sameItem(rng, { skin: skin(), avoid: used, trap: true }) : cardsSameItem(rng, { trap: true }))],
-    [L4, () => rng.pick([pickSameItem, diffRowItem])(rng, { skin: skin(), avoid: used })],
     [L5, () => kindItem(rng, { skin: skin(), avoid: used })],
-    [WHY_LESSON[why], () => whyItem(rng, { kind: why })],
+    [L6, () => rng.pick(IFF_MAKERS)(rng, { skin: skin(), avoid: used })],
+    [L6, () => (rng.chance(0.5) ? xorCellItem(rng, { skin: skin(), avoid: used, row: BOTH_TRUE_ROW }) : rng.pick(XOR_MAKERS)(rng, { skin: skin(), avoid: used }))],
+    [L7, () => rng.pick(SYM_MAKERS)(rng, { skin: skin(), avoid: used })],
   ];
+  // One more item from Lessons 1 to 5, a kind the plan above does not ask, placed after its lesson.
+  const spare = rng.pick<[string, () => Made]>([
+    [L1, () => (rng.chance(0.5) ? countItem(rng, { skin: skin(), avoid: used }) : missingItem(rng, { skin: skin(), avoid: used }))],
+    [L2, () => columnItem(rng, { skin: skin(), avoid: used })],
+    [L3, () => (rng.chance(0.5) ? ifColumnItem(rng, { skin: skin(), avoid: used }) : breakRowItem(rng, { skin: skin(), avoid: used }))],
+    [L4, () => rng.pick([pickSameItem, diffRowItem])(rng, { skin: skin(), avoid: used })],
+    [L5, () => pickAlwaysItem(rng, { skin: skin(), avoid: used })],
+  ]);
+  plan.splice(plan.findIndex(([l]) => l === spare[0]) + 1, 0, spare);
+  plan.push([WHY_LESSON[why], () => whyItem(rng, { kind: why })]);
   return plan.map(([lesson, make], i) => finish(one(make), `s${STOP}-c${i + 1}`, lesson));
 }
+
+type Maker = (rng: Rng, o: { skin: Skin; avoid?: Set<string> }) => Made;
+/** Lesson 6's IF AND ONLY IF questions, and its one-but-not-both questions after the trap box. */
+const IFF_MAKERS: Maker[] = [
+  (rng, o) => bothWaysColumnItem(rng, { ...o, which: 'iff' }),
+  (rng, o) => iffCellItem(rng, o),
+  (rng, o) => bothWaysSameItem(rng, { ...o, which: 'iff' }),
+  (rng, o) => lookAlikeRowItem(rng, { ...o, which: 'iff' }),
+];
+const XOR_MAKERS: Maker[] = [
+  (rng, o) => bothWaysColumnItem(rng, { ...o, which: 'xor' }),
+  (rng, o) => xorCellItem(rng, o),
+  (rng, o) => bothWaysSameItem(rng, { ...o, which: 'xor' }),
+  (rng, o) => lookAlikeRowItem(rng, { ...o, which: 'xor' }),
+];
+/** Lesson 7's questions: words to symbols, symbols to words, one box read in symbols. */
+const SYM_MAKERS: Maker[] = [
+  (rng, o) => toSymbolsItem(rng, { ...o, trap: rng.chance(0.5) }),
+  (rng, o) => toWordsItem(rng, { ...o, trap: rng.chance(0.5) }),
+  (rng, o) => symCellItem(rng, o),
+];
 
 /** One Arcade item from any lesson. */
 const ARCADE: [string, (rng: Rng) => Made][] = [
@@ -445,6 +674,9 @@ const ARCADE: [string, (rng: Rng) => Made][] = [
   [L4, (rng) => cardsSameItem(rng)],
   [L5, (rng) => kindItem(rng, { skin: rng.pick(SKINS) })],
   [L5, (rng) => pickAlwaysItem(rng, { skin: rng.pick(SKINS) })],
+  ...IFF_MAKERS.map((make): [string, (rng: Rng) => Made] => [L6, (rng) => make(rng, { skin: rng.pick(SKINS) })]),
+  ...XOR_MAKERS.map((make): [string, (rng: Rng) => Made] => [L6, (rng) => make(rng, { skin: rng.pick(SKINS) })]),
+  ...SYM_MAKERS.map((make): [string, (rng: Rng) => Made] => [L7, (rng) => make(rng, { skin: rng.pick(SKINS) })]),
 ];
 function arcade(rng: Rng): Item {
   const [lesson, make] = rng.pick(ARCADE);
@@ -503,6 +735,39 @@ function fresh(missed: Item, rng: Rng): Item[] {
       const always = make(kindItem(rng, { skin: skin(), want: 'always' }));
       return was === 'always' ? [always, most] : [most, always];
     }
+    case 's9.iff':
+    case 's9.xor': {
+      const which = missed.skill === 's9.iff' ? 'iff' : 'xor';
+      if (why) return [make(whyItem(rng, { kind: 'xor-row' })), make(xorCellItem(rng, { skin: skin(), row: BOTH_TRUE_ROW }))];
+      const was = answerOf(missed);
+      const cell = (want: boolean) => (which === 'iff' ? iffCellItem(rng, { skin: skin(), want }) : xorCellItem(rng, { skin: skin(), want }));
+      if (isCell(missed)) {
+        // The missed answer first. A missed trap box (both parts true) gets the trap again.
+        const w = was === 'true';
+        const same = missed.tags?.includes(XOR_BOTH.tag) ? xorCellItem(rng, { skin: skin(), row: BOTH_TRUE_ROW }) : cell(w);
+        return [make(same), make(cell(!w))];
+      }
+      if (was === 'yes' || was === 'no') {
+        const yes = make(bothWaysSameItem(rng, { skin: skin(), which, want: true }));
+        const no = make(bothWaysSameItem(rng, { skin: skin(), which, want: false }));
+        return was === 'yes' ? [yes, no] : [no, yes];
+      }
+      // A missed column or row: the look-alike row, then one box.
+      return [make(lookAlikeRowItem(rng, { skin: skin(), which })), make(which === 'xor' ? xorCellItem(rng, { skin: skin(), row: BOTH_TRUE_ROW }) : cell(false))];
+    }
+    case 's9.symbols': {
+      if (isCell(missed)) {
+        // A box read in symbols: the missed answer first, then the other. The trap (→ read as ↔) is always True.
+        const w = answerOf(missed) === 'true';
+        const same = missed.tags?.includes(ARROW_BOTH.tag) ? symCellItem(rng, { skin: skin(), trap: true }) : symCellItem(rng, { skin: skin(), want: w });
+        return [make(same), make(symCellItem(rng, { skin: skin(), want: !w }))];
+      }
+      // A missed translation: one each way, the first with the trap.
+      const toSym = missed.prompt.includes('with symbols?');
+      const first = toSym ? toSymbolsItem(rng, { skin: skin(), trap: true }) : toWordsItem(rng, { skin: skin(), trap: true });
+      const second = toSym ? toWordsItem(rng, { skin: skin() }) : toSymbolsItem(rng, { skin: skin() });
+      return [make(first), make(second)];
+    }
   }
   return [];
 }
@@ -530,5 +795,8 @@ export const stop9: StopDef = {
     's9.if-table': 'Truth tables: the IF table, false in one row only',
     's9.same': 'Truth tables: same meaning means every row matches',
     's9.always': 'Truth tables: always true, sometimes true, never true',
+    's9.iff': 'Truth tables: if and only if, true when the two parts match',
+    's9.xor': 'Truth tables: one but not both',
+    's9.symbols': 'Truth tables: logic words written as symbols, and back',
   },
 };

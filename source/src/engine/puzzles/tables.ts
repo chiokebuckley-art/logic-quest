@@ -17,7 +17,7 @@
  * why items and the warm-up (a Stop 2 NOT (A AND B) card) are here too. Every answer, explanation, wrong-choice
  * feedback and hint case is worked out from the table, never written by hand. The boards are in tableBoards.ts.
  */
-import { ROWS, RULE, condHolds } from './conditionals';
+import { ROWS, RULE, condHolds, formHolds } from './conditionals';
 import { ALL_CARDS, FEATURE_PAIRS, and as cardAnd, cardId, cardName, differences, evaluate, featureText, is as cardIs, not as cardNot, or as cardOr, render as cardRender, sameMeaning as sameOnCards, type Card, type Feature, type Formula } from './rules';
 import type { ItemCore, Made } from './statements';
 import { syncWhyWrong } from '../teach';
@@ -27,7 +27,13 @@ export type { Made };
 
 // ---------- the model ----------
 
-export type Sen = { op: 'atom'; i: number } | { op: 'not'; a: Sen } | { op: 'and' | 'or' | 'if'; a: Sen; b: Sen };
+export type Sen = { op: 'atom'; i: number } | { op: 'not'; a: Sen } | { op: BinOp; a: Sen; b: Sen };
+/**
+ * The joining words: AND, OR, IF … THEN, IF AND ONLY IF (both ways: true when the two parts match, Stop 6's rule each
+ * way) and BUT NOT BOTH (one but not both: true when exactly one part is true; the everyday OR as its own word).
+ */
+export type BinOp = 'and' | 'or' | 'if' | 'iff' | 'xor';
+const isBin = (s: Sen): s is Extract<Sen, { op: BinOp }> => s.op !== 'atom' && s.op !== 'not';
 
 export const atom = (i: number): Sen => ({ op: 'atom', i });
 export const A = atom(0);
@@ -37,6 +43,10 @@ export const NOT = (a: Sen): Sen => ({ op: 'not', a });
 export const AND = (a: Sen, b: Sen): Sen => ({ op: 'and', a, b });
 export const OR = (a: Sen, b: Sen): Sen => ({ op: 'or', a, b });
 export const IF = (a: Sen, b: Sen): Sen => ({ op: 'if', a, b });
+/** A IF AND ONLY IF B: two IF rules, one each way. */
+export const IFF = (a: Sen, b: Sen): Sen => ({ op: 'iff', a, b });
+/** A OR B BUT NOT BOTH: one but not both. */
+export const XOR = (a: Sen, b: Sen): Sen => ({ op: 'xor', a, b });
 
 /** One case: a value for each part, in order (A, B, C). */
 export type Row = readonly boolean[];
@@ -54,7 +64,10 @@ export function rowsFor(n: number): Row[] {
   return [true, false].flatMap((v) => smaller.map((r) => [v, ...r]));
 }
 
-/** A sentence in one row. IF … THEN is the if–then rule of Stop 6: broken only when the IF part is true and the THEN part false. */
+/**
+ * A sentence in one row. IF … THEN is the if–then rule of Stop 6: broken only when the IF part is true and the THEN part
+ * false. IF AND ONLY IF is Stop 6's two rules, one each way. BUT NOT BOTH is OR with the row where both are true left out.
+ */
 export function holds(s: Sen, r: Row): boolean {
   switch (s.op) {
     case 'atom':
@@ -67,11 +80,21 @@ export function holds(s: Sen, r: Row): boolean {
       return holds(s.a, r) || holds(s.b, r);
     case 'if':
       return condHolds(RULE, { p: holds(s.a, r), q: holds(s.b, r) });
+    case 'iff':
+      // Stop 6's “if and only if”: the IF rule each way, both kept.
+      return formHolds('iff', { p: holds(s.a, r), q: holds(s.b, r) });
+    case 'xor': {
+      // One or both, but not both.
+      const x = holds(s.a, r), y = holds(s.b, r);
+      return (x || y) && !(x && y);
+    }
   }
 }
 
 /** How many parts a sentence needs (its highest letter). */
 export const partsIn = (s: Sen): number => (s.op === 'atom' ? s.i + 1 : s.op === 'not' ? partsIn(s.a) : Math.max(partsIn(s.a), partsIn(s.b)));
+/** Does the sentence use this word anywhere? */
+export const usesOp = (s: Sen, op: Sen['op']): boolean => s.op === op || (s.op === 'not' ? usesOp(s.a, op) : isBin(s) && (usesOp(s.a, op) || usesOp(s.b, op)));
 export const column = (s: Sen, n: number): boolean[] => rowsFor(n).map((r) => holds(s, r));
 export const sameColumn = (s: Sen, t: Sen, n: number): boolean => rowsFor(n).every((r) => holds(s, r) === holds(t, r));
 /** The rows (0-based) where two sentences differ. */
@@ -98,9 +121,14 @@ export function kindOf(s: Sen, n = partsIn(s)): Kind {
  *  if-both        IF read both ways: true only when the two parts match
  *  if-flip        IF P, THEN Q read as IF Q, THEN P
  *  if-copies-then the IF column copied from the THEN part
+ *  iff-as-if      IF AND ONLY IF read one way only, as IF … THEN
+ *  iff-as-and     IF AND ONLY IF read as AND: true only when both parts are true
+ *  xor-as-or      one but not both read as plain OR: true when both parts are true (the trap of Lesson 6)
  */
-export type Misread = 'xor' | 'or-as-and' | 'and-as-or' | 'drop-not' | 'not-each' | 'if-as-and' | 'if-both' | 'if-flip' | 'if-copies-then';
+export type Misread = 'xor' | 'or-as-and' | 'and-as-or' | 'drop-not' | 'not-each' | 'if-as-and' | 'if-both' | 'if-flip' | 'if-copies-then' | 'iff-as-if' | 'iff-as-and' | 'xor-as-or';
 export const MISREADS: readonly Misread[] = ['xor', 'or-as-and', 'and-as-or', 'drop-not', 'not-each', 'if-as-and', 'if-both', 'if-flip', 'if-copies-then'];
+/** The misreadings of the both-ways and one-but-not-both words (Lesson 6), tried only on a sentence that uses them. */
+export const BOTH_WAYS_MISREADS: readonly Misread[] = ['iff-as-if', 'iff-as-and', 'xor-as-or'];
 
 export function holdsAs(s: Sen, r: Row, m: Misread): boolean {
   const h = (x: Sen) => holdsAs(x, r, m);
@@ -128,6 +156,16 @@ export function holdsAs(s: Sen, r: Row, m: Misread): boolean {
       if (m === 'if-copies-then') return q;
       return condHolds(RULE, { p, q });
     }
+    case 'iff': {
+      const p = h(s.a), q = h(s.b);
+      if (m === 'iff-as-if') return condHolds(RULE, { p, q });
+      if (m === 'iff-as-and') return p && q;
+      return formHolds('iff', { p, q });
+    }
+    case 'xor': {
+      const x = h(s.a), y = h(s.b);
+      return m === 'xor-as-or' ? x || y : (x || y) && !(x && y);
+    }
   }
 }
 export const columnAs = (s: Sen, n: number, m: Misread): boolean[] => rowsFor(n).map((r) => holdsAs(s, r, m));
@@ -146,8 +184,9 @@ export const listAnd = (xs: readonly string[]) => (xs.length <= 2 ? xs.join(' an
 export const rowsWord = (ks: readonly number[]) => `${plural(ks.length, 'row')} ${listAnd(ks.map((k) => String(k + 1)))}`;
 
 /**
- * A sentence in words: “A AND B”, “NOT (A AND B)”, “NOT A OR NOT B”, “IF A, THEN B”, “(A OR B) AND C”. NOT covers only
- * the part right after it; brackets show where a NOT or a joining word covers more.
+ * A sentence in words: “A AND B”, “NOT (A AND B)”, “NOT A OR NOT B”, “IF A, THEN B”, “(A OR B) AND C”, “A IF AND ONLY IF
+ * B”, “A OR B BUT NOT BOTH”. NOT covers only the part right after it; brackets show where a NOT or a joining word covers
+ * more.
  */
 export function say(s: Sen, names: readonly string[]): string {
   switch (s.op) {
@@ -157,12 +196,17 @@ export function say(s: Sen, names: readonly string[]): string {
       return s.a.op === 'atom' ? `NOT ${names[s.a.i]}` : `NOT (${say(s.a, names)})`;
     case 'and':
     case 'or': {
-      const part = (g: Sen) => ((g.op === 'and' || g.op === 'or' || g.op === 'if') && g.op !== s.op ? `(${say(g, names)})` : say(g, names));
+      const part = (g: Sen) => (isBin(g) && g.op !== s.op ? `(${say(g, names)})` : say(g, names));
       return `${part(s.a)} ${s.op === 'and' ? 'AND' : 'OR'} ${part(s.b)}`;
     }
     case 'if': {
-      const part = (g: Sen) => (g.op === 'if' ? `(${say(g, names)})` : say(g, names));
+      const part = (g: Sen) => (g.op === 'if' || g.op === 'iff' || g.op === 'xor' ? `(${say(g, names)})` : say(g, names));
       return `IF ${part(s.a)}, THEN ${part(s.b)}`;
+    }
+    case 'iff':
+    case 'xor': {
+      const part = (g: Sen) => (isBin(g) ? `(${say(g, names)})` : say(g, names));
+      return s.op === 'iff' ? `${part(s.a)} IF AND ONLY IF ${part(s.b)}` : `${part(s.a)} OR ${part(s.b)} BUT NOT BOTH`;
     }
   }
 }
@@ -173,6 +217,184 @@ export const quote = (s: Sen, names: readonly string[], end = '') => (s.op === '
 /** A fixed id for a sentence, from its words: “NOT (A AND B)” -> “not-[a-and-b]”. Never a position. */
 export const senId = (s: Sen, names: readonly string[]) =>
   say(s, names).toLowerCase().replace(/,/g, '').replace(/\(/g, '[').replace(/\)/g, ']').replace(/\s+/g, '-');
+
+// ---------- symbols (Lesson 7, the one lesson where a kid reads them) ----------
+
+/** The five words that have a symbol. BUT NOT BOTH has none in this game. */
+export type SymOp = 'not' | 'and' | 'or' | 'if' | 'iff';
+export const SYM_OPS: readonly SymOp[] = ['not', 'and', 'or', 'if', 'iff'];
+export const SYMBOL: Readonly<Record<SymOp, string>> = { not: '¬', and: '∧', or: '∨', if: '→', iff: '↔' };
+/** Each symbol's word, as the lessons write it. */
+export const OP_WORD: Readonly<Record<SymOp, string>> = { not: 'NOT', and: 'AND', or: 'OR', if: 'IF … THEN', iff: 'IF AND ONLY IF' };
+
+/**
+ * A sentence in symbols: “¬A”, “A ∧ B”, “¬(A ∨ B)”, “¬B → ¬A”, “(A ∧ B) → A”, “A ↔ B”. The same brackets as in words,
+ * and brackets around a joined part of an arrow, so nothing hangs on which symbol binds first.
+ */
+export function sym(s: Sen, names: readonly string[]): string {
+  switch (s.op) {
+    case 'atom':
+      return names[s.i];
+    case 'not':
+      return isBin(s.a) ? `¬(${sym(s.a, names)})` : `¬${sym(s.a, names)}`;
+    case 'and':
+    case 'or': {
+      const part = (g: Sen) => (isBin(g) && g.op !== s.op ? `(${sym(g, names)})` : sym(g, names));
+      return `${part(s.a)} ${SYMBOL[s.op]} ${part(s.b)}`;
+    }
+    case 'if':
+    case 'iff': {
+      const part = (g: Sen) => (isBin(g) ? `(${sym(g, names)})` : sym(g, names));
+      return `${part(s.a)} ${SYMBOL[s.op]} ${part(s.b)}`;
+    }
+    case 'xor':
+      throw new Error('sym: BUT NOT BOTH has no symbol in this game');
+  }
+}
+
+/** Split a sentence into its words, symbols, brackets and part names (longest first, a word never cut in two). */
+function tokensOf(text: string, names: readonly string[], keys: readonly string[]): string[] {
+  const t = text.trim().replace(/^“/, '').replace(/”$/, '').replace(/[.?!]$/, '');
+  const known = [...new Set([...keys, ...names])].sort((x, y) => y.length - x.length);
+  const out: string[] = [];
+  let i = 0;
+  while (i < t.length) {
+    if (/\s/.test(t[i])) {
+      i++;
+      continue;
+    }
+    const hit = known.find((k) => t.startsWith(k, i) && !(/[A-Za-z]$/.test(k) && /[A-Za-z’]/.test(t[i + k.length] ?? '')));
+    if (!hit) throw new Error(`tokensOf: can’t read “${t.slice(i)}” in “${text}”`);
+    out.push(hit);
+    i += hit.length;
+  }
+  return out;
+}
+
+/** A small reader over a list of tokens, shared by the two parsers. */
+function reader(toks: readonly string[], text: string) {
+  let i = 0;
+  return {
+    peek: () => toks[i],
+    eat(want?: string) {
+      const x = toks[i++];
+      if (x === undefined || (want !== undefined && x !== want)) throw new Error(`parse: expected ${want ?? 'more'} in “${text}”`);
+      return x;
+    },
+    done() {
+      if (i !== toks.length) throw new Error(`parse: extra words in “${text}”`);
+    },
+  };
+}
+
+const WORD_KEYS = ['IF', 'THEN', 'AND', 'OR', 'NOT', 'ONLY', 'BUT', 'BOTH', '(', ')', ','];
+
+/**
+ * Read a sentence back from its words (the words say() prints): “NOT (A AND B)”, “IF NOT B, THEN NOT A”, “A IF AND
+ * ONLY IF B”, “A OR B BUT NOT BOTH”. NOT covers the part right after it; AND joins before OR; brackets group.
+ */
+export function parseWords(text: string, names: readonly string[]): Sen {
+  const r = reader(tokensOf(text, names, WORD_KEYS), text);
+  const sentence = (): Sen => {
+    if (r.peek() === 'IF') {
+      r.eat('IF');
+      const a = expr();
+      r.eat(',');
+      r.eat('THEN');
+      return IF(a, expr());
+    }
+    const x = expr();
+    if (r.peek() === 'IF') {
+      for (const w of ['IF', 'AND', 'ONLY', 'IF']) r.eat(w);
+      return IFF(x, expr());
+    }
+    if (r.peek() === 'BUT') {
+      for (const w of ['BUT', 'NOT', 'BOTH']) r.eat(w);
+      if (x.op !== 'or') throw new Error(`parseWords: BUT NOT BOTH needs OR in “${text}”`);
+      return XOR(x.a, x.b);
+    }
+    return x;
+  };
+  const expr = (): Sen => {
+    let x = term();
+    while (r.peek() === 'OR') {
+      r.eat();
+      x = OR(x, term());
+    }
+    return x;
+  };
+  const term = (): Sen => {
+    let x = factor();
+    while (r.peek() === 'AND') {
+      r.eat();
+      x = AND(x, factor());
+    }
+    return x;
+  };
+  const factor = (): Sen => {
+    const x = r.eat();
+    if (x === 'NOT') return NOT(factor());
+    if (x === '(') {
+      const s = sentence();
+      r.eat(')');
+      return s;
+    }
+    const k = names.indexOf(x);
+    if (k < 0) throw new Error(`parseWords: “${x}” is not a part in “${text}”`);
+    return atom(k);
+  };
+  const out = sentence();
+  r.done();
+  return out;
+}
+
+const SYM_KEYS = ['¬', '∧', '∨', '→', '↔', '(', ')'];
+
+/** Read a sentence back from its symbols (the symbols sym() prints): ¬ covers the part right after it; ∧ joins before ∨, and both before an arrow. */
+export function parseSymbols(text: string, names: readonly string[]): Sen {
+  const r = reader(tokensOf(text, names, SYM_KEYS), text);
+  const sentence = (): Sen => {
+    const x = expr();
+    if (r.peek() === '→' || r.peek() === '↔') return r.eat() === '→' ? IF(x, expr()) : IFF(x, expr());
+    return x;
+  };
+  const expr = (): Sen => {
+    let x = term();
+    while (r.peek() === '∨') {
+      r.eat();
+      x = OR(x, term());
+    }
+    return x;
+  };
+  const term = (): Sen => {
+    let x = factor();
+    while (r.peek() === '∧') {
+      r.eat();
+      x = AND(x, factor());
+    }
+    return x;
+  };
+  const factor = (): Sen => {
+    const x = r.eat();
+    if (x === '¬') return NOT(factor());
+    if (x === '(') {
+      const s = sentence();
+      r.eat(')');
+      return s;
+    }
+    const k = names.indexOf(x);
+    if (k < 0) throw new Error(`parseSymbols: “${x}” is not a part in “${text}”`);
+    return atom(k);
+  };
+  const out = sentence();
+  r.done();
+  return out;
+}
+
+/** Words to symbols, through the model: read the words to a sentence, then print it with symbols. */
+export const toSymbols = (words: string, names: readonly string[]): string => sym(parseWords(words, names), names);
+/** Symbols to words, through the model: read the symbols to a sentence, then say it in words. */
+export const toWords = (symbols: string, names: readonly string[]): string => say(parseSymbols(symbols, names), names);
 
 // ---------- topics: what the letters stand for ----------
 
@@ -284,6 +506,8 @@ export interface TableOpts {
   marked?: number[];
   markLabel?: string;
   caption?: string;
+  /** Sentence headings in symbols (Lesson 7, the one lesson where a kid reads them), not in words. */
+  symbols?: boolean;
 }
 
 /** A truth table as a picture: the parts, then the sentences, one row for each case, True or False in each box. */
@@ -293,7 +517,7 @@ export function tableScene(o: TableOpts): TableScene {
   const key = o.topic ? keyLines(o.topic, o.names, o.n) : [];
   return {
     kind: 'table',
-    heads: [...o.names.slice(0, o.n), ...cols.map((c) => say(c, o.names))],
+    heads: [...o.names.slice(0, o.n), ...cols.map((c) => (o.symbols ? sym(c, o.names) : say(c, o.names)))],
     inputs: o.n,
     cells: rows.map((r, k) => [
       ...r.slice(0, o.n).map((v, i) => (o.blankPart?.(k, i) ? null : v)),
@@ -339,6 +563,17 @@ function reasonRaw(s: Sen, r: Row, names: readonly string[]): string {
       if (q) return `The IF part, ${quote(s.a, names, ',')} is true, and the THEN part, ${quote(s.b, names, ',')} is true too. So ${w(s)} is true.`;
       return `The IF part, ${quote(s.a, names, ',')} is true, but the THEN part, ${quote(s.b, names, ',')} is false. That breaks it, so ${w(s)} is false.`;
     }
+    case 'iff': {
+      const p = holds(s.a, r), q = holds(s.b, r);
+      if (p === q) return `${w(s.a)} is ${tf(p)} and ${w(s.b)} is ${tf(q)}. The two parts match, so ${w(s)} is true.`;
+      return `${w(s.a)} is ${tf(p)}, but ${w(s.b)} is ${tf(q)}. The two parts do not match, so ${w(s)} is false.`;
+    }
+    case 'xor': {
+      const x = holds(s.a, r), y = holds(s.b, r);
+      if (x && y) return `${w(s.a)} is true and ${w(s.b)} is true. Both are true, and BUT NOT BOTH leaves that out. So ${w(s)} is false.`;
+      if (x || y) return `Only ${w(x ? s.a : s.b)} is true. Exactly one part is true, so ${w(s)} is true.`;
+      return `${w(s.a)} is false and ${w(s.b)} is false. One part must be true, so ${w(s)} is false.`;
+    }
   }
 }
 
@@ -376,6 +611,8 @@ export const T_NOT: Term = { word: 'NOT', meaning: 'flips the part after it. Tru
 export const T_AND: Term = { word: 'AND', meaning: 'both parts must be true.' };
 export const T_OR: Term = { word: 'OR', meaning: 'one part or both parts must be true.' };
 export const T_IF: Term = { word: 'IF … THEN', meaning: 'false only when the IF part is true and the THEN part is false.' };
+export const T_IFF: Term = { word: 'IF AND ONLY IF', meaning: 'true when the two parts match: both true or both false.' };
+export const T_XOR: Term = { word: 'BUT NOT BOTH', meaning: 'one part must be true, but not both. Exactly one part is true.' };
 export const T_SAME: Term = { word: 'Mean the same', meaning: 'match in every row. Matching in some rows is not enough.' };
 export const T_ALWAYS: Term = { word: 'Always true', meaning: 'True in every row.' };
 export const T_NEVER: Term = { word: 'Never true', meaning: 'False in every row.' };
@@ -394,7 +631,14 @@ export function opTerms(s: Sen): Term[] {
     }
   };
   walk(s);
-  return [...(ops.has('not') ? [T_NOT] : []), ...(ops.has('and') ? [T_AND] : []), ...(ops.has('or') ? [T_OR] : []), ...(ops.has('if') ? [T_IF] : [])];
+  return [
+    ...(ops.has('not') ? [T_NOT] : []),
+    ...(ops.has('and') ? [T_AND] : []),
+    ...(ops.has('or') ? [T_OR] : []),
+    ...(ops.has('if') ? [T_IF] : []),
+    ...(ops.has('iff') ? [T_IFF] : []),
+    ...(ops.has('xor') ? [T_XOR] : []),
+  ];
 }
 
 /** The rule of a sentence's last step, in plain words. */
@@ -411,6 +655,10 @@ export function ruleLine(s: Sen): string {
       return `${parts}OR is true when one part or both parts are true. It is false only when both parts are false.`;
     case 'if':
       return `${parts}IF … THEN is false only when the IF part is true and the THEN part is false. In every other row it is true.`;
+    case 'iff':
+      return `${parts}IF AND ONLY IF is true when the two parts match, both true or both false. It is false when they differ.`;
+    case 'xor':
+      return `${parts}BUT NOT BOTH is true when exactly one part is true. It is false when both are true, and when both are false.`;
   }
 }
 
@@ -705,6 +953,12 @@ const MISREAD_HEAD = (m: Misread | 'flip-all', s: Sen, names: readonly string[])
       return `Your column just copies ${q}, the THEN part.`;
     case 'flip-all':
       return `Your column is the right column flipped in every row.`;
+    case 'iff-as-if':
+      return `Your column reads IF AND ONLY IF one way only, like “IF ${p}, THEN ${q}.”`;
+    case 'iff-as-and':
+      return 'Your column reads IF AND ONLY IF like AND. It is also true when both parts are false.';
+    case 'xor-as-or':
+      return 'Your column reads BUT NOT BOTH like plain OR. It leaves out the row where both parts are true.';
   }
   return say(s, names);
 };
@@ -720,7 +974,10 @@ function wrongColumns(rng: Rng, s: Sen, n: number, max = 3): { col: boolean[]; m
     seen.add(key(col));
     out.push({ col, ...(m ? { m } : {}) });
   };
-  for (const m of rng.shuffle(MISREADS)) add(columnAs(s, n, m), m);
+  // The both-ways and one-but-not-both misreadings only for a sentence that uses those words (the older sentences keep
+  // their choices for the same seed).
+  const pool = usesOp(s, 'iff') || usesOp(s, 'xor') ? [...BOTH_WAYS_MISREADS, ...MISREADS] : MISREADS;
+  for (const m of rng.shuffle(pool)) add(columnAs(s, n, m), m);
   add(right.map((v) => !v), 'flip-all');
   for (let i = 0; out.length < max && i < 200; i++) add(Array.from({ length: right.length }, () => rng.chance(0.5)));
   return out;
@@ -769,7 +1026,7 @@ function quietRow(right: readonly boolean[], wrongs: readonly (readonly boolean[
 }
 
 /** Which column is right for this sentence? */
-export function columnItem(rng: Rng, o: TableOptions & { family?: 'single' | 'helper'; sen?: Sen }): TableMade {
+export function columnItem(rng: Rng, o: TableOptions & { family?: 'single' | 'helper'; sen?: Sen; tag?: string }): TableMade {
   const skin: Skin = o.skin === 'cards' ? 'letters' : o.skin;
   const t = pickTopic(rng, skin, o.avoid);
   const names = namesFor(t);
@@ -781,7 +1038,7 @@ export function columnItem(rng: Rng, o: TableOptions & { family?: 'single' | 'he
   const feedback: Record<string, ChoiceFeedback> = {};
   for (const w of wrongs) feedback[colId(w.col)] = columnFeedback(s, n, names, w, t);
   const hk = quietRow(right, wrongs.map((w) => w.col));
-  return done('fill', {
+  return done(o.tag ?? 'fill', {
     kind: 'choose',
     prompt: `${opening(t, n, names)} Fill the column for ${quote(s, names, '.')} Which column is right, from row 1 down?`,
     scene: tableScene({ names, n, cols: [s], topic: t, blank: () => true, caption: 'The last column is blank. Fill it row by row.' }),
@@ -800,7 +1057,7 @@ export function columnItem(rng: Rng, o: TableOptions & { family?: 'single' | 'he
 export const OR_BOTH = { tag: 'or-both', label: 'OR in the row where both parts are true' } as const;
 
 /** One box: is this sentence true or false in this row? */
-export function cellItem(rng: Rng, o: TableOptions & { sen?: Sen; row?: number; want?: boolean; pq?: boolean; tag: 'fill' | 'if-table'; trap?: { tag: string } }): TableMade {
+export function cellItem(rng: Rng, o: TableOptions & { sen?: Sen; row?: number; want?: boolean; pq?: boolean; tag: 'fill' | 'if-table' | 'iff' | 'xor'; trap?: { tag: string } }): TableMade {
   const skin: Skin = o.skin === 'cards' ? 'letters' : o.skin;
   const t = pickTopic(rng, skin, o.avoid);
   const names = namesFor(t, o.pq);
@@ -818,6 +1075,13 @@ export function cellItem(rng: Rng, o: TableOptions & { sen?: Sen; row?: number; 
   if (s.op === 'or' && r.every(Boolean) && !v === false) headline = 'Your answer reads OR as “one but not both.” OR includes both, so it is true here.';
   if (s.op === 'if' && !holds(s.a, r)) headline = 'Your answer marks the row False, but the IF part did not happen here. Nothing breaks the sentence.';
   if (s.op === 'if' && holds(s.a, r) && !holds(s.b, r)) headline = 'Your answer marks the row True, but this is the one row that breaks the sentence.';
+  if (s.op === 'xor' && r.every(Boolean)) headline = 'Your answer reads BUT NOT BOTH like plain OR. Both parts are true here, so it is false.';
+  if (s.op === 'xor' && v) headline = 'Your answer marks the row False, but exactly one part is true here. That is just what BUT NOT BOTH needs.';
+  if (s.op === 'xor' && !holds(s.a, r) && !holds(s.b, r)) headline = `Your answer marks the row True, but ${names[0]} and ${names[1]} are both false here. BUT NOT BOTH needs one part true.`;
+  if (s.op === 'iff' && v && holds(s.a, r)) headline = 'Your answer marks the row False, but the two parts match here: both are true.';
+  if (s.op === 'iff' && !v && holdsAs(s, r, 'iff-as-if') === v) headline = 'Your answer marks the row True, but the two parts do not match here.';
+  if (s.op === 'iff' && holdsAs(s, r, 'iff-as-if') !== v) headline = `Your answer reads IF AND ONLY IF one way only. ${names[1]} is true here without ${names[0]}, and that breaks it.`;
+  if (s.op === 'iff' && v && !r[0]) headline = `Your answer marks the row False, but the two parts match here: both are false.`;
   const other = rows.findIndex((x, j) => j !== k && holds(s, x) !== v);
   const hk = other >= 0 ? other : (k + 1) % rows.length;
   const extraTerms = s.op === 'if' ? { terms: [T_ROW, T_COLUMN, T_IF, { word: 'The IF part', meaning: `the part right after IF: ${names[0]}.` }, { word: 'The THEN part', meaning: `the part right after THEN: ${names[1]}.` }] } : {};
@@ -975,7 +1239,7 @@ function pairTeach(s: Sen, u: Sen, names: readonly string[], t?: Topic): Teach {
 }
 
 /** Do these two sentences mean the same? */
-export function sameItem(rng: Rng, o: TableOptions & { pair?: [Sen, Sen]; trap?: boolean; want?: boolean }): TableMade {
+export function sameItem(rng: Rng, o: TableOptions & { pair?: readonly [Sen, Sen]; trap?: boolean; want?: boolean; tag?: string }): TableMade {
   const skin: Skin = o.skin === 'cards' ? 'letters' : o.skin;
   const t = pickTopic(rng, skin, o.avoid);
   const names = namesFor(t);
@@ -1008,7 +1272,7 @@ export function sameItem(rng: Rng, o: TableOptions & { pair?: [Sen, Sen]; trap?:
   }
   const hk = same ? 0 : rows.findIndex((_, j) => !diff.includes(j));
   const isTrap = TRAP_PAIRS.some(([x, y]) => (sameColumn(x, s, 2) && sameColumn(y, u, 2)) || (sameColumn(x, u, 2) && sameColumn(y, s, 2)));
-  return done('same', {
+  return done(o.tag ?? 'same', {
     kind: 'choose',
     prompt: `${opening(t, 2, names)} Do ${quote(s, names)} and ${quote(u, names)} mean the same? Check every row.`,
     scene: tableScene({ names, n: 2, cols: [s, u], topic: t, blank: () => true, caption: 'Fill both columns. Then compare them row by row.' }),
@@ -1077,11 +1341,12 @@ export const ONE_ROW_PAIRS: readonly [Sen, Sen][] = (() => {
 })();
 
 /** These two sentences agree in three rows. In which row do they differ? */
-export function diffRowItem(rng: Rng, o: TableOptions): TableMade {
+export function diffRowItem(rng: Rng, o: TableOptions & { pair?: readonly [Sen, Sen]; tag?: string }): TableMade {
   const skin: Skin = o.skin === 'cards' ? 'letters' : o.skin;
   const t = pickTopic(rng, skin, o.avoid);
   const names = namesFor(t);
-  const pair = rng.pick(ONE_ROW_PAIRS);
+  const pair = o.pair ?? rng.pick(ONE_ROW_PAIRS);
+  if (differRows(pair[0], pair[1], 2).length !== 1) throw new Error('diffRowItem: the pair must differ in exactly one row');
   const [s, u] = rng.chance(0.5) ? pair : [pair[1], pair[0]];
   const rows = rowsFor(2);
   const k = differRows(s, u, 2)[0];
@@ -1092,11 +1357,11 @@ export function diffRowItem(rng: Rng, o: TableOptions): TableMade {
     feedback[`row${j + 1}`] = {
       headline: `In row ${j + 1}, both sentences are ${tf(v)}. They agree there.`,
       detail: [`Row ${j + 1}: ${rowSentence(r, names)}.`, reason(s, r, names), reason(u, r, names)],
-      example: rowCase([s, u], r, j, names, { topic: t, note: `Both are ${tf(v)}. They agree here.` }),
+      example: rowCase([s, u], r, j, names, { topic: t, note: `Both sentences are ${tf(v)}. They agree here.` }),
     };
   });
   const hk = (k + 1) % 4;
-  return done('same', {
+  return done(o.tag ?? 'same', {
     kind: 'choose',
     prompt: `${opening(t, 2, names)} ${quote(s, names)} and ${quote(u, names)} agree in three rows. In which row do they differ?`,
     scene: tableScene({ names, n: 2, cols: [s, u], topic: t, blank: () => true, caption: 'Fill both columns. Find the row where they differ.' }),
@@ -1124,6 +1389,14 @@ export function toFormula(s: Sen, feats: readonly Feature[]): Formula {
       return cardOr(toFormula(s.a, feats), toFormula(s.b, feats));
     case 'if':
       return cardOr(cardNot(toFormula(s.a, feats)), toFormula(s.b, feats));
+    case 'iff': {
+      const a = toFormula(s.a, feats), b = toFormula(s.b, feats);
+      return cardAnd(cardOr(cardNot(a), b), cardOr(cardNot(b), a));
+    }
+    case 'xor': {
+      const a = toFormula(s.a, feats), b = toFormula(s.b, feats);
+      return cardAnd(cardOr(a, b), cardNot(cardAnd(a, b)));
+    }
   }
 }
 
@@ -1297,17 +1570,352 @@ export function pickAlwaysItem(rng: Rng, o: TableOptions): TableMade {
   }, { sens: [right, ...wrongs], names, n, topic: t });
 }
 
+// ----- Lesson 6: both ways, and one but not both -----
+
+export const IFF_AB = IFF(A, B);
+export const XOR_AB = XOR(A, B);
+/** The pass tag of Lesson 6: one but not both, in the row where both parts are true (plain OR is True there). */
+export const XOR_BOTH = { tag: 'xor-both', label: 'one but not both, in the row where both parts are true' } as const;
+/** “One but not both” said with words met before: OR, and not both; only A or only B; NOT both ways. */
+export const XOR_SAME: readonly [Sen, Sen][] = [[XOR_AB, AND(OR(A, B), NOT(AND(A, B)))], [XOR_AB, OR(AND(A, NOT(B)), AND(NOT(A), B))], [XOR_AB, NOT(IFF_AB)]];
+/** “If and only if” said as its two IF rules, one each way, and as NOT one but not both. */
+export const IFF_SAME: readonly [Sen, Sen][] = [[IFF_AB, AND(IF(A, B), IF(B, A))], [IFF_AB, NOT(XOR_AB)]];
+/** Look-alikes that do not mean the same (each agrees in some row): plain OR, “not both” alone, the IF rule one way, AND. */
+export const XOR_DIFF: readonly [Sen, Sen][] = [[XOR_AB, OR(A, B)], [XOR_AB, NOT(AND(A, B))]];
+export const IFF_DIFF: readonly [Sen, Sen][] = [[IFF_AB, IF(A, B)], [IFF_AB, AND(A, B)]];
+/** The pairs that differ in exactly one row: plain OR and one but not both (row 1), IF and IF AND ONLY IF (row 3). */
+export const ONE_ROW_LOOKALIKE: Readonly<Record<'iff' | 'xor', readonly [Sen, Sen]>> = { xor: [OR(A, B), XOR_AB], iff: [IF(A, B), IFF_AB] };
+
+type BothWays = 'iff' | 'xor';
+const BOTH_WAYS_SEN: Record<BothWays, Sen> = { iff: IFF_AB, xor: XOR_AB };
+
+/** A row (0-based) of two parts where a sentence has the value wanted, or any row. */
+function rowWhere(rng: Rng, s: Sen, want?: boolean): number {
+  const ks = rowsFor(2).flatMap((r, j) => (want === undefined || holds(s, r) === want ? [j] : []));
+  return rng.pick(ks);
+}
+
+/** One box of A OR B BUT NOT BOTH. Row 1, both parts true, is the trap: it is False (plain OR would be True). */
+export function xorCellItem(rng: Rng, o: TableOptions & { row?: number; want?: boolean }): TableMade {
+  const k = o.row ?? rowWhere(rng, XOR_AB, o.want);
+  return cellItem(rng, { skin: o.skin, avoid: o.avoid, sen: XOR_AB, row: k, tag: 'xor', ...(rowsFor(2)[k].every(Boolean) ? { trap: XOR_BOTH } : {}) });
+}
+
+/** One box of A IF AND ONLY IF B. */
+export function iffCellItem(rng: Rng, o: TableOptions & { row?: number; want?: boolean }): TableMade {
+  const k = o.row ?? rowWhere(rng, IFF_AB, o.want);
+  return cellItem(rng, { skin: o.skin, avoid: o.avoid, sen: IFF_AB, row: k, tag: 'iff' });
+}
+
+/** Which column is right for A IF AND ONLY IF B, or for A OR B BUT NOT BOTH? */
+export const bothWaysColumnItem = (rng: Rng, o: TableOptions & { which: BothWays }): TableMade => columnItem(rng, { skin: o.skin, avoid: o.avoid, sen: BOTH_WAYS_SEN[o.which], tag: o.which });
+
+/** The look-alike that differs in one row: A OR B against A OR B BUT NOT BOTH (row 1), or IF against IF AND ONLY IF (row 3). */
+export const lookAlikeRowItem = (rng: Rng, o: TableOptions & { which: BothWays }): TableMade => diffRowItem(rng, { skin: o.skin, avoid: o.avoid, pair: ONE_ROW_LOOKALIKE[o.which], tag: o.which });
+
+/** Do these mean the same? One but not both against “OR, and not both”, or a look-alike; the same for IF AND ONLY IF. */
+export function bothWaysSameItem(rng: Rng, o: TableOptions & { which: BothWays; want?: boolean }): TableMade {
+  const same = o.which === 'xor' ? XOR_SAME : IFF_SAME;
+  const diff = o.which === 'xor' ? XOR_DIFF : IFF_DIFF;
+  const pair = rng.pick(o.want === true ? same : o.want === false ? diff : [...same, ...diff]);
+  return sameItem(rng, { skin: o.skin, avoid: o.avoid, pair, tag: o.which });
+}
+
+// ----- Lesson 7: say it with symbols -----
+
+/** The pass tag of Lesson 7: the one-way arrow → read as the both-ways arrow ↔. */
+export const ARROW_BOTH = { tag: 'arrow-both', label: 'the one-way arrow read as both ways' } as const;
+
+/** Sentences with IF … THEN: the ones where → can be read as ↔ (the trap). */
+export const SYM_IF_POOL: readonly Sen[] = [IF(A, B), IF(NOT(B), NOT(A)), IF(A, NOT(B)), IF(NOT(A), B)];
+/** Every sentence a translation question may use: two parts, each word at least once. */
+export const SYM_POOL: readonly Sen[] = [...SYM_IF_POOL, IFF_AB, AND(A, B), OR(A, B), NOT(AND(A, B)), NOT(OR(A, B)), OR(NOT(A), B), AND(A, NOT(B)), IF(AND(A, B), A)];
+/** Sentences for one box read in symbols. */
+export const SYM_CELL_POOL: readonly Sen[] = [IF(A, B), IFF_AB, IF(NOT(B), NOT(A)), OR(NOT(A), B), AND(A, NOT(B))];
+
+/**
+ * How a sentence can be put into symbols (or read back) the wrong way:
+ *  arrow-both  → for ↔: IF … THEN read both ways (the trap)
+ *  arrow-one   ↔ for →: IF AND ONLY IF read one way
+ *  flip        the arrow turned around
+ *  if-as-and   → read as ∧
+ *  and-or      ∧ and ∨ swapped
+ *  not-scope   the NOT moved to another part (the brackets moved)
+ *  not-each    a NOT put on each part of a bracket
+ *  drop-not    a NOT left out
+ *  wrong-sym   another symbol for the main word
+ */
+export type SymMisread = 'arrow-both' | 'arrow-one' | 'flip' | 'if-as-and' | 'and-or' | 'not-scope' | 'not-each' | 'drop-not' | 'wrong-sym';
+
+/** Every joining word swapped as the map says. */
+export function swapOps(s: Sen, swap: Partial<Record<BinOp, BinOp>>): Sen {
+  if (s.op === 'atom') return s;
+  if (s.op === 'not') return NOT(swapOps(s.a, swap));
+  return { op: swap[s.op] ?? s.op, a: swapOps(s.a, swap), b: swapOps(s.b, swap) };
+}
+const dropNots = (s: Sen): Sen => (s.op === 'atom' ? s : s.op === 'not' ? dropNots(s.a) : { op: s.op, a: dropNots(s.a), b: dropNots(s.b) });
+/** The first NOT moved: off a bracket onto its first part, or off a part onto the whole bracket. */
+function moveNot(s: Sen): Sen | undefined {
+  if (s.op === 'not' && isBin(s.a)) return { op: s.a.op, a: NOT(s.a.a), b: s.a.b };
+  if (isBin(s) && s.a.op === 'not') return NOT({ op: s.op, a: s.a.a, b: s.b });
+  if (isBin(s) && s.b.op === 'not') return NOT({ op: s.op, a: s.a, b: s.b.a });
+  return undefined;
+}
+const notEach = (s: Sen): Sen | undefined => (s.op === 'not' && (s.a.op === 'and' || s.a.op === 'or') ? { op: s.a.op, a: NOT(s.a.a), b: NOT(s.a.b) } : undefined);
+/** The symbols another misreading already covers, so “another symbol” never repeats one of them. */
+const COVERED: Partial<Record<BinOp, BinOp[]>> = { if: ['iff', 'and'], iff: ['if'], and: ['or'], or: ['and'] };
+
+/**
+ * Wrong translations of a sentence, each with its misreading. Each one means something else (its column differs in
+ * some row), so the table can show where. `first`: a misreading that must be among them when it applies.
+ */
+export function symMisreads(rng: Rng, s: Sen, max = 3, first?: SymMisread): { sen: Sen; m: SymMisread }[] {
+  const cands: { sen: Sen; m: SymMisread }[] = [];
+  if (usesOp(s, 'if')) cands.push({ sen: swapOps(s, { if: 'iff' }), m: 'arrow-both' });
+  if (usesOp(s, 'iff')) cands.push({ sen: swapOps(s, { iff: 'if' }), m: 'arrow-one' });
+  if (s.op === 'if') cands.push({ sen: IF(s.b, s.a), m: 'flip' });
+  if (usesOp(s, 'if')) cands.push({ sen: swapOps(s, { if: 'and' }), m: 'if-as-and' });
+  if (usesOp(s, 'and') || usesOp(s, 'or')) cands.push({ sen: swapOps(s, { and: 'or', or: 'and' }), m: 'and-or' });
+  const moved = moveNot(s);
+  if (moved) cands.push({ sen: moved, m: 'not-scope' });
+  const each = notEach(s);
+  if (each) cands.push({ sen: each, m: 'not-each' });
+  if (usesOp(s, 'not')) cands.push({ sen: dropNots(s), m: 'drop-not' });
+  if (s.op === 'and' || s.op === 'or' || s.op === 'if' || s.op === 'iff') {
+    for (const op of ['and', 'or', 'if', 'iff'] as const) if (op !== s.op && !COVERED[s.op]?.includes(op)) cands.push({ sen: { op, a: s.a, b: s.b }, m: 'wrong-sym' });
+  }
+  const out: { sen: Sen; m: SymMisread }[] = [];
+  for (const c of [...cands.filter((x) => x.m === first), ...rng.shuffle(cands.filter((x) => x.m !== first))]) {
+    if (out.length >= max) break;
+    if (sameColumn(c.sen, s, 2)) continue;
+    if ([s, ...out.map((x) => x.sen)].some((x) => say(x, ABC) === say(c.sen, ABC))) continue;
+    out.push(c);
+  }
+  return out;
+}
+
+/** The symbols a sentence uses, defined (the teaching words). */
+export const T_SYMBOL: Term = { word: 'A symbol', meaning: 'a short sign that stands for a word.' };
+const SYM_MEANS: Record<SymOp, string> = {
+  not: 'NOT.',
+  and: 'AND.',
+  or: 'OR.',
+  if: 'IF … THEN. It points one way, from the IF part to the THEN part.',
+  iff: 'IF AND ONLY IF. It points both ways.',
+};
+export function symTerms(s: Sen): Term[] {
+  return SYM_OPS.filter((op) => usesOp(s, op)).map((op) => ({ word: SYMBOL[op], meaning: SYM_MEANS[op] }));
+}
+const STEP_NOTE: Record<SymOp, string> = {
+  not: 'NOT is ¬. It goes right in front of what it covers.',
+  and: 'AND is ∧.',
+  or: 'OR is ∨.',
+  if: 'IF … THEN is →. The IF part goes before the arrow.',
+  iff: 'IF AND ONLY IF is ↔.',
+};
+export const SYM_RULE = 'Each word has its own symbol: ¬ is NOT, ∧ is AND, ∨ is OR, → is IF … THEN, and ↔ is IF AND ONLY IF.';
+
+/** Teaching for a translation: each word as its symbol, smallest part first, and one row of the table. */
+function symTeach(s: Sen, names: readonly string[], t: Topic): Teach {
+  const steps = stepsOf(s);
+  const rows = rowsFor(2);
+  return {
+    rule: `${SYM_RULE} The brackets stay where they are.`,
+    terms: [T_SYMBOL, ...symTerms(s)],
+    meaning: `${quote(s, names)} and “${sym(s, names)}” are the same sentence. Words or symbols, its column is ${colLabel(column(s, 2))}.`,
+    casesTitle: 'One word at a time',
+    cases: [
+      ...steps.map((x) => ({ label: `${quote(x, names)} becomes “${sym(x, names)}.”`, note: STEP_NOTE[x.op as SymOp] })),
+      rowCase([s], rows[0], 0, names, { topic: t }),
+    ],
+    remember: [
+      'One word, one symbol. The brackets stay where they are.',
+      usesOp(s, 'if') || usesOp(s, 'iff') ? 'Ask: “Does the arrow point one way or both ways?”' : 'Ask: “Which word does each symbol stand for?”',
+    ],
+    simpler: [
+      `Start with the smallest part: ${quote(steps[0], names, '.')}`,
+      `Write it as “${sym(steps[0], names)}.”`,
+      ...(steps.length > 1 ? ['Then add the next word as its symbol, until the whole sentence is done.'] : ['That is the whole sentence.']),
+    ],
+  };
+}
+
+/** What a wrong translation got wrong, said for words put into symbols (`to: 'symbols'`) or symbols read as words. */
+export function symHead(m: SymMisread, to: 'symbols' | 'words', s: Sen, w: Sen): string {
+  const main = (x: Sen) => (isBin(x) && x.op !== 'xor' ? x.op : 'and');
+  switch (m) {
+    case 'arrow-both':
+      return to === 'symbols' ? 'Your answer uses ↔, but the sentence says IF … THEN. That is →, which points one way.' : 'Your answer reads → as IF AND ONLY IF. The arrow → points one way: it is IF … THEN.';
+    case 'arrow-one':
+      return to === 'symbols' ? 'Your answer uses →, but the sentence says IF AND ONLY IF. That is ↔, which points both ways.' : 'Your answer reads ↔ as IF … THEN. The arrow ↔ points both ways: it is IF AND ONLY IF.';
+    case 'flip':
+      return to === 'symbols' ? 'Your answer turns the arrow around. The IF part goes before →.' : 'Your answer turns the arrow around. The part before → is the IF part.';
+    case 'if-as-and':
+      return to === 'symbols' ? 'Your answer writes IF … THEN as AND. IF … THEN is →.' : 'Your answer reads → as AND. The arrow → is IF … THEN.';
+    case 'and-or':
+      return to === 'symbols' ? 'Your answer swaps AND and OR. AND is ∧, and OR is ∨.' : 'Your answer swaps AND and OR. ∧ is AND, and ∨ is OR.';
+    case 'not-scope':
+      return to === 'symbols' ? 'Your answer puts the NOT on a different part. The brackets must stay where they are.' : 'Your answer puts the NOT on a different part. Brackets show what ¬ covers.';
+    case 'not-each':
+      return to === 'symbols' ? 'Your answer puts a NOT on each part. The NOT covers the whole bracket.' : 'Your answer puts a NOT on each part. The ¬ covers the whole bracket.';
+    case 'drop-not':
+      return to === 'symbols' ? 'Your answer leaves out a NOT. NOT is ¬.' : 'Your answer leaves out a NOT. ¬ is NOT.';
+    case 'wrong-sym': {
+      const want = main(s) as SymOp, got = main(w) as SymOp;
+      return to === 'symbols'
+        ? `Your answer uses ${SYMBOL[got]}, which is ${OP_WORD[got]}. The sentence says ${OP_WORD[want]}, which is ${SYMBOL[want]}.`
+        : `Your answer reads ${SYMBOL[want]} as ${OP_WORD[got]}. ${SYMBOL[want]} is ${OP_WORD[want]}.`;
+    }
+  }
+}
+
+/** The feedback for a wrong translation: what it got wrong, what it says, and a row where it differs. */
+function symFeedback(s: Sen, w: { sen: Sen; m: SymMisread }, to: 'symbols' | 'words', names: readonly string[], t: Topic): ChoiceFeedback {
+  const rows = rowsFor(2);
+  const k = differRows(s, w.sen, 2)[0];
+  const r = rows[k];
+  const said = to === 'symbols' ? `Your answer, “${sym(w.sen, names)},” says ${say(w.sen, names)} in words.` : `The symbols “${sym(s, names)}” say ${say(s, names)} in words.`;
+  return {
+    headline: symHead(w.m, to, s, w.sen),
+    detail: [said, `That is a different sentence. Look at row ${k + 1}: ${rowSentence(r, names)}.`, reason(s, r, names), reason(w.sen, r, names)],
+    example: rowCase([s, w.sen], r, k, names, { topic: t, note: `${quote(s, names)} is ${tf(holds(s, r))}, but your answer is ${tf(holds(w.sen, r))}. They differ here.` }),
+  };
+}
+
+/** Words to symbols: which is this sentence, written with symbols? `trap`: an IF sentence, with ↔ among the choices. */
+export function toSymbolsItem(rng: Rng, o: TableOptions & { sen?: Sen; trap?: boolean }): TableMade {
+  const skin: Skin = o.skin === 'cards' ? 'letters' : o.skin;
+  const t = pickTopic(rng, skin, o.avoid);
+  const names = namesFor(t);
+  const s = o.sen ?? rng.pick(o.trap ? SYM_IF_POOL : SYM_POOL);
+  const words = say(s, names);
+  // The model: read the words to a sentence, print it with symbols, and read the symbols back to the same words.
+  const right = toSymbols(words, names);
+  if (toWords(right, names) !== words) throw new Error(`toSymbolsItem: “${right}” does not read back as “${words}”`);
+  const wrongs = symMisreads(rng, s, 3, o.trap ? 'arrow-both' : undefined);
+  const choices = rng.shuffle([{ id: senId(s, names), label: right }, ...wrongs.map((w) => ({ id: senId(w.sen, names), label: sym(w.sen, names) }))]);
+  const feedback: Record<string, ChoiceFeedback> = {};
+  for (const w of wrongs) feedback[senId(w.sen, names)] = symFeedback(s, w, 'symbols', names, t);
+  const trap = wrongs.some((w) => w.m === 'arrow-both');
+  const hk = quietRow(column(s, 2), wrongs.map((w) => column(w.sen, 2)));
+  return done('symbols', {
+    kind: 'choose',
+    prompt: `${opening(t, 2, names)} How do you write ${quote(s, names)} with symbols?`,
+    scene: tableScene({ names, n: 2, cols: [s], topic: t, caption: 'The sentence in words, with its column.' }),
+    choices,
+    answer: senId(s, names),
+    explain: `Write each word as its symbol, and keep the brackets. So ${quote(s, names)} becomes “${right}.”`,
+    feedback,
+    hint: 'Here is the table, one row worked out. The symbols must say the same sentence, with the same column.',
+    hintCase: rowCase([s], rowsFor(2)[hk], hk, names, { topic: t }),
+    teach: symTeach(s, names, t),
+    seconds: SECONDS,
+    ...(trap ? { conflict: true, tags: [ARROW_BOTH.tag] } : {}),
+  }, { sens: [s, ...wrongs.map((w) => w.sen)], names, n: 2, topic: t });
+}
+
+/** Symbols to words: which sentence in words says these symbols? `trap`: an IF sentence, with IF AND ONLY IF among the choices. */
+export function toWordsItem(rng: Rng, o: TableOptions & { sen?: Sen; trap?: boolean }): TableMade {
+  const skin: Skin = o.skin === 'cards' ? 'letters' : o.skin;
+  const t = pickTopic(rng, skin, o.avoid);
+  const names = namesFor(t);
+  const s = o.sen ?? rng.pick(o.trap ? SYM_IF_POOL : SYM_POOL);
+  const symbols = sym(s, names);
+  // The model: read the symbols to a sentence, say it in words, and put the words back to the same symbols.
+  const right = toWords(symbols, names);
+  if (toSymbols(right, names) !== symbols) throw new Error(`toWordsItem: “${right}” does not go back to “${symbols}”`);
+  const wrongs = symMisreads(rng, s, 3, o.trap ? 'arrow-both' : undefined);
+  const choices = rng.shuffle([{ id: senId(s, names), label: right }, ...wrongs.map((w) => ({ id: senId(w.sen, names), label: say(w.sen, names) }))]);
+  const feedback: Record<string, ChoiceFeedback> = {};
+  for (const w of wrongs) feedback[senId(w.sen, names)] = symFeedback(s, w, 'words', names, t);
+  const trap = wrongs.some((w) => w.m === 'arrow-both');
+  const hk = quietRow(column(s, 2), wrongs.map((w) => column(w.sen, 2)));
+  return done('symbols', {
+    kind: 'choose',
+    prompt: `${opening(t, 2, names)} Which sentence in words says “${symbols}”?`,
+    scene: tableScene({ names, n: 2, cols: [s], topic: t, symbols: true, caption: 'The sentence in symbols, with its column.' }),
+    choices,
+    answer: senId(s, names),
+    explain: `Read each symbol as its word, and keep the brackets. So “${symbols}” says ${right}.`,
+    feedback,
+    hint: 'Here is the table, one row worked out. The words must say the same sentence, with the same column.',
+    hintCase: rowCase([s], rowsFor(2)[hk], hk, names, { topic: t }),
+    teach: symTeach(s, names, t),
+    seconds: SECONDS,
+    ...(trap ? { conflict: true, tags: [ARROW_BOTH.tag] } : {}),
+  }, { sens: [s, ...wrongs.map((w) => w.sen)], names, n: 2, topic: t });
+}
+
+/**
+ * One box, read in symbols: is “A → B” true or false in this row? A row where reading → as ↔ gives the other answer is
+ * the trap (row 3 of A → B: A false, B true).
+ */
+export function symCellItem(rng: Rng, o: TableOptions & { sen?: Sen; row?: number; want?: boolean; trap?: boolean }): TableMade {
+  const skin: Skin = o.skin === 'cards' ? 'letters' : o.skin;
+  const t = pickTopic(rng, skin, o.avoid);
+  const names = namesFor(t);
+  const rows = rowsFor(2);
+  const both = (x: Sen) => swapOps(x, { if: 'iff' });
+  const trapRow = (x: Sen, j: number) => usesOp(x, 'if') && holds(both(x), rows[j]) !== holds(x, rows[j]);
+  const s = o.sen ?? rng.pick(o.trap ? SYM_CELL_POOL.filter((x) => rows.some((_, j) => trapRow(x, j))) : SYM_CELL_POOL);
+  const k = o.row ?? rng.pick(rows.flatMap((r, j) => ((o.want === undefined || holds(s, r) === o.want) && (!o.trap || trapRow(s, j)) ? [j] : [])));
+  const r = rows[k];
+  const v = holds(s, r);
+  const S = `“${sym(s, names)}”`;
+  const isTrap = trapRow(s, k);
+  const oneWay = usesOp(s, 'iff') && holds(swapOps(s, { iff: 'if' }), r) !== v;
+  // Any other row: name what the main word needs and what the row gives it.
+  const rowHead = (): string => {
+    if (s.op === 'if') {
+      if (!holds(s.a, r)) return `Your answer marks the row False, but the IF part, “${sym(s.a, names)},” is false here. Then nothing breaks “${sym(s, names)}.”`;
+      return v
+        ? `Your answer marks the row False, but the THEN part, “${sym(s.b, names)},” is true here. Nothing breaks “${sym(s, names)}.”`
+        : `Your answer marks the row True, but this row breaks “${sym(s, names)}.” Its IF part is true, and its THEN part is false.`;
+    }
+    if (s.op === 'iff') return v ? `Your answer marks the row False, but the two parts of ${S} match here.` : `Your answer marks the row True, but the two parts of ${S} do not match here.`;
+    if (s.op === 'and') return v ? `Your answer marks the row False, but both parts of ${S} are true here.` : `Your answer marks the row True, but a part of ${S} is false here. AND needs both parts true.`;
+    if (s.op === 'or') return v ? `Your answer marks the row False, but a part of ${S} is true here. OR needs just one.` : `Your answer marks the row True, but both parts of ${S} are false here.`;
+    return `Your answer says ${S} is ${tf(!v)} in row ${k + 1}, but it is ${tf(v)} there.`;
+  };
+  const headline = isTrap
+    ? `Your answer reads → as ↔. The arrow → points one way, so ${S} is ${tf(v)} here.`
+    : oneWay
+      ? `Your answer reads ↔ as →. The arrow ↔ points both ways, so ${S} is ${tf(v)} here.`
+      : rowHead();
+  const words = t.skin === 'letters' ? `${cap(rowSentence(r, names))}.` : `${cap(rowSentence(r, names))}: ${rowWords(r, names, t)}.`;
+  const hk = rows.findIndex((x, j) => j !== k && holds(s, x) !== v);
+  return done('symbols', {
+    kind: 'choose',
+    prompt: `${opening(t, 2, names)} Look at row ${k + 1}. ${words} Is ${S} true or false in that row?`,
+    scene: tableScene({ names, n: 2, cols: [s], topic: t, blank: () => true, marked: [k], markLabel: 'This row', symbols: true }),
+    choices: TF_CHOICES,
+    answer: tf(v),
+    explain: `${S} says ${say(s, names)} in words. ${chain(s, r, names).join(' ')}`,
+    feedback: {
+      [tf(!v)]: {
+        headline,
+        detail: [`${S} says ${say(s, names)} in words.`, `Look at row ${k + 1}.`, ...chain(s, r, names)],
+        example: rowCase([s], r, k, names, { topic: t }),
+      },
+    },
+    hint: `Here is another row, worked out. Read the symbols as words, then do row ${k + 1} the same way.`,
+    hintCase: rowCase([s], rows[hk], hk, names, { topic: t }),
+    teach: sentenceTeach(s, 2, names, t, { rule: `${S} says ${say(s, names)} in words. ${ruleLine(s)}`, terms: [T_SYMBOL, ...symTerms(s), T_ROW, ...opTerms(s)] }),
+    ...(isTrap ? { conflict: true, tags: [ARROW_BOTH.tag] } : {}),
+  }, { sens: [s], names, n: 2, topic: t, row: k });
+}
+
 // ---------- the closing why item: a reason, picked from reasons ----------
 
 /** Two sentences each true in three rows of four that still differ: the why item's “most rows” counterexample. */
 const MOST_A = OR(A, B);
 const MOST_B = OR(NOT(A), B);
 
-export type WhyKind = 'same' | 'differ' | 'if-row' | 'always';
-export const WHY_KINDS: readonly WhyKind[] = ['same', 'differ', 'if-row', 'always'];
+export type WhyKind = 'same' | 'differ' | 'if-row' | 'always' | 'xor-row';
+export const WHY_KINDS: readonly WhyKind[] = ['same', 'differ', 'if-row', 'always', 'xor-row'];
 /** The lesson each why item is about. */
-export const WHY_LESSON: Record<WhyKind, string> = { same: 's9.l4', differ: 's9.l4', 'if-row': 's9.l3', always: 's9.l5' };
-const WHY_TAG: Record<WhyKind, string> = { same: 'same', differ: 'same', 'if-row': 'if-table', always: 'always' };
+export const WHY_LESSON: Record<WhyKind, string> = { same: 's9.l4', differ: 's9.l4', 'if-row': 's9.l3', always: 's9.l5', 'xor-row': 's9.l6' };
+const WHY_TAG: Record<WhyKind, string> = { same: 'same', differ: 'same', 'if-row': 'if-table', always: 'always', 'xor-row': 'xor' };
 
 /** Why does it hold? Four reasons, one right, each wrong one with the case that shows it fails. Tagged why. */
 export function whyItem(rng: Rng, o: { kind?: WhyKind; skin?: Skin } = {}): TableMade & { why: WhyKind } {
@@ -1436,6 +2044,52 @@ export function whyItem(rng: Rng, o: { kind?: WhyKind; skin?: Skin } = {}): Tabl
       feedback,
       hint: 'Here is the row that breaks the sentence. Compare it with this row.',
       hintCase: rowCase([s], tf2, kb, names, { topic: t }),
+      teach: sentenceTeach(s, 2, names, t),
+      tags: ['why'],
+    }, { sens: [s], names, n: 2, topic: t, row: k });
+  } else if (kind === 'xor-row') {
+    // Row 1, both parts true: why is one but not both False there? Each wrong reason meets a row or a sentence that breaks it.
+    const names = namesFor(t);
+    const s = XOR_AB;
+    const plain = OR(A, B);
+    const k = rows.findIndex((x) => x.every(Boolean));
+    const r = rows[k];
+    const trueRows = column(s, 2).flatMap((v, j) => (v ? [j] : []));
+    const kt = trueRows[0];
+    const choices: Choice[] = [
+      { id: 'both', label: 'Both parts are true, and BUT NOT BOTH leaves out the row where both are true.' },
+      { id: 'or', label: 'Plain OR is false when both parts are true, and this sentence has OR in it.' },
+      { id: 'never', label: 'A sentence with BUT NOT BOTH is never true, in any row.' },
+      { id: 'first', label: 'The first row of a table is False for every sentence.' },
+    ];
+    const feedback: Record<string, ChoiceFeedback> = {
+      or: {
+        headline: `Your reason says plain OR is false when both parts are true, but ${quote(plain, names)} is True in row ${k + 1}.`,
+        detail: [reason(plain, r, names), 'The words BUT NOT BOTH are what leave this row out.'],
+        example: rowCase([plain, s], r, k, names, { topic: t, note: `${quote(plain, names)} is ${tf(holds(plain, r))}, but ${quote(s, names)} is ${tf(holds(s, r))}.` }),
+      },
+      never: {
+        headline: `Your reason says it is never true, but ${quote(s, names)} is True in ${rowsWord(trueRows)}.`,
+        detail: [reason(s, rows[kt], names), 'It is false here only because both parts are true.'],
+        example: rowCase([s], rows[kt], kt, names, { topic: t }),
+      },
+      first: {
+        headline: `Your reason says row ${k + 1} is always False, but ${quote(plain, names)} is True there.`,
+        detail: [reason(plain, r, names), 'Each sentence gets its value from its own words, row by row.'],
+        example: rowCase([plain], r, k, names, { topic: t }),
+      },
+    };
+    const story = t.skin === 'letters' ? '' : ` That is: ${rowWords(r, names, t)}.`;
+    made = done(WHY_TAG[kind], {
+      kind: 'choose',
+      prompt: `${opening(t, 2, names)} In row ${k + 1}, ${rowSentence(r, names)}.${story} ${quote(s, names)} is ${TF(holds(s, r))} there. Why?`,
+      scene: tableScene({ names, n: 2, cols: [plain, s], topic: t, marked: [k], markLabel: 'This row' }),
+      choices: rng.shuffle(choices),
+      answer: 'both',
+      explain: reason(s, r, names),
+      feedback,
+      hint: 'Here is a row where it is True. Compare it with this row.',
+      hintCase: rowCase([s], rows[kt], kt, names, { topic: t }),
       teach: sentenceTeach(s, 2, names, t),
       tags: ['why'],
     }, { sens: [s], names, n: 2, topic: t, row: k });

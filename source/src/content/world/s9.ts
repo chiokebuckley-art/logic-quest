@@ -44,6 +44,22 @@ export const S9_WORLD: StopWorld = {
         { who: 'Software testers', kind: 'work', text: 'A check in a program that is always true can never catch a mistake. Testers look for checks like that and fix them, so each check can really fail.' },
       ],
     },
+    's9.l6': {
+      why: 'IF AND ONLY IF is true when both parts match. BUT NOT BOTH is true when exactly one part is true, so it leaves out both.',
+      uses: [
+        { who: 'You, at a lunch counter', kind: 'life', text: 'A lunch deal comes with fries or a salad, but not both. Asking for one of them is fine. Asking for both is outside the deal.' },
+        { who: 'Door system builders', kind: 'work', text: 'A door is set to open if and only if a good pass is scanned. A door that opens with no pass is a fault. So is a door that stays shut for a good pass.' },
+        { who: 'Heating engineers', kind: 'work', text: 'A heater is set to run if and only if the room is colder than the set level. Running in a warm room is a fault, and so is staying off in a cold one.' },
+      ],
+    },
+    's9.l7': {
+      why: 'Symbols say the same sentences in less space. Each symbol stands for one word, so the meaning and the table stay the same.',
+      uses: [
+        { who: 'You, reading older math books', kind: 'life', text: 'Math books for older students write NOT, AND and OR as short signs. If you know which sign stands for which word, you can read those pages.' },
+        { who: 'Programmers', kind: 'work', text: 'Many coding languages write AND, OR and NOT as short signs. Programmers read each sign as its word to know when a line of code will run.' },
+        { who: 'Computer scientists', kind: 'work', text: 'Computer scientists write rules about programs in these symbols. A short line of symbols can say what a long sentence says. Then they can check it with a table.' },
+      ],
+    },
   },
   skills: {
     's9.rows': [
@@ -61,6 +77,15 @@ export const S9_WORLD: StopWorld = {
     's9.same': [
       '“Not both” and “neither” sound close, but they differ. A case where only one thing happens tells them apart.',
       'Two ways of writing a game rule mean the same only if every move gives the same result under both.',
+    ],
+    's9.iff': [
+      'A game shows a gold star if and only if every level is done. A star with a level left is a mistake, and so is no star at the end.',
+    ],
+    's9.xor': [
+      'A class vote lets each kid pick the red team or the blue team, but not both. A card with both marked does not count.',
+    ],
+    's9.symbols': [
+      'In older math books, IF … THEN is an arrow that points one way. Reading it as a two-way arrow changes the rule.',
     ],
     's9.always': [
       '“The team will win, or it will not win” is always true. A real forecast could turn out wrong, and that is what makes it useful.',

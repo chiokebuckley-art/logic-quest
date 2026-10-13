@@ -14,10 +14,36 @@
  *      goats
  *  l4  the rain clues and their board; the “right for most” vs “a flag is right” contrast and its board; then the eye
  *      check count picture and its twin board (more false alarms)
+ *  l5  both at once (the balloons: 10 red, 1 in every 2 big) and things that do not affect each other; the both vs
+ *      either contrast and its board (both or either, then the count); then the worked steps (both, then either, then
+ *      a check by boxes) and its twin board (40 red, 1 in every 4 big, the boxes blank to fill)
  */
 import type { ConfusedQuestion, Distinction, DrillMark, DrillOption, DrillRow, DrillStep, IdeaCard, Misconception, Scene } from '../types';
 import { cap, drawAgrees, wordBecause, type Word } from './chances';
-import { EYES_PIC, EYES_TWIN, FARM_PIC, FARM_TWIN, RAIN, RAIN_COUNTS, clueScene, colTotal, groupScene, rightFor, rowTotal, strongerClue, testScene, type CluePic } from './counts';
+import {
+  BALLOONS,
+  EYES_PIC,
+  EYES_TWIN,
+  FARM_PIC,
+  FARM_TWIN,
+  RAIN,
+  RAIN_COUNTS,
+  TOTAL,
+  clueScene,
+  colTotal,
+  groupScene,
+  groupsLine,
+  pairCounts,
+  pairPic,
+  pairScene,
+  pairShareSay,
+  rightFor,
+  rowTotal,
+  shareWords,
+  strongerClue,
+  testScene,
+  type CluePic,
+} from './counts';
 import { COLOR_SENTENCES, SHAPE_SENTENCES, SKINS, WORD_LABEL, WORD_OPTIONS, bagText, cardNote, groupsScene, judgeCards, sentenceRow, wordFor } from './patterns';
 
 const YES_NO: DrillOption[] = [{ id: 'yes', label: 'Yes' }, { id: 'no', label: 'No' }];
@@ -809,5 +835,249 @@ export function flagBoard(afterCard: number): DrillStep {
     misconceptions,
     confused: FLAG_CONFUSED,
     done: 'Right. A check can be right for most kids while most of its flags are false alarms.',
+  };
+}
+
+// ======================= Lesson 5 · And, or, with chances =======================
+
+/** The worked balloons: 10 of the 100 are red, and 1 in every 2 balloons is big (size does not depend on color). */
+export const BALLOONS_PIC = pairPic(BALLOONS, 10, 1, 2);
+/** The twin on the board after the example: 40 of the 100 are red, and 1 in every 4 balloons is big. */
+export const BALLOONS_TWIN = pairPic(BALLOONS, 40, 1, 4);
+export const BALLOON_SCENE = pairScene(BALLOONS_PIC);
+export const BALLOON_PICK_SCENE = pairScene(BALLOONS_PIC, { pick: { row: 0, col: 0 }, pickLabel: 'Red or big: the red row and the big column. They share one box.' });
+const BN = pairCounts(BALLOONS_PIC);
+const BC = BALLOONS_PIC.cells;
+
+/** The distinction of Lesson 5: both (one box) and either (a row and a column, the overlap once). */
+export const BOTH_VS_EITHER: Distinction = {
+  id: 'both-vs-either',
+  a: 'Both (and): the two things at once. One box of the count picture.',
+  b: 'Either (or): one thing, the other, or both. A row and a column, with their shared box counted once.',
+};
+
+export const L5_CLOSING = 'Those two are apart now. Back to the board: for each question, ask first: both, or either?';
+
+export function bothCard(): IdeaCard {
+  return {
+    title: 'Both at once',
+    scene: BALLOON_SCENE,
+    body: [
+      `Picture 100 balloons at a fair. ${BN.a} of them are red. Size does not depend on color: ${pairShareSay(BALLOONS_PIC)}.`,
+      `So of the ${BN.a} red balloons, ${shareWords(BALLOONS_PIC)} is big. That makes ${BN.both} balloons that are red and big.`,
+      '“Both” means two things at once, like red and big. Grown-ups also say “and.”',
+      'Both is one box of the count picture: where the red row meets the big column.',
+    ],
+  };
+}
+
+export function apartCard(): IdeaCard {
+  const p = BALLOONS_PIC, share = shareWords(p);
+  // The card's words: big is the same part of each row, because size does not depend on color.
+  if (BC[0][0] * BN.notA !== BC[1][0] * BN.a) throw new Error('apartCard: big must be the same part of each row');
+  return {
+    title: 'Things that do not affect each other',
+    body: [
+      `Size does not depend on color. So big is just as common in each row: ${share} red balloons, and ${share} of the rest.`,
+      `Then find both in two steps. Start with the ${BN.a} red balloons. Take the part of them that is big: ${BN.both}.`,
+      `To take ${share} of ${BN.a}, ${groupsLine(BN.a, p).charAt(0).toLowerCase()}${groupsLine(BN.a, p).slice(1)}`,
+      'If the two things did affect each other, you would need to count that box itself.',
+    ],
+  };
+}
+
+/** The contrast: the same balloons, two questions. Both is one box; either is a row and a column, the overlap once. */
+export function bothEitherContrast(): Extract<Scene, { kind: 'contrast' }> {
+  return {
+    kind: 'contrast',
+    pairs: [
+      { world: 'Red and big: both at once.', who: 'The count', says: `${BN.both} of the 100.`, truth: true, because: `Only the box where the red row meets the big column: ${BN.both}.` },
+      {
+        world: 'Red or big: one, the other, or both.',
+        who: 'The count',
+        says: `${BN.either} of the 100.`,
+        truth: true,
+        because: `The red row has ${BN.a}, and the big column has ${BN.b}. The ${BN.both} red and big balloons are in each, so count them once: ${BN.either}.`,
+      },
+    ],
+    ask: { q: 'Same 100 balloons. Why is one count so much bigger?', a: 'Both is one box. Either is a whole row and a whole column, with their shared box counted once.' },
+    words: { worldTag: 'The question', truth: 'Right count', untruth: 'Not the right count' },
+  };
+}
+
+export function bothEitherCard(): IdeaCard {
+  return {
+    title: 'Both, or either?',
+    distinction: BOTH_VS_EITHER.id,
+    scene: bothEitherContrast(),
+    body: [
+      'Same balloons, two questions. They sound alike, but they count very different things.',
+      '“Either” means one thing, the other, or both. Grown-ups also say “or.” Red or big counts the red row and the big column.',
+      `The ${BN.both} red and big balloons sit in the row and in the column. That shared box is the overlap. Count it only once.`,
+      'In this game, or always means one, the other, or both.',
+    ],
+  };
+}
+
+/** The questions on the Lesson 5 contrast board, each with its kind and its count read from the balloon picture. */
+export function bothEitherQuestions(): { id: string; says: string; kind: 'both' | 'either'; right: number; why: Record<number, string>; world: string }[] {
+  const notRedOrBig = BN.notA + BN.b - BN.bOnly;
+  return [
+    {
+      id: 'q1', says: 'How many balloons are red and big?', kind: 'both', right: BN.both, world: `Red row: ${BN.a}. Big column: ${BN.b}.`,
+      why: {
+        [BN.added]: `That adds the ${BN.a} red and the ${BN.b} big. Both is one box, where the red row meets the big column. It holds ${BN.both}.`,
+        [BN.either]: `That is the count for red or big. Both is only the box where the red row meets the big column: ${BN.both}.`,
+        [BN.a]: `That is every red balloon. Only the red ones that are big count: ${BN.both}.`,
+      },
+    },
+    {
+      id: 'q2', says: 'How many are red or big, or both?', kind: 'either', right: BN.either, world: `Red row: ${BN.a}. Big column: ${BN.b}. Shared box: ${BN.both}.`,
+      why: {
+        [BN.added]: `${BN.a} and ${BN.b} make ${BN.added}, but the ${BN.both} red and big balloons were counted twice. Take them away once: ${BN.either}.`,
+        [BN.both]: `That is only the red and big box. Or also counts the other red balloons and the other big ones: ${BN.either}.`,
+        [BN.b]: `That is only the big column. Add the ${BN.aOnly} red balloons that are not big: ${BN.either}.`,
+      },
+    },
+    {
+      id: 'q3', says: 'How many are big and not red?', kind: 'both', right: BN.bOnly, world: `Not red row: ${BN.notA}. Big column: ${BN.b}.`,
+      why: {
+        [BN.b]: `That is every big balloon. Only the big ones that are not red count: ${BN.bOnly}.`,
+        [BN.notA]: `That is every balloon that is not red. Only the ones that are big count: ${BN.bOnly}.`,
+        [notRedOrBig]: `That is the count for not red or big. This asks for both at once: one box, where the “Not red” row meets the big column. It holds ${BN.bOnly}.`,
+      },
+    },
+  ];
+}
+
+const ADD_AS_BOTH =
+  'You may be treating “red and big” and “red plus big” as the same thing. They are two different things. Both is one box: the balloons that are red and big at once. Adding gives more than all the red balloons.';
+const AND_AS_OR =
+  'You may be treating “and” and “or” as the same thing. They are two different things. And asks for both things at once: one box. Or asks for one, the other, or both: a row and a column.';
+const COUNTED_TWICE =
+  'You may be treating “red or big” and “the red row plus the big column” as the same thing. They are not the same. The red and big balloons are in the row and in the column, so adding counts them twice. Take them away once.';
+const OR_ONE_ONLY =
+  'You may be treating “or” and “one but not both” as the same thing. They are two different things. In this game, or counts the ones with both things too. So keep the overlap, but count it once.';
+
+const BOTH_EITHER_CONFUSED: ConfusedQuestion[] = [
+  {
+    q: 'A balloon is red and big. Where is it on the count picture?',
+    options: [{ label: 'In the red row and in the big column: their shared box', right: true }, { label: 'Only in the red row' }, { label: 'Not sure' }],
+    teach: 'It sits in the box where the red row meets the big column. So it is part of the row and part of the column. That box is the overlap.',
+  },
+  {
+    q: 'Does “red or big” count a balloon that is red and big?',
+    options: [{ label: 'Yes, once', right: true }, { label: 'No. Or means one but not both' }, { label: 'Not sure' }],
+    teach: 'Yes. In this game, or means one, the other, or both. So the red and big balloons count, but only once.',
+  },
+];
+
+/** Board 1, right after the contrast: for each question, both or either? Then its count, read from the picture. */
+export function bothEitherBoard(afterCard: number): DrillStep {
+  const KIND: DrillOption[] = [{ id: 'both', label: 'Both: one box' }, { id: 'either', label: 'Either: a row and a column' }];
+  const kindWhy = { both: 'This asks for both things at once. That is one box, not a row and a column.', either: 'This asks for one thing, the other, or both. That is a row and a column, with their shared box once.' };
+  const rows: DrillRow[] = bothEitherQuestions().map((q) => ({
+    id: q.id,
+    label: q.says,
+    marks: [
+      { id: `${q.id}-kind`, label: 'Both or either?', options: KIND, answer: q.kind, why: { [q.kind === 'both' ? 'either' : 'both']: kindWhy[q.kind] } },
+      {
+        id: `${q.id}-n`,
+        label: 'How many?',
+        options: numOptions(q.right, Object.keys(q.why).map(Number)),
+        answer: String(q.right),
+        why: Object.fromEntries(Object.entries(q.why)),
+        compare: { says: q.says, world: q.world },
+      },
+    ],
+  }));
+  const misconceptions: Misconception[] = [
+    { id: 'add-both', when: 'picks', picks: { 'q1-n': String(BN.added) }, text: ADD_AS_BOTH },
+    { id: 'counted-twice', when: 'picks', picks: { 'q2-n': String(BN.added) }, text: COUNTED_TWICE },
+    { id: 'and-as-or', when: 'picks', picks: { 'q1-kind': 'either' }, text: AND_AS_OR },
+    { id: 'and-as-or', when: 'picks', picks: { 'q2-kind': 'both' }, text: AND_AS_OR },
+  ];
+  return {
+    id: 's13.l5-do1',
+    title: 'Both, or either?',
+    body: ['Each question is about the balloon picture.', 'First say if it asks for both or either. Then find its count.'],
+    scene: BALLOON_SCENE,
+    afterCard,
+    distinction: BOTH_VS_EITHER.id,
+    scaffold: 'full',
+    rows,
+    words: { says: 'Asks', world: 'The counts', so: 'So', ask: 'One box, or a row and a column?', closing: L5_CLOSING },
+    misconceptions,
+    confused: BOTH_EITHER_CONFUSED,
+    done: 'Right. Both is one box. Either is a row and a column, with the overlap counted once.',
+  };
+}
+
+export function pairExampleCard(): IdeaCard {
+  const share = shareWords(BALLOONS_PIC);
+  return {
+    title: 'Example: both, then either',
+    scene: BALLOON_PICK_SCENE,
+    body: [
+      `Step 1. Red in all: ${BN.a}. Big is ${share} of all 100, so big in all: ${BN.b}.`,
+      `Step 2. Both. Of the ${BN.a} red balloons, ${share} is big: ${BN.both}. That is the red and big box.`,
+      `Step 3. Either. ${BN.a} red and ${BN.b} big make ${BN.added}. The ${BN.both} red and big balloons were counted twice, so take ${BN.both} away: ${BN.either}.`,
+      `Check by counting boxes: ${BC[0][0]} red and big, ${BC[0][1]} red and not big, and ${BC[1][0]} big and not red. They make ${BN.either}.`,
+      // The counts are the chances: one balloon picked without looking.
+      `So pick one balloon without looking. The chance it is red and big is ${BN.both} in ${TOTAL}. The chance it is red or big is ${BN.either} in ${TOTAL}.`,
+    ],
+  };
+}
+
+/** Board 2, a twin of the example: 40 red balloons and 1 in every 4 big. The boxes are blank; the learner finds them. */
+export function balloonTwinBoard(afterCard: number): DrillStep {
+  const p = BALLOONS_TWIN, T = pairCounts(p), share = shareWords(p);
+  const row = (id: string, label: string, right: number, why: Record<number, string>): DrillRow => ({
+    id,
+    label,
+    marks: [{ id: `${id}-n`, label: 'How many?', options: numOptions(right, Object.keys(why).map(Number)), answer: String(right), why: Object.fromEntries(Object.entries(why)) }],
+  });
+  return {
+    id: 's13.l5-do2',
+    title: 'More red balloons',
+    body: ['Size still does not depend on color. The boxes are blank.', 'Find big in all, then both, then either. Use the steps from the example.'],
+    scene: pairScene(p, { show: 'rows', caption: `Size still does not depend on color: ${pairShareSay(p)}.` }),
+    twin: `One thing changed: now ${T.a} of the 100 balloons are red, and ${pairShareSay(p)}.`,
+    afterCard,
+    rows: [
+      row('big', 'Big balloons in all', T.b, {
+        [p.m]: `That is the ${p.m} in “${share}.” ${groupsLine(TOTAL, p)}`,
+        [T.a]: `That is the red balloons. Big is ${share} of all 100: ${T.b}.`,
+        [T.notB]: `That is the balloons that are not big. Big is ${share} of all 100: ${T.b}.`,
+      }),
+      row('both', 'Red and big', T.both, {
+        [T.added]: `That adds ${T.a} red and ${T.b} big. Both is one box: of the ${T.a} red balloons, ${share} is big. That is ${T.both}.`,
+        [T.either]: `That is red or big. Both is only the red balloons that are big: ${T.both}.`,
+        [T.b]: `That is every big balloon. Only the red ones count: ${T.both}.`,
+      }),
+      row('either', 'Red or big, or both', T.either, {
+        [T.added]: `${T.a} and ${T.b} make ${T.added}, but the ${T.both} red and big balloons were counted twice. Take them away once: ${T.either}.`,
+        [T.one]: `That leaves out the ${T.both} red and big balloons. Or counts them too: ${T.either}.`,
+        [T.both]: `That is only the red and big box. Or counts the whole red row and the whole big column: ${T.either}.`,
+      }),
+    ],
+    misconceptions: [
+      { id: 'add-both', when: 'picks', picks: { 'both-n': String(T.added) }, text: ADD_AS_BOTH },
+      { id: 'counted-twice', when: 'picks', picks: { 'either-n': String(T.added) }, text: COUNTED_TWICE },
+      { id: 'or-one-only', when: 'picks', picks: { 'either-n': String(T.one) }, text: OR_ONE_ONLY },
+    ],
+    done: `Right. Big in all: ${T.b}. Both is one box: ${T.both}. Either: ${T.a} and ${T.b} make ${T.added}, and taking away the ${T.both} counted twice leaves ${T.either}.`,
+  };
+}
+
+export function trapsCard(): IdeaCard {
+  return {
+    title: 'Two adding traps',
+    body: [
+      'Adding sets two traps.',
+      'For both, never add the two counts. Both is one box, so it is never bigger than the red count or the big count.',
+      'For either, adding is only the first step. Take away the overlap, or you count it twice.',
+      'So ask first: both, or either? Then find one box, or a row and a column.',
+    ],
   };
 }

@@ -4,7 +4,11 @@
  * trick, every way three kids could pick from three games for the swap trick, truth tables for the circle, the story’s
  * own doors for the two-doors trick (the doors it leaves open, the pair the either-or offers, the one the NOT closes),
  * thing-by-thing counts for too few, and crowd counts for everybody says (every crowd size, every count that is
- * “most”, and the claim true or false).
+ * “most”, and the claim true or false). Lessons 5 and 6 are worked out from each story’s own sentences: a truth table
+ * over the claim (and the good twin’s fact and its if–then rule) for the tricks about people, a walk along the chain of
+ * steps (a step follows only where a rule for it is given) for the slippery slope, and the list of possible causes (an
+ * only-rule rules out every other one) for after-therefore-because. Adding what a trick’s reason leaves out turns it
+ * into a proof.
  */
 import { describe, expect, it } from 'vitest';
 import { stop12 } from '../../content/stop12';
@@ -14,41 +18,63 @@ import { SOON_WORLD, WORLD } from '../../content/world';
 import { CASES as ARG_CASES, SHAPES as ARG_SHAPES, SHAPE_IDS, STORY_TOPICS, claimText, givenTexts, holds as argHolds, isNoShape, type Arg as S18Arg } from '../puzzles/arguments';
 import { MOVE_FACT, MOVE_TAGS, ROWS, litHolds, ruleHolds, type Lit, type Move } from '../puzzles/conditionals';
 import {
+  AFTER_TOPICS,
   ALL_ARGS,
+  AUTHORITY_TOPICS,
+  CHAIN_TOPICS,
   CIRCLE_TOPICS,
   DOOR_TOPICS,
   FAMILIES,
   FLIP_TOPICS,
   HASTY_TOPICS,
+  LEAVES_OUT,
+  LESSON_TRICKS,
   LOWER_STARTS,
   MIDDLE_ONE,
   MIDDLE_TWO,
   MOVE_CLAIM,
+  ONLY_TOPICS,
+  PEOPLE_TOPICS,
+  PERSON_TOPICS,
   POPULAR_TOPICS,
+  POST_TOPICS,
+  SLOPE_TOPICS,
+  STEP_TOPICS,
   SWAP_TOPICS,
   TRICK_KINDS,
   TRUE_DOOR_TOPICS,
   TRUE_TRICK,
+  TWIST_TOPICS,
   VOTE_TOPICS,
   W_APPLES,
   W_BEE,
   W_BEE_ANT,
+  W_BELL,
+  W_CAR,
+  W_CEREAL,
   W_COIN,
   W_FASTEST,
+  W_FISH,
+  W_LAKE,
+  W_POOL,
   W_RAIN,
+  W_SNOW,
   W_SPORTS,
   W_SUN,
   W_SWAP,
   W_VOTE,
   againItem,
   mid,
+  afterArg,
   allCases,
   circleArg,
   doorArg,
   flipArg as flipOf,
   hastyArg,
   oneArg,
+  peopleArg,
   popularArg,
+  stepArg,
   swapArg,
   twoArg,
   voteArg,
@@ -63,24 +89,36 @@ import {
   trueItem,
   verdictOf,
   whyItem,
+  type AfterTopic,
   type Arg,
+  type Case,
   type DoorTopic,
   type Family,
+  type PeopleTopic,
+  type StepTopic,
   type TrickMade,
   type Verdict,
 } from '../puzzles/tricks';
 import {
+  AFTER_ROWS,
+  AFTER_VS_CAUSE,
   DOOR_ROWS,
   ENOUGH_ROWS,
   EACH_VS_ONE,
+  LEAVES_ROWS,
+  LIBRARY_ROWS,
   SAY_ROWS,
   SAY_VS_TRUE,
   TP_ROWS,
   TRUE_VS_PROVES,
   TWO_VS_ALL,
+  WHO_VS_WHAT,
+  W_FAN,
   W_LIGHTNING,
+  W_OCTOPUS,
   W_PUPPIES,
   W_SHIRTS,
+  W_SUNSCREEN,
 } from '../puzzles/trickBoards';
 import { checkDrill, marksToTap } from '../drill';
 import { looks } from '../fresh';
@@ -203,6 +241,44 @@ function crowdTopic(id: string) {
   return { crowd, vote, tied: tiedByRule(vote?.rule) };
 }
 
+/**
+ * Lesson 5, from the story’s own sentences: a truth table. The trick’s reason is a fact about something else (the one who
+ * made the claim, a claim nobody made, a famous name), so it is true in every row of the claim. The good twin’s rule
+ * “If <fact>, <claim>.” is false only in the row where the fact is true and the claim false, and its fact is true. The
+ * reason proves the claim when the claim is true in every row left.
+ */
+function peopleVerdict(t: PeopleTopic, good: boolean): Verdict {
+  const rows = [true, false].flatMap((fact) => [true, false].map((claim) => ({ fact, claim })));
+  const left = good ? rows.filter((r) => r.fact && (!r.fact || r.claim)) : rows;
+  return left.every((r) => r.claim) ? 'proves' : t.family;
+}
+/** Every Lesson 5 story, the quiz ones and the worked ones (cards and boards). */
+const peopleTopic = (id: string) => [...PEOPLE_TOPICS, W_POOL, W_LAKE, W_CEREAL, W_OCTOPUS].find((x) => x.id === id)!;
+
+/**
+ * The slippery slope, as a walk along the chain of steps: the first step happens; a step follows from the one before
+ * only where the story gives a rule for that link. Every way the next step and the end could go is kept unless a given
+ * link rules it out. The end is forced when it happens in every way kept.
+ */
+function stepVerdict(t: StepTopic): Verdict {
+  const links = t.chain ? 2 : 0;
+  const ways = [true, false].flatMap((next) => [true, false].map((end) => ({ next, end })));
+  const kept = ways.filter((w) => (links < 1 || w.next) && (links < 2 || !w.next || w.end));
+  return kept.every((w) => w.end) ? 'proves' : 'slope';
+}
+const stepTopic = (id: string) => [...STEP_TOPICS, W_FISH, W_SNOW].find((x) => x.id === id)!;
+
+/**
+ * After-therefore-because, as a list of what could have caused the second thing: the first thing, or something else.
+ * The order rules out neither. An only-rule rules out everything else. The first thing is proved to be the cause when
+ * it is the only cause left.
+ */
+function afterVerdict(t: AfterTopic): Verdict {
+  const causes = ['the first thing', 'something else'].filter((c) => !t.only || c === 'the first thing');
+  return causes.length === 1 && causes[0] === 'the first thing' ? 'proves' : 'after';
+}
+const afterTopic = (id: string) => [...AFTER_TOPICS, W_CAR, W_BELL, W_FAN, W_SUNSCREEN].find((x) => x.id === id)!;
+
 /** The verdict of any argument, worked out by its family’s second method. */
 function secondVerdict(a: Arg): Verdict {
   switch (a.family) {
@@ -229,6 +305,14 @@ function secondVerdict(a: Arg): Verdict {
     case 'popular':
       // Crowd counts: with no rule that ties the count to the claim, “most say it” leaves the claim free.
       return crowdVerdict(crowdTopic(a.topic).tied);
+    case 'person':
+    case 'twist':
+    case 'authority':
+      return peopleVerdict(peopleTopic(a.topic), a.shape.endsWith('-good'));
+    case 'slope':
+      return stepVerdict(stepTopic(a.topic));
+    case 'after':
+      return afterVerdict(afterTopic(a.topic));
   }
 }
 
@@ -288,6 +372,11 @@ describe('the model: every verdict, worked out again', () => {
       popularArg(W_LIGHTNING),
       voteArg(W_VOTE),
       voteArg(W_SHIRTS),
+      ...[W_POOL, W_LAKE, W_CEREAL, W_OCTOPUS].map((t) => peopleArg(t)),
+      peopleArg(W_POOL, true),
+      stepArg(W_FISH),
+      stepArg(W_SNOW),
+      ...[W_CAR, W_BELL, W_FAN, W_SUNSCREEN].map(afterArg),
     ];
     const lines = new Set(worked.flatMap((a) => [a.claim.text, ...a.givens.map((g) => g.text)]));
     for (const a of ALL_ARGS) for (const t of [a.claim.text, ...a.givens.map((g) => g.text)]) expect(lines.has(t), `${a.id}: “${t}”`).toBe(false);
@@ -313,7 +402,13 @@ describe('the model: every verdict, worked out again', () => {
       doors: [...DOOR_TOPICS, ...TRUE_DOOR_TOPICS],
       hasty: HASTY_TOPICS,
       popular: [...POPULAR_TOPICS, ...VOTE_TOPICS],
+      person: PERSON_TOPICS,
+      twist: TWIST_TOPICS,
+      authority: AUTHORITY_TOPICS,
+      slope: STEP_TOPICS,
+      after: AFTER_TOPICS,
     };
+    expect(Object.keys(pools).sort()).toEqual([...FAMILIES].sort());
     for (const [f, ts] of Object.entries(pools)) expect(new Set(ts.map((t) => t.skin)).size, f).toBeGreaterThanOrEqual(2);
   });
 
@@ -335,7 +430,7 @@ describe('the model: every verdict, worked out again', () => {
     }
     const all = [...bySetting.keys()];
     for (const a of all) for (const b of all) if (a !== b) expect(b.startsWith(a), `${a} / ${b}`).toBe(false);
-    const NAMES = /^(Kai|Kim|Omar’s|Tess’s|Rex|Leo|Leo’s|Blaze|Zed|Nia|Mia|Jay|Zog|Lumo|Mo|Bix|Tom|Shape|Ava’s|Ben’s|Ana|Gus|Puff|Box|Max|Tia|Sam|Rosa’s|Merla|Buzz|Pip|Lightning)$/;
+    const NAMES = /^(Kai|Kim|Omar|Omar’s|Tess’s|Rex|Leo|Leo’s|Blaze|Blaze’s|Zed|Zed’s|Nia|Mia|Jay|Zog|Lumo|Mo|Bix|Tom|Shape|Ava’s|Ben’s|Ana|Ana’s|Gus|Gus’s|Puff|Box|Card|Button|Kai’s|Max|Tia|Sam|Rosa’s|Merla|Buzz|Pip|Lightning)$/;
     for (const a of ALL_ARGS) for (const t of [...a.vars.flatMap((v) => v.values.map((x) => x.text)), a.claim.text]) {
       const w = t.split(' ')[0];
       expect(LOWER_STARTS.has(w) || NAMES.test(w), `${a.id}: “${t}”`).toBe(true);
@@ -361,7 +456,7 @@ describe('every item: the answer is the one the second method gives', () => {
   });
 
   it('name it: a good reason or one of the lesson’s two tricks, by the second method', () => {
-    const lessons: [string, Verdict[]][] = [['s12.l1', ['flip', 'not']], ['s12.l2', ['middle', 'swap']], ['s12.l3', ['circle', 'dilemma']], ['s12.l4', ['hasty', 'popular']]];
+    const lessons: [string, Verdict[]][] = [['s12.l1', ['flip', 'not']], ['s12.l2', ['middle', 'swap']], ['s12.l3', ['circle', 'dilemma']], ['s12.l4', ['hasty', 'popular']], ['s12.l5', ['person', 'twist', 'authority']], ['s12.l6', ['slope', 'after']]];
     for (const [lesson, tricks] of lessons) {
       const answers = new Set<string>();
       for (let seed = 1; seed <= SEEDS; seed++) {
@@ -376,7 +471,7 @@ describe('every item: the answer is the one the second method gives', () => {
   });
 
   it('which case shows it: the one choice that fits every given and breaks the claim', () => {
-    for (const f of ['flip', 'middle', 'swap', 'hasty', 'popular'] as Family[]) for (let seed = 1; seed <= SEEDS; seed++) {
+    for (const f of ['flip', 'middle', 'swap', 'hasty', 'popular', 'slope'] as Family[]) for (let seed = 1; seed <= SEEDS; seed++) {
       const m = caseItem(createRng(seed), f);
       const it = choose(m);
       expect(secondVerdict(m.arg), `${f} ${seed}`).not.toBe('proves');
@@ -467,7 +562,7 @@ describe('every item: the answer is the one the second method gives', () => {
       expect(m.tag).toBe('why');
       for (const c of it.choices) expect(c.label.length, c.label).toBeGreaterThan(12);
       // The wrong tricks come from other lessons, so they never sound like the right one.
-      const lessonOf = (k: string) => ({ flip: 1, not: 1, middle: 2, swap: 2, circle: 3, dilemma: 3, hasty: 4, popular: 4 })[k];
+      const lessonOf = (k: string) => ({ flip: 1, not: 1, middle: 2, swap: 2, circle: 3, dilemma: 3, hasty: 4, popular: 4, person: 5, twist: 5, authority: 5, slope: 6, after: 6 })[k];
       for (const c of it.choices) if (c.id !== 'false' && c.id !== it.answer) expect(lessonOf(c.id)).not.toBe(lessonOf(it.answer));
     }
     expect([...kinds].sort()).toEqual([...TRICK_KINDS].sort());
@@ -477,8 +572,8 @@ describe('every item: the answer is the one the second method gives', () => {
     const makers: (() => TrickMade)[] = [];
     for (let seed = 1; seed <= 60; seed++) {
       for (const f of families) makers.push(() => proveItem(createRng(seed), f), () => trueItem(createRng(seed), f), () => trueItem(createRng(seed), f, { good: true }));
-      for (const f of ['flip', 'middle', 'swap', 'hasty', 'popular'] as Family[]) makers.push(() => caseItem(createRng(seed), f));
-      for (const l of ['s12.l1', 's12.l2', 's12.l3', 's12.l4']) makers.push(() => nameItem(createRng(seed), l));
+      for (const f of ['flip', 'middle', 'swap', 'hasty', 'popular', 'slope'] as Family[]) makers.push(() => caseItem(createRng(seed), f));
+      for (const l of ['s12.l1', 's12.l2', 's12.l3', 's12.l4', 's12.l5', 's12.l6']) makers.push(() => nameItem(createRng(seed), l));
       makers.push(() => againItem(createRng(seed)), () => doorItem(createRng(seed)), () => enoughItem(createRng(seed)), () => whyItem(createRng(seed)));
     }
     for (const make of makers) {
@@ -503,7 +598,21 @@ describe('every item: the answer is the one the second method gives', () => {
   });
 
   it('wrong-answer words stand on their own: the why item names its trick, the enough hint is a marked reason', () => {
-    const names: Record<string, string> = { flip: 'the flip trick', not: 'the NOT trick', middle: 'the middle trick', swap: 'the swap trick', circle: 'the circle trick', dilemma: 'the two-doors trick', hasty: 'the too-few trick', popular: 'the everybody-says trick' };
+    const names: Record<string, string> = {
+      flip: 'the flip trick',
+      not: 'the NOT trick',
+      middle: 'the middle trick',
+      swap: 'the swap trick',
+      circle: 'the circle trick',
+      dilemma: 'the two-doors trick',
+      hasty: 'the too-few trick',
+      popular: 'the everybody-says trick',
+      person: 'attacking the person',
+      twist: 'the twisted-claim trick',
+      authority: 'the famous-name trick',
+      slope: 'the slippery slope',
+      after: 'the after-therefore-because trick',
+    };
     for (const k of TRICK_KINDS) for (let seed = 1; seed <= 20; seed++) {
       const it = choose(whyItem(createRng(seed), { kind: k }));
       // “Its claim is false” is wrong: its words end by naming the trick the reason plays, never a line cut from the middle.
@@ -728,12 +837,12 @@ describe('everybody says: crowd counts, worked out again', () => {
 
 // ---------- the stop ----------
 
-const [l1, l2, l3, l4] = stop12.lessons;
+const [l1, l2, l3, l4, l5, l6] = stop12.lessons;
 const boards = (l: typeof l1) => l.drill!;
 
 describe('the lessons', () => {
-  it('four lessons, each pass rule asks for the trap, and every planned pack holds exactly one trap', () => {
-    expect(stop12.lessons.map((l) => l.id)).toEqual(['s12.l1', 's12.l2', 's12.l3', 's12.l4']);
+  it('six lessons, each pass rule asks for the trap, and every planned pack holds exactly one trap', () => {
+    expect(stop12.lessons.map((l) => l.id)).toEqual(['s12.l1', 's12.l2', 's12.l3', 's12.l4', 's12.l5', 's12.l6']);
     for (const l of stop12.lessons) {
       expect(l.pass).toEqual({ firstTry: 3, include: [TRUE_TRICK] });
       for (let seed = 1; seed <= SEEDS; seed++) {
@@ -742,6 +851,9 @@ describe('the lessons', () => {
         expect(traps.length, `${l.id} ${seed}`).toBe(1);
         expect(traps[0].answer).toBe('trick');
         expect((traps[0].scene as Extract<Scene, { kind: 'argument' }>).realClaim).toBe(true);
+        // Lesson 5’s trap is a trick about people; Lesson 6’s is an after-therefore claim that happens to be right.
+        if (l === l5) expect(['s12.person', 's12.twist', 's12.authority']).toContain(traps[0].skill);
+        if (l === l6) expect(traps[0].skill).toBe('s12.after');
         expect(l.practice(createRng(seed))).toEqual(items);
       }
     }
@@ -753,14 +865,17 @@ describe('the lessons', () => {
       's12.l2': [/^s12\.middle$/, /^s12\.swap$/, /^s12\.(middle|swap)$/, /^s12\.(middle|swap)$/],
       's12.l3': [/^s12\.circle$/, /^s12\.dilemma$/, /^s12\.(circle|dilemma)$/, /^s12\.dilemma$/],
       's12.l4': [/^s12\.hasty$/, /^s12\.popular$/, /^s12\.(hasty|popular)$/, /^s12\.why$/],
+      's12.l5': [/^s12\.person$/, /^s12\.twist$/, /^s12\.authority$/, /^s12\.(person|twist|authority)$/, /^s12\.(person|twist|authority)$/],
+      's12.l6': [/^s12\.slope$/, /^s12\.slope$/, /^s12\.after$/, /^s12\.after$/, /^s12\.(slope|after)$/],
     };
     const skinOf = (it: Item) => ALL_ARGS.find((a) => it.prompt.startsWith(a.setting))!.skin;
     for (const l of stop12.lessons) for (let seed = 1; seed <= SEEDS; seed++) {
       const items = l.practice(createRng(seed));
-      expect(items.length).toBe(4);
+      expect(items.length).toBe(skills[l.id].length);
       items.forEach((it, k) => expect(it.skill, `${l.id} ${seed} ${k}`).toMatch(skills[l.id][k]));
       expect(new Set(items.map(skinOf)).size, `${l.id} ${seed}: skins vary`).toBeGreaterThanOrEqual(2);
-      expect(new Set(items.map(looks)).size).toBe(4);
+      expect(new Set(items.map(looks)).size).toBe(items.length);
+      expect(new Set(items.map((it) => ALL_ARGS.find((a) => it.prompt.startsWith(a.setting))!.topic)).size, `${l.id} ${seed}: a topic once per pack`).toBe(items.length);
     }
   });
 
@@ -776,6 +891,8 @@ describe('the lessons', () => {
       's12.l2': ['middle trick', 'swap trick'],
       's12.l3': ['circular reasoning', 'false dilemma'],
       's12.l4': ['hasty generalization', 'appeal to popularity'],
+      's12.l5': ['attacking the person', 'straw man', 'appeal to authority'],
+      's12.l6': ['slippery slope', 'after-therefore-because'],
     };
     for (const l of stop12.lessons) {
       expect((l.terms ?? []).map((t) => t.term)).toEqual(want[l.id]);
@@ -785,17 +902,47 @@ describe('the lessons', () => {
         expect(t.means).toMatch(/^[A-Z].*[.!?]$/);
       }
     }
+    // The grown-up words of Lessons 5 and 6 are named once, on the card of their lesson.
+    const also: Record<string, string[]> = { 's12.l5': ['ad hominem', 'straw man', 'appeal to authority'], 's12.l6': ['post hoc'] };
+    for (const [id, words] of Object.entries(also)) {
+      for (const w of words) {
+        const at = stop12.lessons.filter((l) => l.ideas.some((c) => c.body.join(' ').includes(w))).map((l) => l.id);
+        expect(at, w).toEqual([id]);
+      }
+    }
+    expect(l6.terms!.find((t) => t.term === 'after-therefore-because')!.also).toBe('post hoc');
   });
 });
 
+/** The lesson that teaches each skill (the why item belongs to Lesson 4, which asks it). */
+const SKILL_LESSON: Record<string, string> = {
+  flip: 's12.l1',
+  middle: 's12.l2',
+  swap: 's12.l2',
+  circle: 's12.l3',
+  dilemma: 's12.l3',
+  hasty: 's12.l4',
+  popular: 's12.l4',
+  why: 's12.l4',
+  person: 's12.l5',
+  twist: 's12.l5',
+  authority: 's12.l5',
+  slope: 's12.l6',
+  after: 's12.l6',
+};
+
 describe('the check, the Arcade, new examples and the warm-up', () => {
-  it('9 items: two per lesson in order, the why item last; at least one conflict; many looks per slot', () => {
+  it('9 items: one from each of Lessons 1 to 4, two from each of Lessons 5 and 6, the why item last; many looks per slot', () => {
     const slots = Array.from({ length: 9 }, () => new Set<string>());
+    const traps = new Set<string>();
     for (let seed = 1; seed <= 300; seed++) {
       const items = stop12.check!(createRng(seed));
-      expect(items.map((i) => i.lesson)).toEqual(['s12.l1', 's12.l1', 's12.l2', 's12.l2', 's12.l3', 's12.l3', 's12.l4', 's12.l4', 's12.l4']);
-      const skillLesson: Record<string, string> = { flip: 's12.l1', middle: 's12.l2', swap: 's12.l2', circle: 's12.l3', dilemma: 's12.l3', hasty: 's12.l4', popular: 's12.l4', why: 's12.l4' };
-      for (const it of items) expect(it.lesson, `${seed} ${it.skill}`).toBe(skillLesson[it.skill.replace('s12.', '')]);
+      expect(items.map((i) => i.lesson)).toEqual(['s12.l1', 's12.l2', 's12.l3', 's12.l4', 's12.l5', 's12.l5', 's12.l6', 's12.l6', 's12.l4']);
+      for (const it of items) expect(it.lesson, `${seed} ${it.skill}`).toBe(SKILL_LESSON[it.skill.replace('s12.', '')]);
+      // Two of the three tricks about people; the slippery slope, then after-therefore-because.
+      expect(items[4].skill, `${seed}`).not.toBe(items[5].skill);
+      expect([items[6].skill, items[7].skill]).toEqual(['s12.slope', 's12.after']);
+      if (items[7].tags?.includes(TRUE_TRICK.tag)) traps.add(String(seed));
       const last = items[8] as ChooseItem;
       expect(last.tags).toEqual(['why']);
       expect(last.skill).toBe('s12.why');
@@ -804,6 +951,8 @@ describe('the check, the Arcade, new examples and the warm-up', () => {
       items.forEach((it, k) => slots[k].add(looks(it)));
     }
     for (const s of slots) expect(s.size).toBeGreaterThanOrEqual(15);
+    // The after slot is Lesson 6’s trap (an after-therefore claim that happens to be right) on many seeds.
+    expect(traps.size).toBeGreaterThan(50);
   });
 
   it('one check never shows the same given or claim in two items', () => {
@@ -827,10 +976,9 @@ describe('the check, the Arcade, new examples and the warm-up', () => {
       expect(it.choices.some((c) => c.id === it.answer)).toBe(true);
       lessons.add(it.lesson);
       // An item belongs to the lesson that teaches its skill (the why item to Lesson 4, which asks it).
-      const skillLesson: Record<string, string> = { flip: 's12.l1', middle: 's12.l2', swap: 's12.l2', circle: 's12.l3', dilemma: 's12.l3', hasty: 's12.l4', popular: 's12.l4', why: 's12.l4' };
-      expect(it.lesson, it.skill).toBe(skillLesson[it.skill.replace('s12.', '')]);
+      expect(it.lesson, it.skill).toBe(SKILL_LESSON[it.skill.replace('s12.', '')]);
     }
-    expect(lessons.size).toBe(4);
+    expect(lessons.size).toBe(6);
   });
 
   it('a new example after a miss: the same skill, another topic; a pair with both answers where one answer could be repeated', () => {
@@ -885,7 +1033,7 @@ describe('the check, the Arcade, new examples and the warm-up', () => {
   });
 
   it('no quiz, check or Arcade item uses a worked example', () => {
-    const worked = [W_RAIN, W_BEE, W_BEE_ANT, W_SWAP, W_FASTEST, W_SPORTS, W_COIN, W_APPLES, W_SUN, W_VOTE, W_PUPPIES, W_LIGHTNING, W_SHIRTS].map((t) => t.setting);
+    const worked = [W_RAIN, W_BEE, W_BEE_ANT, W_SWAP, W_FASTEST, W_SPORTS, W_COIN, W_APPLES, W_SUN, W_VOTE, W_PUPPIES, W_LIGHTNING, W_SHIRTS, W_POOL, W_LAKE, W_CEREAL, W_OCTOPUS, W_FISH, W_SNOW, W_CAR, W_BELL, W_FAN, W_SUNSCREEN].map((t) => t.setting);
     for (let seed = 1; seed <= 100; seed++) {
       const items = [...stop12.lessons.flatMap((l) => l.practice(createRng(seed))), ...stop12.check!(createRng(seed)), stop12.practice!(createRng(seed))];
       for (const it of items) for (const s of worked) expect(it.prompt.startsWith(s), it.prompt).toBe(false);
@@ -1008,12 +1156,14 @@ describe('the boards: every mark worked out again', () => {
     caseBoardAnswers(boards(l1)[0], boardArg(boards(l1)[0]));
     caseBoardAnswers(boards(l2)[0], boardArg(boards(l2)[0]));
     caseBoardAnswers(boards(l2)[1], boardArg(boards(l2)[1]));
+    caseBoardAnswers(boards(l5)[0], boardArg(boards(l5)[0]));
+    caseBoardAnswers(boards(l6)[0], boardArg(boards(l6)[0]));
     for (const l of stop12.lessons) for (const b of l.drill!) expect(marksToTap(b).length, b.id).toBeLessThanOrEqual(12);
   });
 
   it('distinctions: each taught once with a contrast card and a board; Lessons 2 to 4 remind true vs proved with a card', () => {
     expect(l1.distinctions).toEqual([TRUE_VS_PROVES]);
-    for (const [l, d] of [[l2, EACH_VS_ONE], [l3, TWO_VS_ALL], [l4, SAY_VS_TRUE]] as const) {
+    for (const [l, d] of [[l2, EACH_VS_ONE], [l3, TWO_VS_ALL], [l4, SAY_VS_TRUE], [l5, WHO_VS_WHAT], [l6, AFTER_VS_CAUSE]] as const) {
       expect(l.distinctions).toEqual([d, { ...TRUE_VS_PROVES, taughtIn: 's12.l1' }]);
       expect(l.ideas.some((c) => c.distinction === TRUE_VS_PROVES.id)).toBe(true);
       const card = l.ideas.find((c) => c.distinction === d.id)!;
@@ -1033,12 +1183,193 @@ describe('the boards: every mark worked out again', () => {
     const c4 = l4.ideas.find((c) => c.distinction === SAY_VS_TRUE.id)!.scene as Extract<Scene, { kind: 'contrast' }>;
     expect(c4.pairs.map((p) => p.truth)).toEqual([true, false]);
     // The reminders: tricks whose claims are really true, drawn with True tags.
-    for (const l of [l2, l3, l4]) {
+    for (const l of [l2, l3, l4, l5, l6]) {
       const s = l.ideas.find((c) => c.distinction === TRUE_VS_PROVES.id)!.scene as Extract<Scene, { kind: 'argument' }>;
       expect(s.realClaim).toBe(true);
     }
+    expect([W_OCTOPUS.truth, W_SUNSCREEN.truth]).toEqual([true, true]);
+    // Same words, same facts, two different kids: the truth comes out the same.
+    const c5 = l5.ideas.find((c) => c.distinction === WHO_VS_WHAT.id)!.scene as Extract<Scene, { kind: 'contrast' }>;
+    expect(c5.pairs[0].says).toBe(c5.pairs[1].says);
+    expect(c5.pairs[0].world).toBe(c5.pairs[1].world);
+    expect(c5.pairs[0].who).not.toBe(c5.pairs[1].who);
+    expect(c5.pairs.map((p) => p.truth)).toEqual([libraryClaim(c5.pairs[0].says, c5.pairs[0].world), libraryClaim(c5.pairs[1].says, c5.pairs[1].world)]);
+    const c6 = l6.ideas.find((c) => c.distinction === AFTER_VS_CAUSE.id)!.scene as Extract<Scene, { kind: 'contrast' }>;
+    expect(c6.pairs.map((p) => p.truth)).toEqual([afterVerdict(W_BELL) === 'proves', afterVerdict(W_CAR) === 'proves']);
+    expect(c6.pairs.map((p) => p.truth)).toEqual([true, false]);
     expect(W_PUPPIES.truth).toBe(true);
     expect(twoGroupsFollow()).toBe(false);
+  });
+});
+
+/** A library claim, worked out from the fact’s words alone: true when the fact says the claim’s last three words. */
+function libraryClaim(says: string, fact: string): boolean {
+  const tail = says.replace(/[.!?]$/, '').toLowerCase().split(' ').slice(-3).join(' ');
+  return fact.toLowerCase().includes(tail);
+}
+/** The subject of a story’s first line: the words before “says” (“Ava”, “Puff the dragon”, “The elf”). */
+const subjectOf = (setting: string) => setting.split(' says ')[0];
+/** An argument with more givens: what a trick’s reason leaves out, added. */
+const withGivens = (a: Arg, more: { text: string; holds: (c: Case) => boolean }[]): Arg => ({ ...a, givens: [...a.givens, ...more] });
+
+describe('Lessons 5 and 6: each trick is a shape with what its reason leaves out', () => {
+  it('tricks about people: the reason is true in every case and about something else, so the claim stays free', () => {
+    for (const t of PEOPLE_TOPICS) {
+      const a = peopleArg(t);
+      // The reason crosses out no case: it says nothing about the claim.
+      expect(allCases(a).every((c) => a.givens.every((g) => g.holds(c))), t.id).toBe(true);
+      expect(allCases(a).map((c) => claimIn(a, c)).sort(), t.id).toEqual([false, true]);
+      expect(verdictOf(a), t.id).toBe(peopleVerdict(t, false));
+      expect(a.leaves, t.id).toBe(t.leaves);
+      // What the reason is about, from the story’s own words.
+      const who = subjectOf(t.setting);
+      if (t.family === 'person') expect(t.reason.split(' ')[0], `${t.id}: the reason is about ${who}`).toBe(who.split(' ')[0]);
+      if (t.family === 'twist') {
+        expect(t.retell?.toLowerCase(), `${t.id}: the speaker retells what ${who} said`).toContain(`${who.toLowerCase()} thinks`);
+        expect(a.retell).toBe(t.retell);
+      } else expect(t.retell, t.id).toBeUndefined();
+      if (t.family === 'authority') {
+        const famous = t.reason.match(/^The famous (\w+) says /)?.[1];
+        expect(famous, `${t.id}: a famous person’s word`).toBeTruthy();
+        expect(t.setting, t.id).toContain(`famous ${famous}`);
+        expect(t.other, `${t.id}: what the ${famous} knows, and what not`).toMatch(/knows about .+, not about /);
+      }
+    }
+    for (const f of ['person', 'twist', 'authority'] as const) expect(PEOPLE_TOPICS.filter((t) => t.family === f && t.fact).length, f).toBeGreaterThanOrEqual(3);
+  });
+
+  it('tricks about people: the good twin adds a fact about the claim and its rule “If <fact>, <claim>.”, and then it proves', () => {
+    for (const t of PEOPLE_TOPICS.filter((x) => x.fact)) {
+      const g = peopleArg(t, true);
+      expect(g.givens.map((x) => x.text), t.id).toEqual([`If ${mid(t.fact![0])}, ${mid(t.claim[0])}.`, t.fact![0]]);
+      expect(verdictOf(g), t.id).toBe(peopleVerdict(t, true));
+      expect(verdictOf(g)).toBe('proves');
+      expect(g.leaves, t.id).toBeUndefined();
+      // A twin only for a claim that is not really false.
+      expect(t.truth, t.id).not.toBe(false);
+    }
+  });
+
+  it('the slippery slope: no rule for any step, so the end can fail; adding the rule for each step makes a chain that proves', () => {
+    for (const t of STEP_TOPICS) {
+      const a = stepArg(t);
+      expect(verdictOf(a), t.id).toBe(stepVerdict(t));
+      expect(a.givens[0].text, t.id).toBe(t.first);
+      const links = [`If ${mid(t.first)}, ${mid(t.next[0])}.`, `If ${mid(t.next[0])}, ${mid(t.end[0])}.`];
+      if (t.chain) {
+        expect(a.givens.slice(1).map((g) => g.text), t.id).toEqual(links);
+        expect(verdictOf(a)).toBe('proves');
+      } else {
+        expect(a.givens.length, t.id).toBe(1);
+        expect(a.leaves).toBe(LEAVES_OUT.slope);
+        // The case that shows it: the next step happened, and the end did not.
+        const leak = allCases(a).find((c) => !claimIn(a, c))!;
+        expect(leak.n, t.id).toBe('yes');
+        // What it leaves out, added: a rule for each step. Then the end is forced.
+        const fixed = withGivens(a, [{ text: links[0], holds: (c) => c.n === 'yes' }, { text: links[1], holds: (c) => c.n !== 'yes' || c.e === 'yes' }]);
+        expect(verdictOf(fixed), t.id).toBe('proves');
+        // One rule is not enough: the other step can still fail.
+        expect(verdictOf(withGivens(a, [{ text: links[0], holds: (c) => c.n === 'yes' }])), t.id).toBe('slope');
+      }
+    }
+    expect(SLOPE_TOPICS.length).toBeGreaterThanOrEqual(4);
+    expect(CHAIN_TOPICS.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('after-therefore-because: the order is true in every case, so it rules out no cause; an only-rule rules out the rest', () => {
+    for (const t of AFTER_TOPICS) {
+      const a = afterArg(t);
+      expect(verdictOf(a), t.id).toBe(afterVerdict(t));
+      expect(allCases(a).every((c) => a.givens[0].holds(c)), `${t.id}: the order rules out no cause`).toBe(true);
+      expect(a.vars[0].values.map((v) => v.text)).toEqual([t.cause, t.other]);
+      if (t.only) expect(a.givens[1].text).toBe(t.only);
+      else {
+        expect(a.leaves).toBe(LEAVES_OUT.after);
+        // What it leaves out, added: a rule that nothing else could cause it. Then the cause is proved.
+        expect(verdictOf(withGivens(a, [{ text: 'Nothing else can cause it.', holds: (c) => c.k === 'yes' }])), t.id).toBe('proves');
+      }
+    }
+    expect(POST_TOPICS.filter((t) => t.truth !== false).length, 'traps: after-therefore claims that can turn out right').toBeGreaterThanOrEqual(4);
+    expect(ONLY_TOPICS.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('every Lesson 5 and 6 label (the why item’s and the name item’s) names what the reason leaves out, and each lesson names its own tricks', () => {
+    expect(LESSON_TRICKS['s12.l5']).toEqual(['person', 'twist', 'authority']);
+    expect(LESSON_TRICKS['s12.l6']).toEqual(['slope', 'after']);
+    for (let seed = 1; seed <= 60; seed++) {
+      for (const k of ['person', 'twist', 'authority', 'slope', 'after'] as const) {
+        const it = choose(whyItem(createRng(seed), { kind: k }));
+        expect(it.choices.find((c) => c.id === k)!.label, k).toContain('It leaves out');
+        // The right answer’s words name what this story’s reason leaves out.
+        expect(it.explain, `${k} ${seed}`).toContain(`It leaves out ${whyItem(createRng(seed), { kind: k }).arg.leaves}.`);
+      }
+      // Name it: the right choice for a Lesson 5 or 6 trick names what its reason leaves out.
+      for (const lesson of ['s12.l5', 's12.l6']) {
+        const it = choose(nameItem(createRng(seed), lesson, { want: 'trick' }));
+        const k = it.answer as keyof typeof LEAVES_OUT;
+        expect(LESSON_TRICKS[lesson], `${lesson} ${seed}`).toContain(k);
+        expect(it.choices.find((c) => c.id === k)!.label, `${lesson} ${seed}`).toContain(`It leaves out ${LEAVES_OUT[k]}.`);
+      }
+    }
+  });
+});
+
+describe('the boards of Lessons 5 and 6: every mark worked out again', () => {
+  it('Lesson 5: the twin with a reason about the pool proves; claims about the library by the facts, not the kid; what each trick leaves out', () => {
+    const [person, who, leaves] = boards(l5);
+    expect(person.twin?.trim()).toBeTruthy();
+    expect(person.afterCard).toBe(0);
+    expect(peopleVerdict(W_POOL, true)).toBe('proves');
+    expect(person.rows.at(-1)!.marks[0].answer).toBe('proves');
+    expect(who.distinction).toBe(WHO_VS_WHAT.id);
+    who.rows.forEach((r, k) => {
+      const row = LIBRARY_ROWS[k];
+      expect(r.marks[0].answer, r.label).toBe(libraryClaim(row.says, row.fact) ? 'yes' : 'no');
+    });
+    // Mia (late for everything) is right both times; Kim (never late) is wrong both times.
+    expect(LIBRARY_ROWS.map((r) => `${r.who}:${libraryClaim(r.says, r.fact)}`)).toEqual(['Mia:true', 'Kim:false', 'Mia:true', 'Kim:false']);
+    expect(diag(who, { 'r1-true': 'no' })).toBe('who-as-what');
+    expect(diag(who, { 'r2-true': 'yes' })).toBe('who-as-what');
+    expect(checkDrill(who, rightPicks(who)).done).toBe(true);
+    leaves.rows.forEach((r, k) => {
+      const a = LEAVES_ROWS[k];
+      expect(r.marks[0].answer, r.label).toBe(peopleVerdict(peopleTopic(a.topic), false));
+      expect(r.marks[0].options.find((o) => o.id === r.marks[0].answer)!.label.toLowerCase()).toBe(`${LEAVES_OUT[r.marks[0].answer as 'person']}.`);
+    });
+    expect(leaves.rows.map((r) => r.marks[0].answer).sort()).toEqual(['authority', 'person', 'twist']);
+    expect(checkDrill(leaves, rightPicks(leaves)).done).toBe(true);
+  });
+
+  it('Lesson 6: the chain with a rule for each step proves; after or a cause, from the order and the only-rules', () => {
+    const [chain, after] = boards(l6);
+    expect(chain.twin?.trim()).toBeTruthy();
+    expect(chain.afterCard).toBe(0);
+    expect(stepVerdict(W_SNOW)).toBe('proves');
+    expect(chain.rows.at(-1)!.marks[0].answer).toBe('proves');
+    expect(after.distinction).toBe(AFTER_VS_CAUSE.id);
+    after.rows.forEach((r, k) => {
+      const t = afterTopic(AFTER_ROWS[k].arg.topic);
+      expect(r.label.startsWith(t.after), r.label).toBe(true);
+      expect(r.marks[0].answer, `${r.id}: it came right after`).toBe('yes');
+      expect(r.marks[1].answer, r.id).toBe(afterVerdict(t) === 'proves' ? 'yes' : 'no');
+    });
+    expect(after.rows.map((r) => r.marks[1].answer)).toEqual(['yes', 'no', 'yes', 'no']);
+    expect(diag(after, { 'car-proves': 'yes' })).toBe('after-as-cause');
+    expect(diag(after, { 'sun-proves': 'yes' })).toBe('after-as-cause');
+    // The words for that mix-up end with the story’s own order and the case where something else caused it.
+    for (const t of [W_CAR, W_SUNSCREEN]) {
+      const m = after.misconceptions!.find((x) => x.text.includes(t.after))!;
+      expect(m, t.id).toBeDefined();
+      expect(m.text, t.id).toContain(mid(t.other));
+    }
+    expect(checkDrill(after, rightPicks(after)).done).toBe(true);
+  });
+
+  it('the worked tricks of Lessons 5 and 6 are tricks by the second methods, and the reminders’ claims are really true', () => {
+    for (const t of [W_POOL, W_LAKE, W_CEREAL, W_OCTOPUS]) expect(peopleVerdict(t, false), t.id).toBe(t.family);
+    expect(stepVerdict(W_FISH)).toBe('slope');
+    expect([W_CAR, W_SUNSCREEN].map(afterVerdict)).toEqual(['after', 'after']);
+    expect([W_BELL, W_FAN].map(afterVerdict)).toEqual(['proves', 'proves']);
   });
 });
 
@@ -1047,7 +1378,7 @@ function boardArg(b: DrillStep): Arg {
   const s = b.scene as Extract<Scene, { kind: 'argument' }>;
   const worked: Arg[] = [];
   for (const t of [W_RAIN]) for (const m of ['mp', 'mt', 'ac', 'da'] as Move[]) worked.push(flipOf(t, m));
-  worked.push(oneOf(true), swapOf());
+  worked.push(oneOf(true), swapOf(), peopleArg(W_POOL, true), stepArg(W_SNOW));
   const a = worked.find((x) => JSON.stringify(x.givens.map((g) => g.text)) === JSON.stringify(s.givens) && x.claim.text === s.claim);
   if (!a) throw new Error(`boardArg: ${b.id}`);
   return a;

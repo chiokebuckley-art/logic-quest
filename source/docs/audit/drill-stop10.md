@@ -20,6 +20,16 @@ lamp in every row. Two circuits do the same job when their lamps agree in every 
 twice more: against Truth Tables’ columns (a line is AND, side by side is OR, a flipper box is NOT, closed and on are
 True) and against Stop 2’s card rules over all 18 cards (`sameMeaning`). Skins: lab, everyday and fantasy.
 
+Lesson 5 adds one more way to wire two switches: a two-way pair (`TWOWAY(i, j)`, drawn as the scene part `twoway`). Each
+two-way switch has a lever that touches its top end (up) or its bottom end (down), and two wires join the ends of switch
+A to the ends of switch B. The wires cross, so A’s top end reaches B’s bottom end (`twoWayPasses` follows them). Power
+gets through when both levers touch the same wire: when the switches differ. In a row, a two-way switch’s true is up,
+the way a plain switch’s true is closed; a frame keeps two-way levers in `up` and plain switches in `closed`, and a
+table names its switch words (`inputWords`: Up and Down for the pair, True and False when the pair and plain switches
+share one table). The pair is Truth Tables’ one but not both, (A AND NOT B) OR (NOT A AND B), and Stop 2’s card rule of
+the same shape: both checks still run in `sameJob`. Lesson 5 has its own stories (`TWO_TOPICS`): a long place with a
+switch at each end.
+
 ## s10.l1 · In a line: AND
 
 **Model.** `passes(LINE(...))`: on only when every switch in the line is closed.
@@ -96,28 +106,74 @@ column, then a look-alike pair or another table.
 
 **Terms.** none. **Distinction.** `looks-vs-works`.
 
+## s10.l5 · The two-way switch (added in v0.12.0, from the logic audit)
+
+**Model.** `passes(TWO)` follows the crossed wires: on exactly when one switch is up (exclusive or). Flip either switch
+and the lamp changes. Next to side by side (plain switches with the same names), the two tables differ in one row only:
+row 1, both up next to both closed, where side by side is on and the pair is off (`differRows`).
+
+**See.** A switch at each end (a hall lamp; A up, B down, lamp on; names the two-way switch) · Follow the wires (the two
+wires cross; both up, the levers touch different wires, lamp off) · Up is not the same as on (contrast: A up in both
+panels; B down lights the lamp, B up leaves it off) · Not like side by side (side by side both closed: on; the pair both
+up: off; one but not both, named exclusive or and “exclusive or in wires”; up is like True, so the tables differ in row 1
+only) · Example: the two-way table (rows 1 and 2 worked, from `explainRow`) · From a table to a circuit (the pair’s
+table in True and False beside the three circuits; row 1 crosses out side by side and the line). Every lamp and every
+claim on these cards is worked out from the model (the card builders throw if the model disagrees).
+
+**Do.** `s10.l5-do1` “Match or differ?”, right after the contrast: twin “The two-way pair from the card. No case is set
+yet.” Four cases, each marked: do A and B match? then the lamp (8 taps, full scaffold, compare facts under each lamp).
+`s10.l5-do2` “Two-way or side by side?”, after the side-by-side card: twin “The two circuits from the card, with no case
+set, and their table.” Rows 2 and 3 are filled; the learner marks both lamps in rows 1 and 4, then the one row where they
+differ (row 1). `s10.l5-do3` “Fill the two-way table”, after the example: the lamp in rows 3 and 4, then the rule (on when
+the switches differ). `s10.l5-do4` “Which circuit has this table?”, after the pick card: twin “The same three circuits. The
+table is new: it is side by side’s.” Three lamps in row 1 and the line’s lamp in row 2, then the circuit (circuit 1, side
+by side).
+
+**Quiz.** `lampItem` with family `two` (is the lamp on or off), `compareItem` (one row on the pair and on side by side:
+which lamps are on?), `columnItem` with family `two` (fill its table; the wrong columns are side by side, a line and the
+other way round, “on when they match”), `pickItem` (which of the pair, side by side and a line has this table; the table
+is the pair’s half the time). Skill `s10.xor`. Trap tag `both-up` (the pair with both switches up, alone or next to side
+by side with both closed; a conflict item). Pack: a plain case, the trap (alone or next to side by side), the column,
+then which circuit has a table.
+
+**Mix-ups the boards name.** `up-as-on` (both up marked on), `down-as-off` (one down and one up marked off),
+`match-as-on` (the rule read as “on when they match”), `two-as-side` (the pair read like side by side in row 1),
+`one-row-enough` (a circuit picked because it matches row 1). “I’m confused”: “Switch A of a two-way pair is up. Is the
+lamp on?” (it depends on switch B) and “Both switches are up. Is the lamp on, like side by side?” (no).
+
+**Terms.** two-way switch (also: exclusive or in wires). **Distinction.** `up-vs-differ` (one switch up, against the two
+switches differing).
+
 ## The stop
 
-- **Check:** 9 items, two from each lesson, then the why item last: the trap lamp of lessons 1, 2 and 3, each followed by
-  a column, case or lamp item of the same lesson; a same-job pair and a match or column item from lesson 4. The why item
-  (`whyItem`, tag `why`) is one of line-off, side-both, flip-closed, same and differ; it is filed under that kind’s lesson
-  with that lesson’s skill (there is no separate why skill).
+- **Check:** 10 items, two from each of lessons 1 to 4, one from lesson 5, then the why item last: the trap lamp of
+  lessons 1, 2 and 3, each followed by a column, case or lamp item of the same lesson; a same-job pair and a match or
+  column item from lesson 4; from lesson 5, a row next to side by side (the trap), the pair with both up, which circuit
+  has a table, or the pair’s column. The why item (`whyItem`, tag `why`) is one of line-off, side-both, flip-closed,
+  same, differ and two-match (both switches up or both down, and the lamp off: why?); it is filed under that kind’s
+  lesson with that lesson’s skill (there is no separate why skill). Until v0.12.0 the check had 9 items.
 - **Warm-up (bridge):** a Stop 9 fill-the-column item for AND, OR or NOT (Truth Tables’ own `columnItem`, prompt starting
   “Back to Truth Tables.”), with its table board. It is stored as a Stop 9 item (`s9.l2`, skill `s9.fill`).
 - **Arcade:** one item from any lesson. **New examples:** a missed lamp gets the trap again (or the same lamp) and the other
-  lamp; a missed same-job pair gets one that agrees and one that does not; a missed why gets a why of the same lesson and
-  that lesson’s trap.
-- **Skill names:** `s10.series`, `s10.parallel`, `s10.not`, `s10.match`.
-- **World:** `src/content/world/s10.ts`. **Test:** `src/engine/__tests__/circuits.test.ts` (the model worked out again;
-  every kind in every skin; the closing why item; the warm-up; the lessons; the stop).
+  lamp; a missed same-job pair gets one that agrees and one that does not; a missed row next to side by side gets the
+  same kind of row (the trap row, or a row where the lamps agree) and then the other kind; a missed why gets a why of
+  the same lesson and that lesson’s trap.
+- **Skill names:** `s10.series`, `s10.parallel`, `s10.not`, `s10.match`, `s10.xor`.
+- **World:** `src/content/world/s10.ts` (Lesson 5: a stair light with a switch at each end, electricians wiring a
+  bedroom’s door and bed switches as a two-way pair, chip designers adding with one-but-not-both circuits; the skill
+  line is a garage with a switch by each door). **Test:** `src/engine/__tests__/circuits.test.ts` (the model worked out
+  again, the two-way pair as six ends and two crossed wires in the graph search; every kind in every skin; Lesson 5’s
+  lamp, column, row next to side by side and which-circuit items; the closing why item; the warm-up; the lessons; the
+  stop).
 
 ## Plan and code
 
-- The optional lesson 5 (XOR and a half-adder) was not built, as the plan’s status says.
+- The plan’s optional lesson 5 (XOR and a half-adder) was not built in v0.11.0. The logic audit (v0.12.0,
+  `docs/AUDIT-ADDITIONS.md`) added Lesson 5 as the two-way switch: exclusive or in wires, with no half-adder.
 - The plan’s terms are circuit, series, parallel and inverter; the code adds closed switch and open switch (l1). Lesson 4
-  has no terms.
+  has no terms. Lesson 5 adds two-way switch.
 - The plan names one distinction for the stop (two circuits that look different and compute the same table); the code
-  teaches one per lesson: `one-vs-all`, `line-vs-side`, `closed-vs-lit` and `looks-vs-works`.
+  teaches one per lesson: `one-vs-all`, `line-vs-side`, `closed-vs-lit`, `looks-vs-works` and `up-vs-differ`.
 
 ## Review
 

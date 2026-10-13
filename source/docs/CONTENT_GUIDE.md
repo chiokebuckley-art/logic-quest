@@ -291,4 +291,6 @@ Flesch-Kincaid grade of **7.0 or lower**, with no sentence over **25 words**. In
 - Most sentences under 15 words. Everyday words. Say "you".
 - Define a new word the first time it appears.
 - No idioms or emoji. US spelling.
+- No symbols in anything a kid reads. The one exception is a lesson with `symbols: true` (Truth Tables, Say it with
+  symbols), where the signs themselves are taught; read-aloud says their names.
 - Calm and encouraging, never babyish. Use "Not yet", not "Wrong".

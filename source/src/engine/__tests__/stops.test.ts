@@ -145,8 +145,8 @@ function observatorySceneText(scene: Scene | undefined): string[] {
     case 'rings': out.push(...scene.rings, scene.caption ?? ''); break;
     // A truth table (Truth Tables): its column headings, the key lines, the picked-out row's label and the caption.
     case 'table': out.push(...scene.heads, ...(scene.key ?? []), scene.markLabel ?? '', scene.caption ?? ''); break;
-    // Circuits (Circuit Lab): each frame's name, the table's headings and picked-out label, and the caption.
-    case 'circuit': out.push(...scene.circuits.map((f) => f.name ?? ''), ...(scene.table?.heads ?? []), scene.table?.markLabel ?? '', scene.caption ?? ''); break;
+    // Circuits (Circuit Lab): each frame's name, the table's headings, switch words and picked-out label, and the caption.
+    case 'circuit': out.push(...scene.circuits.map((f) => f.name ?? ''), ...(scene.table?.heads ?? []), ...(scene.table?.inputWords ?? []), scene.table?.markLabel ?? '', scene.caption ?? ''); break;
     // A count picture (Clues & Chances): the group, the row and column names, the picked part's label and the caption.
     case 'counts': out.push(scene.title, ...scene.rows, ...scene.cols, scene.pickLabel ?? '', scene.caption ?? ''); break;
     case 'lantern':
@@ -169,6 +169,9 @@ function caseProblems(c: TeachCase, where: string): string[] {
   for (const t of c.truths ?? []) if (!t.who.trim()) out.push(`${where}: truth without a name`);
   return out;
 }
+
+/** The five logic symbols. A kid reads them only in the lesson that sets LessonDef.symbols. */
+const LOGIC_SYMBOLS = /[¬∧∨→↔]/;
 
 const only = process.env.STOP ? Number(process.env.STOP) : null;
 const built = STOPS.filter((s) => s.ready && (only === null || s.n === only));
@@ -403,6 +406,20 @@ describe.each(built.map((s) => [s.n, s] as const))('stop %i', (_n, stop) => {
     expect(fkGrade(check), 'check grade').toBeLessThanOrEqual(READING.maxGrade);
   });
 
+  it('logic symbols (¬ ∧ ∨ → ↔) show only in the lesson that sets LessonDef.symbols; its words still keep the reading level above', () => {
+    const symbolLesson = (id: string) => !!stop.lessons.find((l) => l.id === id)?.symbols;
+    // What a kid reads of an item: the prose, the choices and the picture's words.
+    const itemText = (items: Item[]) => [prose(items), ...items.flatMap((it) => [...(it.kind === 'choose' || it.kind === 'multi' ? it.choices.map((c) => c.label) : []), ...observatorySceneText(it.scene)])].join('\n');
+    for (const l of lessonsOf(stop)) {
+      if (l.symbols) continue;
+      const text = [...l.ideas.flatMap((c) => [c.title, ...cardText(c)]), ...(l.drill ?? []).flatMap(drillText), itemText([1, 2, 3].flatMap((s) => l.practice(createRng(s))))].join('\n');
+      expect(text, `${l.id} shows a logic symbol`).not.toMatch(LOGIC_SYMBOLS);
+    }
+    if (onlyLesson !== null) return;
+    const items = [1, 2, 3].flatMap((s) => [...stop.check!(createRng(s)), ...(stop.practice ? [stop.practice(createRng(s))] : [])]).filter((it) => !symbolLesson(it.lesson));
+    expect(itemText(items), 'the check and the Arcade outside the symbols lesson').not.toMatch(LOGIC_SYMBOLS);
+  });
+
   stopWide('the check ends with a why item: its last item is tagged why, is a choose item, and its choices are reasons (each longer than 12 characters)', () => {
     if (WHY_PENDING.has(stop.id)) return;
     for (let seed = 1; seed <= 30; seed++) {
@@ -470,6 +487,10 @@ describe.each(built.map((s) => [s.n, s] as const))('stop %i: See -> Do -> Quiz',
       }
     }
   });
+});
+
+it('one lesson in the game sets LessonDef.symbols, the one lesson where a kid reads logic symbols: Truth Tables, Say it with symbols', () => {
+  expect(STOPS.flatMap((s) => s.lessons).filter((l) => l.symbols).map((l) => l.id)).toEqual(['s9.l7']);
 });
 
 it('the Journey lists Stop 1, Arguments, then stops 2-13 and the four Observatory rings; shown numbers follow the list', () => {

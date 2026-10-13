@@ -16,7 +16,17 @@
  *  - circle family (Lesson 3): a given that is the claim in new words;
  *  - doors family (Lesson 3): “Every kid plays soccer or swims” when some kids ride bikes (a false either-or);
  *  - hasty family (Lesson 4): a few checked, a claim about all;
- *  - popular family (Lesson 4): most people say it, so it is true.
+ *  - popular family (Lesson 4): most people say it, so it is true;
+ *  - person, twist and authority families (Lesson 5): a reason about the wrong thing. Attacking the person (the one who
+ *    made the claim), the twisted claim (a claim nobody made, knocked down) and the famous name (a famous person on a
+ *    subject they do not know). The reason is true in the story and crosses out no case, so it leaves the claim free;
+ *  - slope family (Lesson 6): the slippery slope, steps from a first one to a far-off end with no rule for any step;
+ *  - after family (Lesson 6): after-therefore-because, one thing came right after another, so it caused it.
+ *
+ * Each trick is a shape with what its reason leaves out (`Arg.leaves`, and `LEAVES_OUT` by trick): the claim’s own facts,
+ * the claim really made, what the famous person knows, a rule for each step, a reason the first thing caused the
+ * second. Adding what it leaves out turns the trick into its good twin: a fact about the claim and its rule, the rule
+ * for each step (a chain), or a rule that nothing else can cause it.
  *
  * Every family also has good reasons (twins that prove their claim), so no answer can be guessed from the family. Every
  * pack’s trap is a trick whose claim happens to be true (tag `true-trick`): the claim being true is not the reason
@@ -30,31 +40,75 @@ import { MOVE_FACT, MOVE_TAGS, type Lit, type Move } from './conditionals';
 
 export type Skin = 'everyday' | 'fantasy' | 'abstract';
 export const SKINS: readonly Skin[] = ['everyday', 'fantasy', 'abstract'];
-export type Family = 'flip' | 'middle' | 'swap' | 'circle' | 'doors' | 'hasty' | 'popular';
-export const FAMILIES: readonly Family[] = ['flip', 'middle', 'swap', 'circle', 'doors', 'hasty', 'popular'];
-/** The eight tricks. flip and not are Stop 6’s trap moves; dilemma is the doors family’s trick. */
-export type TrickKind = 'flip' | 'not' | 'middle' | 'swap' | 'circle' | 'dilemma' | 'hasty' | 'popular';
-export const TRICK_KINDS: readonly TrickKind[] = ['flip', 'not', 'middle', 'swap', 'circle', 'dilemma', 'hasty', 'popular'];
+export type Family = 'flip' | 'middle' | 'swap' | 'circle' | 'doors' | 'hasty' | 'popular' | 'person' | 'twist' | 'authority' | 'slope' | 'after';
+export const FAMILIES: readonly Family[] = ['flip', 'middle', 'swap', 'circle', 'doors', 'hasty', 'popular', 'person', 'twist', 'authority', 'slope', 'after'];
+/** The thirteen tricks. flip and not are Stop 6’s trap moves; dilemma is the doors family’s trick. */
+export type TrickKind = 'flip' | 'not' | 'middle' | 'swap' | 'circle' | 'dilemma' | 'hasty' | 'popular' | 'person' | 'twist' | 'authority' | 'slope' | 'after';
+export const TRICK_KINDS: readonly TrickKind[] = ['flip', 'not', 'middle', 'swap', 'circle', 'dilemma', 'hasty', 'popular', 'person', 'twist', 'authority', 'slope', 'after'];
 export type Verdict = 'proves' | TrickKind;
 export type Status = 'must' | 'might' | 'cant';
 
 /** The lesson that teaches each family, and its skill tag (s12.<tag>). */
-export const FAMILY_LESSON: Record<Family, string> = { flip: 's12.l1', middle: 's12.l2', swap: 's12.l2', circle: 's12.l3', doors: 's12.l3', hasty: 's12.l4', popular: 's12.l4' };
-export const FAMILY_SKILL: Record<Family, string> = { flip: 'flip', middle: 'middle', swap: 'swap', circle: 'circle', doors: 'dilemma', hasty: 'hasty', popular: 'popular' };
-/** The tricks each lesson names. */
-export const LESSON_TRICKS: Record<string, readonly [TrickKind, TrickKind]> = {
+export const FAMILY_LESSON: Record<Family, string> = {
+  flip: 's12.l1',
+  middle: 's12.l2',
+  swap: 's12.l2',
+  circle: 's12.l3',
+  doors: 's12.l3',
+  hasty: 's12.l4',
+  popular: 's12.l4',
+  person: 's12.l5',
+  twist: 's12.l5',
+  authority: 's12.l5',
+  slope: 's12.l6',
+  after: 's12.l6',
+};
+export const FAMILY_SKILL: Record<Family, string> = {
+  flip: 'flip',
+  middle: 'middle',
+  swap: 'swap',
+  circle: 'circle',
+  doors: 'dilemma',
+  hasty: 'hasty',
+  popular: 'popular',
+  person: 'person',
+  twist: 'twist',
+  authority: 'authority',
+  slope: 'slope',
+  after: 'after',
+};
+/** The tricks each lesson names (two, or three in Lesson 5). */
+export const LESSON_TRICKS: Record<string, readonly TrickKind[]> = {
   's12.l1': ['flip', 'not'],
   's12.l2': ['middle', 'swap'],
   's12.l3': ['circle', 'dilemma'],
   's12.l4': ['hasty', 'popular'],
+  's12.l5': ['person', 'twist', 'authority'],
+  's12.l6': ['slope', 'after'],
 };
 export const LESSON_FAMILIES: Record<string, readonly Family[]> = {
   's12.l1': ['flip'],
   's12.l2': ['middle', 'swap'],
   's12.l3': ['circle', 'doors'],
   's12.l4': ['hasty', 'popular'],
+  's12.l5': ['person', 'twist', 'authority'],
+  's12.l6': ['slope', 'after'],
 };
-export const KIND_FAMILY: Record<TrickKind, Family> = { flip: 'flip', not: 'flip', middle: 'middle', swap: 'swap', circle: 'circle', dilemma: 'doors', hasty: 'hasty', popular: 'popular' };
+export const KIND_FAMILY: Record<TrickKind, Family> = {
+  flip: 'flip',
+  not: 'flip',
+  middle: 'middle',
+  swap: 'swap',
+  circle: 'circle',
+  dilemma: 'doors',
+  hasty: 'hasty',
+  popular: 'popular',
+  person: 'person',
+  twist: 'twist',
+  authority: 'authority',
+  slope: 'slope',
+  after: 'after',
+};
 
 /** One value a variable can take, as a sentence: “It rained.” */
 export interface Value {
@@ -80,7 +134,31 @@ export interface Line {
 }
 
 export type FlipShape = Move;
-export type Shape = FlipShape | 'one' | 'one-good' | 'two' | 'swap' | 'swap-good' | 'circle' | 'circle-good' | 'doors' | 'doors-good' | 'few' | 'all-checked' | 'popular' | 'vote';
+export type Shape =
+  | FlipShape
+  | 'one'
+  | 'one-good'
+  | 'two'
+  | 'swap'
+  | 'swap-good'
+  | 'circle'
+  | 'circle-good'
+  | 'doors'
+  | 'doors-good'
+  | 'few'
+  | 'all-checked'
+  | 'popular'
+  | 'vote'
+  | 'person'
+  | 'person-good'
+  | 'twist'
+  | 'twist-good'
+  | 'authority'
+  | 'authority-good'
+  | 'slope'
+  | 'chain'
+  | 'after'
+  | 'only';
 
 /** An argument: a topic in a shape, with its cases. */
 export interface Arg {
@@ -109,6 +187,13 @@ export interface Arg {
   picture?: string;
   /** Everybody says: what would really settle the claim (a fact to check, never a count of people). */
   settle?: string;
+  /** The twisted claim: how the speaker retells the claim before answering it. The question says it before the reason. */
+  retell?: string;
+  /**
+   * Lessons 5 and 6: what this trick’s reason leaves out, in a few words (“anything about the pool”, “a reason for each
+   * step”). Its good twin adds it, and then the givens force the claim.
+   */
+  leaves?: string;
 }
 
 /** Every case, in order: the first variable changes slowest. */
@@ -172,7 +257,10 @@ export const provesOf = (arg: Arg) => verdictOf(arg) === 'proves';
 
 export const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 /** Words that start a sentence and go lower case in the middle of one. Names keep their capital. */
-export const LOWER_STARTS = new Set(['The', 'This', 'It', 'A', 'An', 'All', 'Every', 'No', 'Most', 'One', 'Each', 'Both', 'If', 'Smoke', 'Recess', 'Some', 'Seven', 'Bats', 'At', 'Scientists', 'Pizza', 'Lightning']);
+export const LOWER_STARTS = new Set([
+  'The', 'This', 'It', 'A', 'An', 'All', 'Every', 'No', 'Most', 'One', 'Each', 'Both', 'If', 'Smoke', 'Recess', 'Some', 'Seven', 'Bats', 'At', 'Scientists', 'Pizza', 'Lightning',
+  'Other', 'School', 'Washing', 'Clouds', 'Dust', 'Sunlight', 'Cold', 'Something',
+]);
 /** A sentence in the middle of another, with no end mark: “The bell rang.” -> “the bell rang”. */
 export function mid(text: string): string {
   const s = text.replace(/[.!?]$/, '');
@@ -765,6 +853,243 @@ export function voteArg(t: VoteTopic): Arg {
   };
 }
 
+// ---------- Lesson 5: tricks about people ----------
+
+/** The rule a good twin adds: “If <fact>, <claim>.” Built from the two sentences, so its words always match its logic. */
+export const ruleOf = (fact: string, claim: string) => `If ${mid(fact)}, ${mid(claim)}.`;
+
+export type PeopleFamily = 'person' | 'twist' | 'authority';
+/**
+ * Lesson 5: a reason about the wrong thing. Attacking the person (a reason about the one who made the claim), the
+ * twisted claim (a reason that knocks down a claim nobody made, after the speaker retells it) and the famous name (a
+ * famous person’s word on a subject they do not know). The reason is true in the story and crosses out no case, so the
+ * claim can be true or false: the reason leaves out the claim’s own facts. The good twin keeps the story and gives a
+ * reason about the claim itself: a fact, and the rule “If <fact>, <claim>.”
+ */
+export interface PeopleTopic {
+  id: string;
+  skin: Skin;
+  family: PeopleFamily;
+  speaker: string;
+  /** The first line: who made the claim (attacking the person, the twisted claim), or who the famous person is. */
+  setting: string;
+  /** The twisted claim: how the speaker retells the claim (“Ben says Ana thinks the bus will never come.”). */
+  retell?: string;
+  /** The trick’s reason: true in the story, and about something other than the claim. */
+  reason: string;
+  /** The claim and its NOT. */
+  claim: Pair;
+  /** How the reason can be true and the claim false (shown under that case). */
+  other: string;
+  /** What the reason leaves out, in this story: “anything about the pool”. */
+  leaves: string;
+  /** The good twin’s fact about the claim itself, and its NOT. None when the claim is really false. */
+  fact?: Pair;
+  truth?: boolean;
+}
+const ppl = (o: PeopleTopic): PeopleTopic => o;
+
+export const PERSON_TOPICS: readonly PeopleTopic[] = [
+  ppl({ id: 'museum', skin: 'everyday', family: 'person', speaker: 'Ben', setting: 'Ava says the science museum is free on Sundays.', reason: 'Ava always forgets her lunch.', claim: ['The science museum is not free on Sundays.', 'The science museum is free on Sundays.'], other: 'Ava can forget her lunch and still know what the museum costs.', leaves: 'anything about what the museum costs', fact: ['The museum sign lists a price for Sundays.', 'The museum sign lists no price for Sundays.'] }),
+  ppl({ id: 'gametime', skin: 'everyday', family: 'person', speaker: 'Rosa', setting: 'Omar says the soccer game starts at ten.', reason: 'Omar missed the bus twice this week.', claim: ['The soccer game does not start at ten.', 'The soccer game starts at ten.'], other: 'Missing the bus has nothing to do with when the game starts.', leaves: 'anything about when the game starts', fact: ['The team schedule says the game starts at noon.', 'The team schedule does not say noon.'] }),
+  ppl({ id: 'moonair', skin: 'everyday', family: 'person', speaker: 'Kai', setting: 'Gus says the moon has no air.', reason: 'Gus is only eight years old.', claim: ['The moon has air.', 'The moon has no air.'], other: 'A kid who is eight can know a true fact about space.', leaves: 'anything about the moon', truth: false }),
+  ppl({ id: 'cave', skin: 'fantasy', family: 'person', speaker: 'The troll', setting: 'Puff the dragon says the cave is empty.', reason: 'Puff has a squeaky voice.', claim: ['The cave is not empty.', 'The cave is empty.'], other: 'A squeaky voice says nothing about what is in the cave.', leaves: 'anything about the cave', fact: ['The troll hears snoring in the cave.', 'The troll hears no snoring in the cave.'] }),
+  ppl({ id: 'oldmap', skin: 'fantasy', family: 'person', speaker: 'Zed', setting: 'Tia the elf says the castle is north of the woods.', reason: 'Tia is the smallest elf in the village.', claim: ['The castle is not north of the woods.', 'The castle is north of the woods.'], other: 'Being small has nothing to do with where the castle is.', leaves: 'anything about where the castle is', fact: ['The old map shows the castle south of the woods.', 'The old map does not show the castle south of the woods.'] }),
+  ppl({ id: 'redcard', skin: 'abstract', family: 'person', speaker: 'Gus', setting: 'Pim says Card 3 in the row is red.', reason: 'Pim just started playing this game.', claim: ['Card 3 is not red.', 'Card 3 is red.'], other: 'A new player can still see what color a card is.', leaves: 'anything about Card 3', fact: ['Card 3 is blue.', 'Card 3 is not blue.'] }),
+];
+export const TWIST_TOPICS: readonly PeopleTopic[] = [
+  ppl({ id: 'busstop', skin: 'everyday', family: 'twist', speaker: 'Ben', setting: 'Ana says the school bus may be a few minutes late today.', retell: 'Ben says Ana thinks the bus will never come.', reason: 'The bus always comes in the end.', claim: ['The bus is on time today.', 'The bus is a few minutes late today.'], other: 'Ana never said the bus would not come. It can come and still be late.', leaves: 'what Ana really said: a few minutes late', fact: ['The bus stops at the corner at eight.', 'The bus does not stop at the corner at eight.'] }),
+  ppl({ id: 'soup', skin: 'everyday', family: 'twist', speaker: 'Mia', setting: 'Leo says the soup is a little too salty.', retell: 'Mia says Leo thinks the soup is pure salt.', reason: 'The soup is not pure salt.', claim: ['The soup is not too salty.', 'The soup is a little too salty.'], other: 'Leo never said the soup was pure salt. Soup can be a little too salty.', leaves: 'what Leo really said: a little too salty', fact: ['The soup has just one pinch of salt.', 'The soup has more than one pinch of salt.'] }),
+  ppl({ id: 'fly', skin: 'fantasy', family: 'twist', speaker: 'The knight', setting: 'The elf says Puff can fly a short way.', retell: 'The knight says the elf thinks Puff can fly to the moon.', reason: 'No dragon can fly to the moon.', claim: ['Puff can’t fly at all.', 'Puff can fly a short way.'], other: 'The elf said a short way, not to the moon.', leaves: 'what the elf really said: a short way', fact: ['Puff has no wings.', 'Puff has wings.'] }),
+  ppl({ id: 'sleepy', skin: 'fantasy', family: 'twist', speaker: 'Zed', setting: 'Tia says the blue potion may make you a bit sleepy.', retell: 'Zed says Tia thinks it puts you to sleep for a hundred years.', reason: 'The blue potion does not put you to sleep for a hundred years.', claim: ['The blue potion does not make you sleepy.', 'The blue potion makes you a bit sleepy.'], other: 'Tia said a bit sleepy, not a hundred years.', leaves: 'what Tia really said: a bit sleepy', fact: ['The blue potion is only water.', 'The blue potion is not only water.'] }),
+  ppl({ id: 'heavybox', skin: 'abstract', family: 'twist', speaker: 'Pim', setting: 'Max says Box A is a little heavier than Box B.', retell: 'Pim says Max thinks Box A weighs a ton.', reason: 'Box A does not weigh a ton.', claim: ['Box A is not heavier than Box B.', 'Box A is a little heavier than Box B.'], other: 'Max said a little heavier, not a ton.', leaves: 'what Max really said: a little heavier', fact: ['The scale shows the two boxes weigh the same.', 'The scale does not show the two boxes weigh the same.'] }),
+];
+export const AUTHORITY_TOPICS: readonly PeopleTopic[] = [
+  ppl({ id: 'teeth', skin: 'everyday', family: 'authority', speaker: 'Ana', setting: 'A famous skater is in a toothpaste ad.', reason: 'The famous skater says this toothpaste keeps teeth the cleanest.', claim: ['This toothpaste keeps teeth the cleanest.', 'This toothpaste does not keep teeth the cleanest.'], other: 'A skater knows about skating, not about teeth.', leaves: 'whether the skater knows about teeth', fact: ['The dentist test puts this toothpaste first.', 'The dentist test does not put this toothpaste first.'] }),
+  ppl({ id: 'juice', skin: 'everyday', family: 'authority', speaker: 'Leo', setting: 'A famous singer is in a juice ad.', reason: 'The famous singer says this juice makes you smarter.', claim: ['This juice makes you smarter.', 'This juice does not make you smarter.'], other: 'A singer knows about songs, not about how kids learn.', leaves: 'whether the singer knows about how kids learn', truth: false }),
+  ppl({ id: 'snowchef', skin: 'everyday', family: 'authority', speaker: 'Omar', setting: 'A famous chef talks about the weather on the radio.', reason: 'The famous chef says it will snow tomorrow.', claim: ['It snows the next day.', 'It does not snow the next day.'], other: 'A chef knows about cooking, not about weather.', leaves: 'whether the chef knows about weather' }),
+  ppl({ id: 'ropebridge', skin: 'fantasy', family: 'authority', speaker: 'The goat', setting: 'A famous dancer visits the old rope bridge.', reason: 'The famous dancer says the rope bridge is safe to cross.', claim: ['The rope bridge is safe to cross.', 'The rope bridge is not safe to cross.'], other: 'A dancer knows about dancing, not about bridges.', leaves: 'whether the dancer knows about bridges', fact: ['The bridge builder finds no worn ropes.', 'The bridge builder finds a worn rope.'] }),
+  ppl({ id: 'hiccups', skin: 'fantasy', family: 'authority', speaker: 'An elf', setting: 'A famous knight visits the potion shop.', reason: 'The famous knight says the green potion stops hiccups.', claim: ['The green potion stops hiccups.', 'The green potion does not stop hiccups.'], other: 'A knight knows about horses and castles, not about potions.', leaves: 'whether the knight knows about potions', fact: ['The potion maker’s book says the green potion stops hiccups.', 'The potion maker’s book says nothing about hiccups.'] }),
+  ppl({ id: 'puzzle', skin: 'abstract', family: 'authority', speaker: 'Ivy', setting: 'A famous painter looks at Max’s number puzzle.', reason: 'The famous painter says the answer is 12.', claim: ['The answer to Max’s puzzle is 12.', 'The answer to Max’s puzzle is not 12.'], other: 'A painter knows about painting, not about number puzzles.', leaves: 'whether the painter knows about number puzzles', fact: ['The number 12 fits every clue.', 'The number 12 does not fit every clue.'] }),
+];
+export const PEOPLE_TOPICS: readonly PeopleTopic[] = [...PERSON_TOPICS, ...TWIST_TOPICS, ...AUTHORITY_TOPICS];
+
+/** The worked examples (cards and boards only, never a quiz): Mia and the pool, Leo and the lake, a singer on a cereal box. */
+export const W_POOL = ppl({ id: 'w-pool', skin: 'everyday', family: 'person', speaker: 'Leo', setting: 'Mia says the pool opens at noon today.', reason: 'Mia is late for everything.', claim: ['The pool does not open at noon today.', 'The pool opens at noon today.'], other: 'Mia can be late and still be right about the pool.', leaves: 'anything about the pool', fact: ['The pool sign says one o’clock.', 'The pool sign does not say one o’clock.'] });
+export const W_LAKE = ppl({ id: 'w-lake', skin: 'everyday', family: 'twist', speaker: 'Mia', setting: 'Leo says the lake is warm enough for a swim.', retell: 'Mia says Leo thinks the lake is as hot as a bath.', reason: 'The lake is not as hot as a bath.', claim: ['The lake is too cold for a swim.', 'The lake is warm enough for a swim.'], other: 'Leo never said the lake was as hot as a bath.', leaves: 'what Leo really said: warm enough for a swim' });
+export const W_CEREAL = ppl({ id: 'w-cereal', skin: 'everyday', family: 'authority', speaker: 'Kai', setting: 'A famous singer is on a cereal box.', reason: 'The famous singer says this cereal is the healthiest one.', claim: ['This cereal is the healthiest one.', 'This cereal is not the healthiest one.'], other: 'The singer knows about songs, not about food.', leaves: 'whether the singer knows about food' });
+
+/** A Lesson 5 argument: the trick (a reason about the wrong thing), or with good: true its twin (a fact and its rule). */
+export function peopleArg(t: PeopleTopic, good = false): Arg {
+  const base = {
+    topic: t.id,
+    family: t.family,
+    skin: t.skin,
+    setting: t.setting,
+    speaker: t.speaker,
+    claim: line(t.claim[0], (c: Case) => isYes(c, 'c')),
+    claimMid: mid(t.claim[0]),
+    ...(t.truth !== undefined ? { truth: t.truth } : {}),
+  };
+  if (good) {
+    if (!t.fact) throw new Error(`peopleArg: ${t.id} has no good twin`);
+    return {
+      ...base,
+      id: `${t.id}:${t.family}-good`,
+      shape: `${t.family}-good` as Shape,
+      vars: [yesNo('w', t.fact), yesNo('c', t.claim)],
+      givens: [line(ruleOf(t.fact[0], t.claim[0]), (c) => !isYes(c, 'w') || isYes(c, 'c')), line(t.fact[0], (c) => isYes(c, 'w'))],
+    };
+  }
+  return {
+    ...base,
+    id: `${t.id}:${t.family}`,
+    shape: t.family,
+    vars: [yesNo('c', t.claim)],
+    // True in the story, whatever the claim: it is about something else, so it crosses out no case.
+    givens: [line(t.reason, () => true)],
+    note: (c) => (isYes(c, 'c') ? undefined : `How? ${t.other}`),
+    leaves: t.leaves,
+    ...(t.retell ? { retell: t.retell } : {}),
+  };
+}
+
+// ---------- Lesson 6: tricks about time ----------
+
+/**
+ * Lesson 6: steps from a first one (it happens in the story) through a next step to an end (the claim). The slippery
+ * slope gives no rule for any step, so every case is left and the end can fail: it leaves out a reason for each step. A
+ * chain (its good twin) gives the rule for each step, “If <first>, <next>.” and “If <next>, <end>.”, and forces the end.
+ */
+export interface StepTopic {
+  id: string;
+  skin: Skin;
+  speaker: string;
+  setting: string;
+  /** The first step: it happens in the story. */
+  first: string;
+  /** The next step, and its NOT. */
+  next: Pair;
+  /** The last step (the claim), and its NOT. */
+  end: Pair;
+  /** The steps in a few words, shown under the picture: “Ana’s fish, then more pets, then a zoo”. */
+  steps: string;
+  /** A slippery slope: how the last step can fail after the next one happens. */
+  other?: string;
+  /** A chain: each step comes with its rule, so the reason proves its claim. */
+  chain?: true;
+  truth?: boolean;
+}
+const stp = (o: StepTopic): StepTopic => o;
+/** The rule for each step: what a slippery slope leaves out, and what a chain gives. */
+export const linkRules = (t: StepTopic): [string, string] => [ruleOf(t.first, t.next[0]), ruleOf(t.next[0], t.end[0])];
+
+export const SLOPE_TOPICS: readonly StepTopic[] = [
+  stp({ id: 'brothergame', skin: 'everyday', speaker: 'Kai', setting: 'Kai’s little brother asks to play Kai’s game once.', first: 'Kai lets his brother play once.', next: ['Kai’s brother asks to play every day.', 'Kai’s brother does not ask again.'], end: ['Kai never gets a turn again.', 'Kai still gets his turns.'], steps: 'one game, then every day, then no turns for Kai', other: 'Kai and his brother can take turns.', truth: false }),
+  stp({ id: 'puppy', skin: 'everyday', speaker: 'Rosa’s dad', setting: 'Rosa’s family has a new puppy.', first: 'Rosa lets the puppy on the couch once.', next: ['The puppy jumps on the couch every day.', 'The puppy stays off the couch.'], end: ['The puppy sleeps on the couch every night.', 'The puppy sleeps in its own bed.'], steps: 'the couch once, then every day, then every night', other: 'Rosa can still teach the puppy to sleep in its own bed.' }),
+  stp({ id: 'practice', skin: 'everyday', speaker: 'Sam’s coach', setting: 'Sam wants to skip one swim practice.', first: 'Sam skips one practice.', next: ['Sam skips the next practice too.', 'Sam comes to the next practice.'], end: ['Sam quits the swim team.', 'Sam stays on the swim team.'], steps: 'one missed practice, then another, then quitting', other: 'Sam can miss two days and still love the team.' }),
+  stp({ id: 'onecookie', skin: 'fantasy', speaker: 'The baker', setting: 'A dragon asks the village for one cookie.', first: 'The village gives the dragon one cookie.', next: ['The dragon asks for a cookie every day.', 'The dragon never asks again.'], end: ['The dragon eats every cookie in the village.', 'The village keeps most of its cookies.'], steps: 'one cookie, then one a day, then every cookie', other: 'The village can say no to more cookies.' }),
+  stp({ id: 'onespell', skin: 'fantasy', speaker: 'Zed’s owl', setting: 'Tia asks Zed to teach her one easy spell.', first: 'Zed teaches Tia one easy spell.', next: ['Tia wants to learn every spell.', 'Tia is happy with one spell.'], end: ['Tia takes over the wizard tower.', 'Tia does not take over the wizard tower.'], steps: 'one spell, then every spell, then the whole tower', other: 'Tia can learn lots of spells and never want the tower.', truth: false }),
+  stp({ id: 'goats', skin: 'fantasy', speaker: 'The troll', setting: 'One goat asks to cross the troll’s bridge.', first: 'The troll lets one goat cross.', next: ['Every goat in the hills comes to cross.', 'No other goat comes.'], end: ['The bridge falls down.', 'The bridge stays up.'], steps: 'one goat, then every goat, then a fallen bridge', other: 'The bridge can hold lots of goats, one at a time.', truth: false }),
+];
+export const CHAIN_TOPICS: readonly StepTopic[] = [
+  stp({ id: 'flat', skin: 'everyday', speaker: 'Mia’s dad', setting: 'Mia finds a flat tire on her bike.', first: 'Mia’s bike tire is flat.', next: ['Mia can’t ride her bike.', 'Mia can ride her bike.'], end: ['Mia walks to school.', 'Mia does not walk to school.'], steps: 'a flat tire, then no bike, then a walk', chain: true }),
+  stp({ id: 'poweroff', skin: 'everyday', speaker: 'Omar’s mom', setting: 'The power goes out at Omar’s house.', first: 'The power is out.', next: ['The lamps are dark.', 'The lamps are lit.'], end: ['Omar uses a flashlight.', 'Omar does not use a flashlight.'], steps: 'no power, then dark lamps, then a flashlight', chain: true }),
+  stp({ id: 'crystal', skin: 'fantasy', speaker: 'An elf', setting: 'A full moon rises over the elf village.', first: 'The moon is full tonight.', next: ['The crystal bridge glows.', 'The crystal bridge does not glow.'], end: ['The elves hold a dance.', 'The elves do not hold a dance.'], steps: 'a full moon, then a glowing bridge, then a dance', chain: true }),
+  stp({ id: 'owls', skin: 'fantasy', speaker: 'Tia', setting: 'Zed rings the big bell in the wizard tower.', first: 'Zed rings the big bell.', next: ['The owls wake up.', 'The owls stay asleep.'], end: ['The owls fly to the roof.', 'The owls do not fly to the roof.'], steps: 'the bell, then awake owls, then owls on the roof', chain: true }),
+  stp({ id: 'cardsteps', skin: 'abstract', speaker: 'Ivy', setting: 'Max plays a board game with card rules.', first: 'Max draws a red card.', next: ['Max moves two spaces.', 'Max does not move two spaces.'], end: ['Max lands on the star.', 'Max does not land on the star.'], steps: 'a red card, then two spaces, then the star', chain: true }),
+];
+export const STEP_TOPICS: readonly StepTopic[] = [...SLOPE_TOPICS, ...CHAIN_TOPICS];
+/** The worked slope (Ana’s fish) and the worked chain (a snow day). */
+export const W_FISH = stp({ id: 'w-fish', skin: 'everyday', speaker: 'Leo', setting: 'Ana asks to bring her fish to class.', first: 'Ms. Lee lets Ana bring her fish.', next: ['Other kids ask to bring pets.', 'No other kid asks to bring a pet.'], end: ['The class turns into a zoo.', 'The class does not turn into a zoo.'], steps: 'Ana’s fish, then more pets, then a zoo', other: 'Ms. Lee can say no to the other pets.' });
+export const W_SNOW = stp({ id: 'w-snow', skin: 'everyday', speaker: 'Kai’s mom', setting: 'It snowed all night in Kai’s town.', first: 'It snowed a lot last night.', next: ['School is closed today.', 'School is open today.'], end: ['Kai goes sledding.', 'Kai does not go sledding.'], steps: 'lots of snow, then no school, then sledding', chain: true });
+
+/** A Lesson 6 step argument: a slippery slope, or a chain when every step has its rule. */
+export function stepArg(t: StepTopic): Arg {
+  const [r1, r2] = linkRules(t);
+  // The first step happens in the story. A chain adds the rule for each step.
+  const first = line(t.first, () => true);
+  const givens = t.chain ? [first, line(r1, (c) => isYes(c, 'n')), line(r2, (c) => !isYes(c, 'n') || isYes(c, 'e'))] : [first];
+  return {
+    id: `${t.id}:${t.chain ? 'chain' : 'slope'}`,
+    topic: t.id,
+    family: 'slope',
+    shape: t.chain ? 'chain' : 'slope',
+    skin: t.skin,
+    setting: t.setting,
+    speaker: t.speaker,
+    vars: [yesNo('n', t.next), yesNo('e', t.end)],
+    givens,
+    claim: line(t.end[0], (c) => isYes(c, 'e')),
+    claimMid: mid(t.end[0]),
+    picture: `The steps: ${t.steps}.`,
+    ...(t.chain ? {} : { note: (c: Case) => (isYes(c, 'n') && !isYes(c, 'e') ? `How? ${t.other}` : undefined), leaves: 'a reason for each step' }),
+    ...(t.truth !== undefined ? { truth: t.truth } : {}),
+  };
+}
+
+/**
+ * Lesson 6: one thing came right after another (true in the story, in every case), so the first caused it. The cases are
+ * what caused the second thing: the first thing, or something else. After-therefore-because leaves out a reason the
+ * first thing was the cause. Its good twin adds a rule that nothing else can cause it.
+ */
+export interface AfterTopic {
+  id: string;
+  skin: Skin;
+  speaker: string;
+  setting: string;
+  /** The given: one thing came right after another. */
+  after: string;
+  /** The claim: the first thing caused the second. */
+  cause: string;
+  /** The other case: something else caused it. */
+  other: string;
+  /** A good reason: a rule that nothing else can cause it. */
+  only?: string;
+  truth?: boolean;
+}
+const aft = (o: AfterTopic): AfterTopic => o;
+export const POST_TOPICS: readonly AfterTopic[] = [
+  aft({ id: 'socks', skin: 'everyday', speaker: 'Gus', setting: 'Gus wears his blue socks to the soccer game.', after: 'Gus’s team won after he put on his blue socks.', cause: 'Gus’s blue socks made his team win.', other: 'The team played well, and the socks did nothing.', truth: false }),
+  aft({ id: 'sneeze', skin: 'everyday', speaker: 'Omar’s sister', setting: 'A cat walks into Omar’s room.', after: 'Omar sneezed right after the cat walked in.', cause: 'The cat made Omar sneeze.', other: 'Dust made Omar sneeze, not the cat.' }),
+  aft({ id: 'coat', skin: 'everyday', speaker: 'Leo', setting: 'Leo puts on his coat on a cold morning.', after: 'Leo felt warm right after he put on his coat.', cause: 'The coat made Leo feel warm.', other: 'The sun came out and warmed Leo, not the coat.' }),
+  aft({ id: 'plant', skin: 'everyday', speaker: 'Ava', setting: 'Ava waters her bean plant every day.', after: 'The bean plant grew tall after Ava watered it.', cause: 'The water helped the bean plant grow.', other: 'Sunlight made the plant grow, not the water.', truth: true }),
+  aft({ id: 'roar', skin: 'fantasy', speaker: 'The knight', setting: 'Blaze the dragon roars at dawn.', after: 'The sun came up right after Blaze roared.', cause: 'Blaze’s roar made the sun come up.', other: 'The sun comes up every morning, roar or no roar.', truth: false }),
+  aft({ id: 'tapdoor', skin: 'fantasy', speaker: 'Tia', setting: 'Zed taps the old door with his wand.', after: 'The old door swung open right after Zed tapped it.', cause: 'Zed’s tap made the old door open.', other: 'The wind blew the old door open, not the tap.' }),
+  aft({ id: 'song', skin: 'fantasy', speaker: 'The goat', setting: 'The troll sings by the river.', after: 'It snowed right after the troll sang.', cause: 'The troll’s song made it snow.', other: 'Cold clouds made it snow, not the song.', truth: false }),
+  aft({ id: 'lighta', skin: 'abstract', speaker: 'Max', setting: 'Max presses Button 1 on a panel of lights.', after: 'Light A came on right after Max pressed Button 1.', cause: 'Button 1 turned on Light A.', other: 'A timer turned on Light A, not Button 1.' }),
+];
+export const ONLY_TOPICS: readonly AfterTopic[] = [
+  aft({ id: 'lampflip', skin: 'everyday', speaker: 'Leo’s sister', setting: 'Leo flips the switch by his bed.', after: 'The lamp came on right after Leo flipped the switch.', cause: 'Leo’s flip turned on the lamp.', other: 'Something else turned on the lamp.', only: 'Nothing but this switch can turn on the lamp.' }),
+  aft({ id: 'whistle', skin: 'everyday', speaker: 'Ana', setting: 'The swim coach blows her whistle.', after: 'The swimmers stopped right after the coach blew her whistle.', cause: 'The whistle made the swimmers stop.', other: 'Something else made the swimmers stop.', only: 'Here, only the whistle can make the swimmers stop.' }),
+  aft({ id: 'gatespell', skin: 'fantasy', speaker: 'An elf', setting: 'Merla says the magic word at the garden gate.', after: 'The garden gate opened right after Merla said the magic word.', cause: 'The magic word opened the garden gate.', other: 'Something else opened the garden gate.', only: 'Nothing but the magic word can open this gate.' }),
+  aft({ id: 'buttonb', skin: 'abstract', speaker: 'Ivy', setting: 'Ivy presses Button 2 on a toy panel.', after: 'Light B came on right after Ivy pressed Button 2.', cause: 'Button 2 turned on Light B.', other: 'Something else turned on Light B.', only: 'Light B is wired to Button 2 and nothing else.' }),
+];
+export const AFTER_TOPICS: readonly AfterTopic[] = [...POST_TOPICS, ...ONLY_TOPICS];
+/** The worked trick (rain after a car wash) and the worked good reason (a doorbell only its button rings). */
+export const W_CAR = aft({ id: 'w-car', skin: 'everyday', speaker: 'Kai’s sister', setting: 'Kai washes the family car.', after: 'It rained right after Kai washed the car.', cause: 'Washing the car made it rain.', other: 'Clouds made it rain, not the car wash.', truth: false });
+export const W_BELL = aft({ id: 'w-bell', skin: 'everyday', speaker: 'Ana', setting: 'Ana presses the button by her front door.', after: 'The doorbell rang right after Ana pressed the button.', cause: 'Ana’s press made the doorbell ring.', other: 'Something else made the doorbell ring.', only: 'Nothing but the button can ring this doorbell.' });
+
+/** A Lesson 6 after argument: after-therefore-because, or with an only-rule its good twin. */
+export function afterArg(t: AfterTopic): Arg {
+  return {
+    id: `${t.id}:${t.only ? 'only' : 'after'}`,
+    topic: t.id,
+    family: 'after',
+    shape: t.only ? 'only' : 'after',
+    skin: t.skin,
+    setting: t.setting,
+    speaker: t.speaker,
+    vars: [{ id: 'k', values: [{ id: 'yes', text: t.cause }, { id: 'no', text: t.other }] }],
+    // The order is true in the story, whatever caused it. An only-rule crosses out every other cause.
+    givens: [line(t.after, () => true), ...(t.only ? [line(t.only, (c) => isYes(c, 'k'))] : [])],
+    claim: line(t.cause, (c) => isYes(c, 'k')),
+    claimMid: mid(t.cause),
+    ...(t.only ? {} : { leaves: 'a reason the first thing caused the second' }),
+    ...(t.truth !== undefined ? { truth: t.truth } : {}),
+  };
+}
+
 // ---------- every argument a family can ask about ----------
 
 const MOVES: readonly Move[] = ['mp', 'mt', 'ac', 'da'];
@@ -785,6 +1110,14 @@ export function familyArgs(f: Family): Arg[] {
       return HASTY_TOPICS.flatMap((t) => [hastyArg(t), hastyArg(t, true)]);
     case 'popular':
       return [...POPULAR_TOPICS.map(popularArg), ...VOTE_TOPICS.map(voteArg)];
+    case 'person':
+    case 'twist':
+    case 'authority':
+      return PEOPLE_TOPICS.filter((t) => t.family === f).flatMap((t) => [peopleArg(t), ...(t.fact ? [peopleArg(t, true)] : [])]);
+    case 'slope':
+      return STEP_TOPICS.map(stepArg);
+    case 'after':
+      return AFTER_TOPICS.map(afterArg);
   }
 }
 const ARGS: Record<Family, Arg[]> = Object.fromEntries(FAMILIES.map((f) => [f, familyArgs(f)])) as Record<Family, Arg[]>;
@@ -850,6 +1183,11 @@ export const TRICK_NAME: Record<TrickKind, string> = {
   dilemma: 'the two-doors trick',
   hasty: 'the too-few trick',
   popular: 'the everybody-says trick',
+  person: 'attacking the person',
+  twist: 'the twisted-claim trick',
+  authority: 'the famous-name trick',
+  slope: 'the slippery slope',
+  after: 'the after-therefore-because trick',
 };
 /** What each trick does, in a line. */
 export const TRICK_DOES: Record<TrickKind, string> = {
@@ -861,6 +1199,19 @@ export const TRICK_DOES: Record<TrickKind, string> = {
   dilemma: 'Its either-or leaves out a third door.',
   hasty: 'It checks a few, then makes a claim about all.',
   popular: 'It counts how many people say it, not the facts.',
+  person: 'It talks about the one who made the claim, not about the claim.',
+  twist: 'It knocks down a claim nobody made.',
+  authority: 'It trusts a famous name on a subject that person does not know.',
+  slope: 'It says each step leads to the next, but gives no reason for any step.',
+  after: 'It says one thing caused another just because it came first.',
+};
+/** What each Lesson 5 and 6 trick’s reason leaves out, in a few words. Its good twin adds it. */
+export const LEAVES_OUT: Partial<Record<TrickKind, string>> = {
+  person: 'the claim itself',
+  twist: 'the claim that was really made',
+  authority: 'whether the person knows this subject',
+  slope: 'a reason for each step',
+  after: 'a reason the first thing caused the second',
 };
 /** Why a trick’s name does not fit an argument that plays another trick (or none). */
 export const NOT_HERE: Record<TrickKind, string> = {
@@ -872,6 +1223,11 @@ export const NOT_HERE: Record<TrickKind, string> = {
   dilemma: 'The two-doors trick needs an either-or that leaves a door out. No given here does that.',
   hasty: 'The too-few trick checks a few things and claims all. This reason does not.',
   popular: 'The everybody-says trick leans on what most people say. This reason does not.',
+  person: 'Attacking the person puts down the one who made the claim. This reason does not.',
+  twist: 'The twisted-claim trick knocks down a claim nobody made. This reason does not.',
+  authority: 'The famous-name trick leans on what a famous person says. This reason does not.',
+  slope: 'The slippery slope says one step will lead to a far-off end. This reason does not.',
+  after: 'The after-therefore-because trick says a thing caused what came after it. This reason does not.',
 };
 
 export const TRICK_TERM = { word: 'A trick', meaning: 'a reason that sounds good but does not prove its claim. Its claim may still be true.' };
@@ -886,6 +1242,11 @@ const FAMILY_TERM: Record<Family, { word: string; meaning: string }> = {
   doors: { word: 'The two-doors trick', meaning: 'an either-or that leaves out a door that is really there.' },
   hasty: { word: 'The too-few trick', meaning: 'checking a few things, then making a claim about all of them.' },
   popular: { word: 'The everybody-says trick', meaning: 'counting how many people say something, as if that made it true.' },
+  person: { word: 'Attacking the person', meaning: 'putting down the one who made a claim, instead of looking at the claim.' },
+  twist: { word: 'The twisted-claim trick', meaning: 'answering a bigger claim that nobody made, instead of the real one.' },
+  authority: { word: 'The famous-name trick', meaning: 'trusting a famous person about a subject that person does not know.' },
+  slope: { word: 'The slippery slope', meaning: 'saying one step will lead to the next and the next, with no reason for each step.' },
+  after: { word: 'After-therefore-because', meaning: 'saying one thing caused another just because it came first.' },
 };
 const FAMILY_RULE: Record<Family, string> = {
   flip: 'An if–then rule works forward, and with flip and NOT. Run backward, or with NOT only, it proves nothing.',
@@ -895,6 +1256,11 @@ const FAMILY_RULE: Record<Family, string> = {
   doors: 'An either-or proves a claim only if there are really just two doors. Look for a third door.',
   hasty: 'A few checked can’t prove a claim about all. The ones you did not check could be different.',
   popular: 'Many people saying something does not make it true. A vote only proves what people picked.',
+  person: 'A claim is true or false because of the facts, not because of who says it. Look at the claim, not the person.',
+  twist: 'To answer a claim, answer the one that was really made. Knocking down a bigger claim proves nothing.',
+  authority: 'Being famous does not make someone right about everything. Ask if the person knows this subject.',
+  slope: 'Each step needs its own reason. With no reason, the steps can stop anywhere.',
+  after: 'Coming first is not the same as causing. Something else could have made it happen.',
 };
 const FAMILY_REMEMBER: Record<Family, string> = {
   flip: 'Forward works. Flip and NOT works. Backward and NOT only are tricks.',
@@ -904,6 +1270,11 @@ const FAMILY_REMEMBER: Record<Family, string> = {
   doors: 'Before you trust an either-or, look for a third door.',
   hasty: 'To be sure about all, check all.',
   popular: 'Check the facts, not the crowd.',
+  person: 'Look at the claim, not the person.',
+  twist: 'Answer the claim that was really made.',
+  authority: 'Famous is not the same as knowing.',
+  slope: 'Each step needs its own reason.',
+  after: 'After is not the same as because.',
 };
 const REMEMBER_ASK = 'Ask: “Is there a case that fits the givens but breaks the claim?”';
 
@@ -959,6 +1330,31 @@ export const FAMILY_Q: Record<Family, ConfusedQuestion> = {
     options: [{ label: 'No. You still need to check the facts', right: true }, { label: 'Yes. Most kids can’t be wrong' }, NOT_SURE],
     teach: 'No. Lots of people can believe something false. A vote proves what people picked. It can’t prove what is true.',
   },
+  person: {
+    q: 'Mia is late a lot. Does that make what she says false?',
+    options: [{ label: 'No. Look at the claim, not the person', right: true }, { label: 'Yes. You can’t trust a kid who is late' }, NOT_SURE],
+    teach: 'No. Being late is about Mia. Her claim is about something else. Check the facts the claim is about.',
+  },
+  twist: {
+    q: 'Someone knocks down a claim nobody made. Does that answer the real claim?',
+    options: [{ label: 'No. The real claim is still not answered', right: true }, { label: 'Yes. A claim was knocked down' }, NOT_SURE],
+    teach: 'No. Showing the lake is not as hot as a bath says nothing about a swim. Answer the claim that was really made.',
+  },
+  authority: {
+    q: 'A famous singer says a cereal is the healthiest. Does that make it so?',
+    options: [{ label: 'No. A singer may not know about food', right: true }, { label: 'Yes. Famous people know a lot' }, NOT_SURE],
+    teach: 'No. A singer knows about songs. Food is a different subject. Being famous does not make someone right about everything.',
+  },
+  slope: {
+    q: 'One step happens. Must every step after it happen too?',
+    options: [{ label: 'No. Each step needs its own reason', right: true }, { label: 'Yes. One step always leads to the next' }, NOT_SURE],
+    teach: 'No. The steps can stop anywhere. Ms. Lee can let one fish in and say no to more pets. Each step needs its own reason.',
+  },
+  after: {
+    q: 'It rained right after Kai washed the car. Did washing the car make it rain?',
+    options: [{ label: 'No. Coming first is not causing', right: true }, { label: 'Yes. The rain came right after' }, NOT_SURE],
+    teach: 'No. Clouds make rain. It would have rained anyway. One thing coming first does not show it caused the next.',
+  },
 };
 
 /** Given 1 says “…” Given 2 says “…” The claim says “…” */
@@ -1004,8 +1400,10 @@ export function trickDetail(arg: Arg): string[] {
   }
   const c = trickCase(arg);
   const note = arg.note?.(c);
-  return [`Picture ${caseName(arg, c).toLowerCase()}: ${caseMid(arg, c)}.${note ? ` ${note}` : ''}`, `${everyGiven(arg)}, and the claim is false. So the givens do not force it.`, `This is ${TRICK_NAME[v]}. ${TRICK_DOES[v]}`];
+  return [`Picture ${caseName(arg, c).toLowerCase()}: ${caseMid(arg, c)}.${note ? ` ${note}` : ''}`, `${everyGiven(arg)}, and the claim is false. So the givens do not force it.`, `This is ${TRICK_NAME[v]}. ${TRICK_DOES[v]}${leavesLine(arg)}`];
 }
+/** “ It leaves out anything about the pool.”, for a trick that says what its reason leaves out (else empty). */
+export const leavesLine = (arg: Arg) => (arg.leaves ? ` It leaves out ${arg.leaves}.` : '');
 
 /** The right answer’s explanation for a trick. */
 export function trickExplain(arg: Arg): string {
@@ -1013,12 +1411,23 @@ export function trickExplain(arg: Arg): string {
   if (v === 'circle') return 'Given 1 is the claim in new words. So the reason goes in a circle, and it proves nothing. The claim might be true or false.';
   if (v === 'dilemma') return `Given 1 leaves out a third door: ${caseMid(arg, trickCase(arg))}. So given 1 is false, and the reason proves nothing. The claim might be true or false.`;
   const c = trickCase(arg);
-  return `${caseName(arg, c)} fits the givens: ${caseMid(arg, c)}. But the claim is false there. So it is ${TRICK_NAME[v as TrickKind]}. The claim might be true or false.`;
+  return `${caseName(arg, c)} fits the givens: ${caseMid(arg, c)}. But the claim is false there. So it is ${TRICK_NAME[v as TrickKind]}.${leavesLine(arg)} The claim might be true or false.`;
 }
+
+/** What a good reason has that its trick twin leaves out, said after the cases. */
+const GOOD_TAIL: Partial<Record<Shape, string>> = {
+  'circle-good': ' And no given is the claim said again.',
+  'doors-good': ' And there are really just two doors, so the either-or is true.',
+  'person-good': ' The reason is about the claim itself, not about a person.',
+  'twist-good': ' The reason answers the claim that was really made.',
+  'authority-good': ' The reason checks the claim itself, not a famous name.',
+  chain: ' Each step has its own rule.',
+  only: ' A rule says nothing else could have caused it.',
+};
 
 /** The right answer’s explanation for a good reason. */
 export function goodExplain(arg: Arg): string {
-  const tail = arg.shape === 'circle-good' ? ' And no given is the claim said again.' : arg.shape === 'doors-good' ? ' And there are really just two doors, so the either-or is true.' : '';
+  const tail = GOOD_TAIL[arg.shape] ?? '';
   return `${statusReason(arg)} So the givens force the claim. They prove it.${tail}`;
 }
 
@@ -1037,6 +1446,11 @@ const SIMPLER: Record<Family, (arg: Arg) => string[]> = {
   doors: () => ['Read the either-or given.', 'Look at the story. Is there a third door?', 'If there is, the either-or is false, and it proves nothing.'],
   hasty: () => ['Count how many were checked. Count how many there are.', 'Any not checked could be different.', 'So a few can’t prove all. Only checking all can.'],
   popular: (arg) => ['Ask: is the claim about what people picked, or about the world?', 'Many people can be wrong about the world.', 'So to know if it is true, check the facts.', ...(arg.settle ? [arg.settle] : [])],
+  person: () => ['Read the reason. Is it about the claim, or about the person who made it?', 'A reason about the person can’t prove the claim.', 'So check the facts the claim is about.'],
+  twist: () => ['Read what was really said. Then read what the reason answers.', 'Are they the same claim?', 'If not, the reason answers a claim nobody made. It proves nothing.'],
+  authority: () => ['Ask: what is this person famous for?', 'Is the claim about that subject?', 'If not, their word does not prove it.'],
+  slope: (arg) => [...(arg.picture ? [arg.picture] : []), 'For each step, ask: is there a rule that it leads to the next?', 'If a step has no rule, the steps can stop there.'],
+  after: () => ['Ask: did the first thing make the second happen, or did it just come first?', 'Look for something else that could have caused it.', 'If something else could have, coming first proves nothing.'],
 };
 
 /** The teaching every item about an argument carries: the rule, the words, every case, and what to remember. */
@@ -1123,7 +1537,8 @@ function done(kind: TrickItemKind, arg: Arg, item: ChooseCore, tag = FAMILY_SKIL
   return { tag, kind, item, arg };
 }
 
-const ask = (arg: Arg) => `${arg.setting} ${arg.speaker} gives this reason.`;
+/** The question’s first lines: the setting, how the speaker retells the claim (the twisted-claim trick), who gives the reason. */
+const ask = (arg: Arg) => `${arg.setting}${arg.retell ? ` ${arg.retell}` : ''} ${arg.speaker} gives this reason.`;
 const helpFor = (arg: Arg): Pick<ChooseCore, 'confused'> => ({ confused: [TRUE_PROVED_Q, FAMILY_Q[arg.family]] });
 
 export const PROVE_CHOICES: readonly Choice[] = [
@@ -1173,7 +1588,7 @@ export function proveItem(rng: Rng, f: Family, o: PickOpts = {}): TrickMade {
   });
 }
 
-/** “A good reason” and the lesson’s two tricks, by name. */
+/** “A good reason” and the lesson’s tricks (two, or three in Lesson 5), by name. */
 export const NAME_LABEL: Record<Verdict, string> = {
   proves: 'A good reason. It proves the claim.',
   flip: 'The flip trick. It runs the rule backward.',
@@ -1184,18 +1599,24 @@ export const NAME_LABEL: Record<Verdict, string> = {
   dilemma: 'The two-doors trick. It leaves out a third door.',
   hasty: 'The too-few trick. It checks a few and claims all.',
   popular: 'The everybody-says trick. It counts who says it, not the facts.',
+  // Lessons 5 and 6: the label names what the trick’s reason leaves out (LEAVES_OUT), the brief’s right answer.
+  person: `Attacking the person. It talks about who made the claim. It leaves out ${LEAVES_OUT.person}.`,
+  twist: `The twisted-claim trick. It answers a claim nobody made. It leaves out ${LEAVES_OUT.twist}.`,
+  authority: `The famous-name trick. It leaves out ${LEAVES_OUT.authority}.`,
+  slope: `The slippery slope. It leaves out ${LEAVES_OUT.slope}.`,
+  after: `After-therefore-because. It leaves out ${LEAVES_OUT.after}.`,
 };
 
-/** Which is it: a good reason, or one of the lesson’s two tricks? */
+/** Which is it: a good reason, or one of the lesson’s tricks (two, or three in Lesson 5)? */
 export function nameItem(rng: Rng, lesson: string, o: PickOpts & { family?: Family } = {}): TrickMade {
   const families = LESSON_FAMILIES[lesson];
-  const [k1, k2] = LESSON_TRICKS[lesson];
+  const kinds = LESSON_TRICKS[lesson];
   // A good reason about a third of the time; else a trick from one of the lesson’s families (or the one asked for).
   const want = o.want ?? (rng.chance(0.34) ? 'good' : 'trick');
   const family = o.family && families.includes(o.family) ? o.family : rng.pick(families);
   const arg = pickArg(rng, family, { ...o, want });
   const v = verdictOf(arg);
-  const ids: Verdict[] = ['proves', k1, k2];
+  const ids: Verdict[] = ['proves', ...kinds];
   const feedback: Record<string, ChoiceFeedback> = {};
   for (const id of ids) {
     if (id === v) continue;
@@ -1474,10 +1895,28 @@ export const WHY_LABEL: Record<TrickKind | 'false', string> = {
   dilemma: 'Its either-or shuts out a third door that is really there.',
   hasty: 'It checks only a few, then makes a claim about all of them.',
   popular: 'Lots of people saying something does not make it true.',
+  person: 'It talks about the one who made the claim. It leaves out the claim itself.',
+  twist: 'It knocks down a claim nobody made. It leaves out the real claim.',
+  authority: 'It trusts a famous name. It leaves out whether that person knows this subject.',
+  slope: 'It says one step leads to the next. It leaves out a reason for each step.',
+  after: 'It says the first thing caused the second because it came first. It leaves out a real reason.',
   false: 'Its claim is false, and a false claim can’t be proved.',
 };
-/** Tricks that are too close to tell apart in a why item (an “All” middle trick is a flip trick in other words). */
-const CLOSE: Partial<Record<TrickKind, readonly TrickKind[]>> = { flip: ['not', 'middle'], not: ['flip', 'middle'], middle: ['flip', 'not', 'swap'], swap: ['middle'] };
+/**
+ * Tricks that are too close to tell apart in a why item (an “All” middle trick is a flip trick in other words; a crowd and
+ * a famous name both lean on who says it; “not as hot as a bath, so too cold” leaves out a door in between).
+ */
+const CLOSE: Partial<Record<TrickKind, readonly TrickKind[]>> = {
+  flip: ['not', 'middle'],
+  not: ['flip', 'middle'],
+  middle: ['flip', 'not', 'swap'],
+  swap: ['middle'],
+  popular: ['person', 'authority'],
+  person: ['popular'],
+  authority: ['popular'],
+  twist: ['dilemma'],
+  dilemma: ['twist'],
+};
 
 /**
  * The closing why item: a trick whose claim is true. Why is it a trick? Its own reason, two reasons from other tricks,

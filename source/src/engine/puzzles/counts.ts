@@ -1,5 +1,6 @@
 /**
- * Clues & Chances (id s13), Lessons 3 and 4: counts out of 100, and how often you would see a clue if you were wrong.
+ * Clues & Chances (id s13), Lessons 3, 4 and 5: counts out of 100, how often you would see a clue if you were wrong,
+ * and both or either of two things.
  *
  * The model is a count picture: 100 things split two ways, by group (a row) and by a clue (a column), so each of the
  * four boxes is a count and every box, row and column adds up. Never a percentage, never a fraction with a slash.
@@ -16,6 +17,13 @@
  * (out of the yes column). The trap (tag false-alarm): when the thing is rare, a test that is right for most of the
  * 100 still gives more false alarms than right yes answers. And two clues, each counted out of 10 times you are right
  * and 10 times you are wrong: the clue that tells you more is the one you would rarely see if you were wrong.
+ *
+ * Lesson 5 · And, or, with chances. Two things that do not affect each other (size does not depend on color), on the
+ * same picture: the rows are the first thing, the columns the second, and the second is k in every m in each row.
+ * Both (and) is one box: the first row split into groups of m, with k from each group. Either (or) is the row and the
+ * column added, with the overlap (the box they share) taken away once: the three boxes with one thing or both. Never
+ * fractions and never percent: counts and groups only. The traps: adding for both (tag add-both), and adding for either
+ * without taking the overlap away (tag overlap).
  *
  * The closing why items (tag why) ask for the reason behind the stop’s big ideas: nothing is due, the common group
  * wins, a yes is most likely a false alarm, a clue seen either way proves little.
@@ -238,7 +246,7 @@ function groupCases(p: GroupPic): TeachCase[] {
   ];
 }
 
-/** The model behind each Lesson 3 and 4 item (for tests). */
+/** The model behind each Lesson 3, 4 and 5 item (for tests). */
 export type CountModel =
   | { t: 'read'; pic: GroupPic; ask: Part; parts: Part[] }
   | { t: 'fits'; pic: GroupPic }
@@ -247,6 +255,8 @@ export type CountModel =
   | { t: 'alarm'; pic: TestPic }
   | { t: 'answer'; pic: TestPic }
   | { t: 'strong'; pic: CluePic }
+  | { t: 'both'; pic: PairPic }
+  | { t: 'either'; pic: PairPic; form: EitherForm }
   | { t: 'why'; kind: WhyKind; group?: GroupPic; test?: TestPic; clue?: CluePic; coin?: { device: string; k: number; side: string; other: string } };
 
 export interface CountMade extends Omit<ChanceMade, 'model'> {
@@ -1139,6 +1149,394 @@ export function strongItem(rng: Rng, o: CountOptions & { pic?: CluePic; conflict
       },
     },
     { t: 'strong', pic },
+  );
+}
+
+// ---------- Lesson 5: both and either, for things that do not affect each other ----------
+
+/** One thing a pair picture splits by: its two labels, and how to say it about one thing or many. */
+export interface PairSide {
+  /** The picture’s labels: “Red”, “Not red”. */
+  yes: string;
+  no: string;
+  /** “is red”, “are red”; “has a dog”, “have a dog”. */
+  is: string;
+  are: string;
+}
+
+export interface PairTopic {
+  id: string;
+  skin: CountSkin;
+  /** “100 balloons are at a fair.” */
+  setting: string;
+  /** The picture’s title: “100 balloons at a fair”. */
+  title: string;
+  noun: string;
+  nouns: string;
+  /** The rows: the first thing (red, or not). */
+  a: PairSide;
+  /** The columns: the second thing (big, or not). */
+  b: PairSide;
+  /** Why the two do not affect each other: “Size does not depend on color.” */
+  apart: string;
+  /** Said after a part of all 100, so it holds in each row: “red or not”. */
+  orNot: string;
+}
+
+const pairSide = (yes: string, no: string, is: string, are: string): PairSide => ({ yes, no, is, are });
+
+/** The worked example (cards and boards only, never a quiz): balloons at a fair, red and big. */
+export const BALLOONS: PairTopic = {
+  id: 'balloons', skin: 'everyday', setting: '100 balloons are at a fair.', title: '100 balloons at a fair', noun: 'balloon', nouns: 'balloons',
+  a: pairSide('Red', 'Not red', 'is red', 'are red'), b: pairSide('Big', 'Not big', 'is big', 'are big'),
+  apart: 'Size does not depend on color.', orNot: 'red or not',
+};
+
+export const PAIR_TOPICS: readonly PairTopic[] = [
+  {
+    id: 'shirts', skin: 'everyday', setting: 'A shop has 100 T-shirts.', title: '100 T-shirts in a shop', noun: 'T-shirt', nouns: 'T-shirts',
+    a: pairSide('Blue', 'Not blue', 'is blue', 'are blue'), b: pairSide('Pocket', 'No pocket', 'has a pocket', 'have a pocket'),
+    apart: 'Pockets have nothing to do with color.', orNot: 'blue or not',
+  },
+  {
+    id: 'camp', skin: 'everyday', setting: '100 kids go to a summer camp.', title: '100 kids at a camp', noun: 'kid', nouns: 'kids',
+    a: pairSide('Has a dog', 'No dog', 'has a dog', 'have a dog'), b: pairSide('Glasses', 'No glasses', 'wears glasses', 'wear glasses'),
+    apart: 'Wearing glasses has nothing to do with having a dog.', orNot: 'with a dog or not',
+  },
+  {
+    id: 'owls', skin: 'fantasy', setting: '100 owls live in a magic wood.', title: '100 owls in a magic wood', noun: 'owl', nouns: 'owls',
+    a: pairSide('White', 'Not white', 'is white', 'are white'), b: pairSide('Can talk', 'Cannot talk', 'can talk', 'can talk'),
+    apart: 'Talking has nothing to do with color.', orNot: 'white or not',
+  },
+  {
+    id: 'potions', skin: 'fantasy', setting: 'A wizard has 100 potions.', title: '100 potions on a shelf', noun: 'potion', nouns: 'potions',
+    a: pairSide('Green', 'Not green', 'is green', 'are green'), b: pairSide('Glows', 'No glow', 'glows', 'glow'),
+    apart: 'Glowing has nothing to do with color.', orNot: 'green or not',
+  },
+  {
+    id: 'shapes', skin: 'abstract', setting: 'A box holds 100 shapes.', title: '100 shapes in a box', noun: 'shape', nouns: 'shapes',
+    a: pairSide('Circle', 'Not a circle', 'is a circle', 'are circles'), b: pairSide('Striped', 'Not striped', 'is striped', 'are striped'),
+    apart: 'Stripes have nothing to do with shape.', orNot: 'circle or not',
+  },
+  {
+    id: 'beads', skin: 'abstract', setting: 'A tray holds 100 beads.', title: '100 beads on a tray', noun: 'bead', nouns: 'beads',
+    a: pairSide('Square', 'Not square', 'is square', 'are square'), b: pairSide('Shiny', 'Not shiny', 'is shiny', 'are shiny'),
+    apart: 'Shine has nothing to do with shape.', orNot: 'square or not',
+  },
+];
+
+/**
+ * A pair picture: 100 things split by two things that do not affect each other. The second thing is `k` in every `m`
+ * in each row, so its box in each row is that part of the row: the row split into groups of m, with k from each group.
+ */
+export interface PairPic {
+  topic: PairTopic;
+  cells: Cells;
+  k: number;
+  m: number;
+}
+
+/** k in every m of n: n split into groups of m, with k taken from each group. Never a fraction: whole groups only. */
+export function partOf(n: number, k: number, m: number): number {
+  if (n % m !== 0) throw new Error(`partOf: ${n} is not whole groups of ${m}`);
+  return (n / m) * k;
+}
+
+/** The picture from its model: `r` of the 100 have the first thing, and the second is k in every m in each row. */
+export function pairPic(topic: PairTopic, r: number, k: number, m: number): PairPic {
+  const x = partOf(r, k, m), y = partOf(TOTAL - r, k, m);
+  return { topic, cells: [[x, r - x], [y, TOTAL - r - y]], k, m };
+}
+
+/** The parts a second thing can have, k in every m. */
+export const PAIR_SHARES: readonly (readonly [number, number])[] = [[1, 2], [1, 4], [3, 4], [1, 5], [2, 5], [3, 5], [4, 5], [1, 10], [3, 10], [7, 10], [9, 10]];
+
+/**
+ * Every count a Lesson 5 question can use, each read from the picture’s boxes: the first thing (a row), the second
+ * (a column), both (the box they share), either (the three boxes with one thing or both), the row and the column added
+ * (the overlap twice), just one of the two (one but not both), neither (the last box), and the rest of each.
+ */
+export function pairCounts(p: PairPic) {
+  const c = p.cells;
+  return {
+    a: rowTotal(c, 0),
+    notA: rowTotal(c, 1),
+    b: colTotal(c, 0),
+    notB: colTotal(c, 1),
+    both: c[0][0],
+    either: c[0][0] + c[0][1] + c[1][0],
+    added: rowTotal(c, 0) + colTotal(c, 0),
+    one: c[0][1] + c[1][0],
+    neither: c[1][1],
+    aOnly: c[0][1],
+    bOnly: c[1][0],
+  };
+}
+
+/**
+ * A pair picture for a quiz: the first thing in 10 to 60 of the 100, whole groups of m. Every box holds at least 2,
+ * the row and the column added stay under 100 (so the sum looks like a count too), and every box, row, column and
+ * count a choice can show is its own number.
+ */
+export function makePairPic(rng: Rng, topic: PairTopic): PairPic {
+  for (let t = 0; t < 2000; t++) {
+    const [k, m] = rng.pick(PAIR_SHARES);
+    const r = m * rng.int(Math.ceil(10 / m), Math.floor(60 / m));
+    const p = pairPic(topic, r, k, m);
+    const n = pairCounts(p);
+    if (Math.min(...p.cells.flat()) < 2 || n.added > 95) continue;
+    const parts = [...p.cells.flat(), n.a, n.notA, n.b, n.notB];
+    // The groups (the first row split into groups of m) are a choice only when more than 1 is taken from each group.
+    const shown = [n.both, n.added, n.either, n.b, n.aOnly, n.one, n.neither, ...(k > 1 ? [r / m] : [])];
+    if (new Set(parts).size !== parts.length || new Set(shown).size !== shown.length) continue;
+    return p;
+  }
+  throw new Error('makePairPic: no picture');
+}
+
+/**
+ * A pair picture as a scene: every box, or (`rows`) a picture to fill, with each row’s count in all and the boxes
+ * blank.
+ */
+export function pairScene(p: PairPic, o: { show?: 'all' | 'rows'; pick?: { row?: 0 | 1; col?: 0 | 1 }; pickLabel?: string; caption?: string } = {}): Extract<Scene, { kind: 'counts' }> {
+  const t = p.topic, c = p.cells;
+  const { show = 'all', ...rest } = o;
+  const head = { kind: 'counts' as const, title: t.title, total: TOTAL, rows: [t.a.yes, t.a.no] as [string, string], cols: [t.b.yes, t.b.no] as [string, string] };
+  if (show === 'rows') return { ...head, cells: [[null, null], [null, null]], rowTotals: [rowTotal(c, 0), rowTotal(c, 1)], ...rest };
+  return { ...head, cells: [[c[0][0], c[0][1]], [c[1][0], c[1][1]]], ...rest };
+}
+
+/** “1 in every 4”. */
+export const shareWords = (p: PairPic) => `${p.k} in every ${p.m}`;
+/** The second thing’s verb after a part: “1 in every 4 is big”, “3 in every 4 are big”. */
+const partVerb = (p: PairPic) => (p.k === 1 ? p.topic.b.is : p.topic.b.are);
+/** “1 in every 4 balloons is big”, “3 in every 10 kids wear glasses”. */
+export const pairShareSay = (p: PairPic) => `${shareWords(p)} ${p.topic.nouns} ${partVerb(p)}`;
+/** “Of the 20 kids that have a dog, 1 in every 4 wears glasses: 5.” */
+const ofTheRow = (p: PairPic) => `Of the ${rowTotal(p.cells, 0)} ${p.topic.nouns} that ${p.topic.a.are}, ${shareWords(p)} ${partVerb(p)}: ${p.cells[0][0]}.`;
+/** “Split the 20 into groups of 4: 5 groups. Take 1 from each group: 5.” */
+export const groupsLine = (n: number, p: PairPic) => `Split the ${n} into groups of ${p.m}: ${n / p.m} groups. Take ${p.k} from each group: ${partOf(n, p.k, p.m)}.`;
+/** “have a dog and wear glasses”, “have a dog or wear glasses”. */
+const andSay = (t: PairTopic) => `${t.a.are} and ${t.b.are}`;
+const orSay = (t: PairTopic) => `${t.a.are} or ${t.b.are}`;
+
+/** The trap tags of Lesson 5. */
+export const ADD_BOTH = { tag: 'add-both', label: 'a question where adding the two counts is the trap, because both is one box' } as const;
+export const OVERLAP = { tag: 'overlap', label: 'a question where adding counts the overlap twice, so it must be taken away once' } as const;
+
+const PAIR_TERMS = {
+  both: { word: 'Both', meaning: 'the two things at once. Grown-ups also say “and.” It is one box of the count picture.' },
+  apart: { word: 'Do not affect each other', meaning: 'one thing does not change how common the other is. The part is the same in each row.' },
+  either: { word: 'Either', meaning: 'one thing, the other, or both. Grown-ups also say “or.” It is a row and a column.' },
+  overlap: { word: 'The overlap', meaning: 'the ones in the row and in the column at once: the box where they meet.' },
+};
+
+/**
+ * The small worked case behind every Lesson 5 hint and “Explain more simply”: 10 cards, 4 of them red, and 1 in every
+ * 2 cards big, red or not. Every count is worked out from it, never typed.
+ */
+const SMALL = (() => {
+  const all = 10, red = 4, k = 1, m = 2;
+  const both = partOf(red, k, m), big = partOf(all, k, m);
+  return { all, red, k, m, both, big, added: red + big, either: red + big - both };
+})();
+
+/** A small worked case of both, for a hint: 10 cards, 4 of them red, and 1 in every 2 cards big, red or not. */
+export function smallBothCase(): TeachCase {
+  const { all, red, k, m, both, big, added } = SMALL;
+  return {
+    label: `Say ${all} cards: ${red} are red, and ${k} in every ${m} cards is big, red or not, so ${big} are big. Of the ${red} red cards, ${k} in every ${m} is big: ${both}.`,
+    truths: [{ who: `Red and big: ${both}`, value: true }, { who: `Red and big: ${red} and ${big} added`, value: false }],
+    note: `Adding ${red} and ${big} gives ${added}, more than the ${red} red cards.`,
+  };
+}
+
+/** A small worked case of either, for a hint: the same 10 cards, so 4 red, 5 big, and 2 of them both. */
+export function smallEitherCase(): TeachCase {
+  const { all, red, big, both, added, either } = SMALL;
+  return {
+    label: `Say ${all} cards: ${red} are red, ${big} are big, and ${both} are both. ${red} and ${big} make ${added}, but the ${both} red and big cards were counted twice.`,
+    truths: [{ who: `Red or big: ${either}`, value: true }, { who: `Red or big: ${added}`, value: false }],
+    note: `Take them away once: ${either} cards are red or big, or both.`,
+  };
+}
+
+/** “Explain more simply” for both, worked out from the small case. */
+function smallBothSteps(): string[] {
+  const { all, red, k, m, both, big, added } = SMALL;
+  return [
+    `Say ${all} cards: ${red} are red. ${k} in every ${m} cards is big, red or not, so ${big} are big.`,
+    `Of the ${red} red cards, ${k} in every ${m} is big. That is ${both}.`,
+    `So ${both} cards are red and big. Adding ${red} and ${big} gives ${added}, more than the ${red} red cards.`,
+  ];
+}
+
+/** “Explain more simply” for either, worked out from the small case. */
+function smallEitherSteps(): string[] {
+  const { all, red, big, both, added, either } = SMALL;
+  return [
+    `Say ${all} cards: ${red} are red, ${big} are big, and ${both} are both.`,
+    `${red} and ${big} make ${added}. But the ${both} red and big cards were counted twice.`,
+    `Take them away once: ${either} cards are red or big, or both.`,
+  ];
+}
+
+/** Each row of a pair picture with the same part of it, and the second thing’s column. */
+function pairRowCases(p: PairPic): TeachCase[] {
+  const t = p.topic, c = p.cells;
+  const part = `${cap(shareWords(p))} of them ${partVerb(p)}`;
+  return [
+    { label: `The “${t.a.yes}” row: ${rowTotal(c, 0)} ${t.nouns}. ${part}: ${c[0][0]}.`, note: `${groupsLine(rowTotal(c, 0), p)}` },
+    { label: `The “${t.a.no}” row: ${rowTotal(c, 1)} ${t.nouns}. ${part}: ${c[1][0]}.`, note: 'The same part as in the first row, because the two things do not affect each other.' },
+    { label: `The “${t.b.yes}” column: ${c[0][0]} and ${c[1][0]} make ${colTotal(c, 0)}.` },
+  ];
+}
+
+/** The story of a pair picture told by its rows: how many have the first thing, and the part with the second. */
+function pairStory(p: PairPic): string {
+  const t = p.topic;
+  return `${t.setting} ${rowTotal(p.cells, 0)} of them ${t.a.are}. ${t.apart} ${cap(pairShareSay(p))}, ${t.orNot}.`;
+}
+
+/**
+ * Two things that do not affect each other: how many have both? One box, found from the first row and the part with
+ * the second thing. The picture shows only each row’s count, its boxes blank to fill. (The trap: adding. Tag add-both.)
+ */
+export function bothItem(rng: Rng, o: CountOptions & { pic?: PairPic }): CountMade {
+  const pic = o.pic ?? makePairPic(rng, pickTopic(rng, PAIR_TOPICS, o.skin, o.avoid));
+  const t = pic.topic, n = pairCounts(pic);
+  const share = shareWords(pic);
+  const box = `That is one box, where the “${t.a.yes}” row meets the “${t.b.yes}” column.`;
+  const example: TeachCase = { label: `The “${t.a.yes}” row: ${n.a} ${t.nouns}. ${cap(share)} of them ${partVerb(pic)}: ${n.both}.`, note: `So ${n.both} ${t.nouns} ${andSay(t)}.` };
+  const fb: Record<string, ChoiceFeedback> = {
+    added: {
+      headline: 'Your answer adds the two counts, but both means the two things at once.',
+      detail: [`${n.a} ${t.nouns} ${t.a.are}, and ${n.b} ${t.b.are}. Added, they make ${n.added}. That is more than all ${n.a} that ${t.a.are}.`, `Both is one box. ${ofTheRow(pic)}`],
+      example,
+    },
+    either: {
+      headline: `Your answer counts the ${t.nouns} that ${orSay(t)}, but the question asks for both at once.`,
+      detail: [`${n.a} and ${n.b} make ${n.added}. Take away the ${n.both} counted twice: ${n.either}. That is the count for or.`, `Both is only the ${n.both} that ${andSay(t)}.`],
+      example,
+    },
+    b: {
+      headline: `Your answer counts every ${t.noun} that ${t.b.is}, not only the ones that ${t.a.are}.`,
+      detail: [`${cap(share)} of all 100 ${t.nouns} ${partVerb(pic)}: ${n.b}.`, `But both counts only the ${n.a} that ${t.a.are}. ${ofTheRow(pic)}`],
+      example,
+    },
+    aOnly: {
+      headline: `Your answer is the other part of the “${t.a.yes}” row: the ones in the “${t.b.no}” column.`,
+      detail: [ofTheRow(pic), `The other ${n.aOnly} of the ${n.a} sit in the “${t.b.no}” column.`],
+      example,
+    },
+    groups: {
+      headline: 'Your answer counts the groups, not the ones taken from them.',
+      detail: [`Split the ${n.a} into groups of ${pic.m}: ${n.a / pic.m} groups.`, `Then take ${pic.k} from each group: ${n.both}.`],
+      example,
+    },
+  };
+  // The fifth choice: when more than 1 is taken from each group, the number of groups (a step left out, smaller than
+  // the answer); else the other part of the first row. So the right count is not always the smallest choice.
+  const fifth: Choice = pic.k > 1 ? { id: 'groups', label: String(n.a / pic.m) } : { id: 'aOnly', label: String(n.aOnly) };
+  const choices: Choice[] = [
+    { id: 'both', label: String(n.both) },
+    { id: 'added', label: String(n.added) },
+    { id: 'either', label: String(n.either) },
+    { id: 'b', label: String(n.b) },
+    fifth,
+  ];
+  const feedback: Record<string, ChoiceFeedback> = {};
+  for (const ch of choices) if (ch.id !== 'both') feedback[ch.id] = fb[ch.id];
+  return done(
+    'both',
+    {
+      kind: 'choose',
+      prompt: `${pairStory(pic)} How many ${t.nouns} ${andSay(t)}?`,
+      scene: pairScene(pic, { show: 'rows' }),
+      choices: rng.shuffle(choices),
+      answer: 'both',
+      explain: `${ofTheRow(pic)} ${groupsLine(n.a, pic)} ${box}`,
+      feedback,
+      hint: 'Start with one group. Then take the part of it that has the other thing. Here is a smaller case, checked for you.',
+      hintCase: smallBothCase(),
+      teach: {
+        rule: 'When two things do not affect each other, find both in two steps. Start with the ones that have the first thing. Then take the part of them that has the second.',
+        terms: [PAIR_TERMS.both, PAIR_TERMS.apart],
+        meaning: `The question asks for the ${t.nouns} that ${andSay(t)}, both at once. ${box}`,
+        casesTitle: 'Each row, and the same part of it',
+        cases: pairRowCases(pic),
+        remember: ['Both is one box. It is never more than the count for one thing alone.', 'Ask: “Of these, how many also have the other thing?”'],
+        simpler: smallBothSteps(),
+      },
+      tags: [ADD_BOTH.tag],
+      conflict: true,
+    },
+    { t: 'both', pic },
+  );
+}
+
+/** How an either item shows its picture: every box, or only each row’s count (find both first). */
+export type EitherForm = 'picture' | 'rows';
+export const EITHER_FORMS: readonly EitherForm[] = ['picture', 'rows'];
+
+/**
+ * How many have one thing, the other, or both? The row and the column added, with the overlap taken away once: the
+ * three boxes with one thing or both. 'picture' shows every box; 'rows' shows only each row’s count, so both is found
+ * first. (The trap: adding counts the overlap twice. Tag overlap.)
+ */
+export function eitherItem(rng: Rng, o: CountOptions & { pic?: PairPic; form?: EitherForm }): CountMade {
+  const pic = o.pic ?? makePairPic(rng, pickTopic(rng, PAIR_TOPICS, o.skin, o.avoid));
+  const form = o.form ?? rng.pick(EITHER_FORMS);
+  const t = pic.topic, c = pic.cells, n = pairCounts(pic);
+  const share = shareWords(pic);
+  const steps = form === 'rows' ? [`${cap(share)} of all 100 ${t.nouns} ${partVerb(pic)}: ${n.b}.`, ofTheRow(pic)] : [];
+  const rowCol = `The “${t.a.yes}” row has ${n.a}, and the “${t.b.yes}” column has ${n.b}.`;
+  const twice = `The ${n.both} that ${andSay(t)} sit in both, so adding counts them twice.`;
+  const takeAway = `${n.a} and ${n.b} make ${n.added}. Take away the ${n.both} once: ${n.either}.`;
+  const overlapCase: TeachCase = { label: `The overlap: the box where the “${t.a.yes}” row meets the “${t.b.yes}” column. It holds ${n.both}.`, note: 'It is part of the row and part of the column, so count it once.' };
+  const boxesCase: TeachCase = { label: `The boxes for or: ${c[0][0]} with both, ${c[0][1]} only in the “${t.a.yes}” row, and ${c[1][0]} only in the “${t.b.yes}” column.`, note: `Together they make ${n.either}.` };
+  const fb: Record<string, ChoiceFeedback> = {
+    added: { headline: 'Your answer adds the row and the column, but that counts the overlap twice.', detail: [...steps, rowCol, twice, takeAway], example: overlapCase },
+    one: {
+      headline: `Your answer leaves out the ${t.nouns} that ${andSay(t)}, but or counts them too.`,
+      detail: ['In this game, or means one thing, the other, or both.', `${n.one} counts only the ones with just one of the two things. Add the ${n.both} with both: ${n.either}.`],
+      example: boxesCase,
+    },
+    both: { headline: `Your answer counts only the ${t.nouns} that ${andSay(t)}, but or counts more.`, detail: [`Or counts the whole “${t.a.yes}” row and the whole “${t.b.yes}” column: ${n.a} and ${n.b}.`, `Take away the ${n.both} counted twice: ${n.either}.`], example: boxesCase },
+    neither: { headline: `Your answer counts the ones with neither thing: the box outside the “${t.a.yes}” row and the “${t.b.yes}” column.`, detail: [`Those ${n.neither} sit in the last box.`, `Or counts the other three boxes: ${n.either}.`], example: boxesCase },
+  };
+  const choices: Choice[] = [
+    { id: 'either', label: String(n.either) },
+    { id: 'added', label: String(n.added) },
+    { id: 'one', label: String(n.one) },
+    { id: 'both', label: String(n.both) },
+    { id: 'neither', label: String(n.neither) },
+  ];
+  return done(
+    'either',
+    {
+      kind: 'choose',
+      prompt: `${form === 'rows' ? pairStory(pic) : `${t.setting} The count picture splits them two ways.`} How many ${t.nouns} ${orSay(t)}, or both?`,
+      scene: pairScene(pic, { show: form === 'rows' ? 'rows' : 'all' }),
+      choices: rng.shuffle(choices),
+      answer: 'either',
+      explain: [...steps, rowCol, twice, takeAway, ...(form === 'picture' ? [`Or count the boxes: ${c[0][0]}, ${c[0][1]} and ${c[1][0]} make ${n.either}.`] : [])].join(' '),
+      feedback: fb,
+      hint: 'Add the row and the column. Then ask: did I count any of them twice? Here is a smaller case, checked for you.',
+      hintCase: smallEitherCase(),
+      teach: {
+        rule: 'For or, add the row and the column. Then take away the overlap once, because adding counted it twice.',
+        terms: [PAIR_TERMS.either, PAIR_TERMS.overlap],
+        meaning: `The question asks for the ${t.nouns} that ${orSay(t)}, or both. In this game, or means one thing, the other, or both.`,
+        casesTitle: 'The row, the column and the overlap',
+        cases: [{ label: `The “${t.a.yes}” row: ${n.a} ${t.nouns}.` }, { label: `The “${t.b.yes}” column: ${n.b} ${t.nouns}.` }, overlapCase, boxesCase],
+        remember: ['Or is a row and a column, with the overlap counted once.', 'Ask: “Did I count any of them twice?”'],
+        simpler: smallEitherSteps(),
+      },
+      tags: [OVERLAP.tag],
+      conflict: true,
+    },
+    { t: 'either', pic, form },
   );
 }
 

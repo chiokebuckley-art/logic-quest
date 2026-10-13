@@ -82,12 +82,17 @@ export type Scene =
    */
   | { kind: 'argument'; givens: string[]; claim: string; real?: (boolean | null)[]; realClaim?: boolean; cases?: ArgumentCase[]; caption?: string }
   /**
-   * Rings around shape cards (All, Some, None, id s8): one ring, or two that overlap, each named by its feature
-   * ("Circles", "Red"). Every card is drawn in its part: only in the first ring (`a`), in both rings (`both`), only in
-   * the second ring (`b`), or outside every ring (`out`). One ring: only `a` and `out` hold cards. `marked`: cards
-   * circled as breaking a sentence, by id. `loose`: cards not placed yet, drawn under the rings. A still frame.
+   * Rings around shape cards (All, Some, None, id s8): one ring, two that overlap, or three that overlap, each named by
+   * its feature ("Circles", "Red", "Big"). Every card is drawn in its part (RingPart): only in the first ring (`a`), in
+   * the first two rings (`both`), only in the second ring (`b`), or outside every ring (`out`). Three rings add only in
+   * the third (`c`), the first and third (`ac`), the second and third (`bc`) and all three (`abc`); `a`, `both` and `b`
+   * are then outside the third ring. One ring: only `a` and `out` hold cards. `marked`: cards circled as breaking a
+   * sentence, by id. `loose`: cards not placed yet, drawn under the rings. `crossed`: parts a given rules out, drawn
+   * gray (no card can be there); `starred`: parts where a given puts at least one card, drawn with a star. `links`:
+   * instead of cards, two groups drawn as rings side by side (`rings` names them: "Kids", "Friends") with a line
+   * between each pair, in one frame or several. A still frame.
    */
-  | { kind: 'rings'; rings: [string] | [string, string]; a: Thing[]; both: Thing[]; b: Thing[]; out: Thing[]; marked?: string[]; loose?: Thing[]; caption?: string }
+  | { kind: 'rings'; rings: [string] | [string, string] | [string, string, string]; a: Thing[]; both: Thing[]; b: Thing[]; out: Thing[]; c?: Thing[]; ac?: Thing[]; bc?: Thing[]; abc?: Thing[]; marked?: string[]; loose?: Thing[]; crossed?: RingPart[]; starred?: RingPart[]; links?: RingLinks[]; caption?: string }
   /**
    * A truth table (Truth Tables, id s9): one row for each case, one column for each sentence. `heads`: the column
    * headings in words ("A", "B", "A AND B"); the first `inputs` columns are the parts, drawn apart from the sentences.
@@ -100,20 +105,39 @@ export type Scene =
    * drawn as a 2-by-2 table of counts, with each row's and each column's count in all, and the group as dots. `title`:
    * the group ("100 kids at a school"). `rows`: the two groups ("Needs glasses", "Sees fine"); `cols`: what the clue
    * says ("Flagged", "Not flagged"). `cells[r][c]`: how many are in that row and that column, or null for a box left
-   * blank (its row and column totals are then blank too). `pick`: a row or a column picked out (the group a question
-   * counts out of), named by `pickLabel`. Never percentages and never a fraction with a slash: counts only. A still frame.
+   * blank (its row and column totals are then blank too, unless given). `rowTotals`, `colTotals`: a row's or a column's
+   * count in all, shown even when its boxes are blank (a picture to fill: the counts in all are known, the boxes are
+   * not yet); null or left out, the total is the sum of its boxes. `pick`: a row or a column picked out (the group a
+   * question counts out of), or both at once (a row and a column, sharing one box), named by `pickLabel`. Never
+   * percentages and never a fraction with a slash: counts only. A still frame.
    */
-  | { kind: 'counts'; title: string; total: number; rows: [string, string]; cols: [string, string]; cells: [[number | null, number | null], [number | null, number | null]]; pick?: { row?: 0 | 1; col?: 0 | 1 }; pickLabel?: string; caption?: string }
+  | { kind: 'counts'; title: string; total: number; rows: [string, string]; cols: [string, string]; cells: [[number | null, number | null], [number | null, number | null]]; rowTotals?: [number | null, number | null]; colTotals?: [number | null, number | null]; pick?: { row?: 0 | 1; col?: 0 | 1 }; pickLabel?: string; caption?: string }
   /**
    * Circuits (Circuit Lab, id s10): one to three still frames, drawn one under the other. Each frame is one loop: a
-   * battery, the switches wired as `part` (in a line, side by side, or inside a flipper box), and a lamp. `closed`: each
-   * switch's state by name (closed lets power pass, open leaves a gap); `lamp`: on, off, or null for a lamp to work out.
-   * Both left out: a plain wiring picture. `table`: the cases in rows, each switch Closed or Open and each lamp On or Off
-   * (null for a box left blank). A still frame, read aloud in words (circuitSpeech).
+   * battery, the switches wired as `part` (in a line, side by side, inside a flipper box, or a two-way pair), and a lamp.
+   * `closed`: each switch's state by name (closed lets power pass, open leaves a gap); `up`: each two-way switch's lever,
+   * up or down; `lamp`: on, off, or null for a lamp to work out. All left out: a plain wiring picture. `table`: the cases
+   * in rows, each switch Closed or Open (or the table's `inputWords`) and each lamp On or Off (null for a box left
+   * blank). A still frame, read aloud in words (circuitSpeech).
    */
   | { kind: 'circuit'; circuits: CircuitFrame[]; table?: CircuitTable; caption?: string }
   /** The Pattern Observatory's pictures (src/engine/scenes): a chain, a staircase, a machine, a clock, a mirror, a matrix, a bridge, a lantern. */
   | ObservatoryScene;
+
+/** A part of a rings picture (Scene 'rings'). Two rings: a, both, b and out. Three rings add c, ac, bc and abc. */
+export type RingPart = 'a' | 'both' | 'b' | 'c' | 'ac' | 'bc' | 'abc' | 'out';
+
+/**
+ * One frame of a links picture (Scene 'rings', `links`): two groups as rings side by side, not overlapping, and a line
+ * between each pair (a kid and a friend). `name`: "Picture 1", drawn over the frame. `left`, `right`: the names in the
+ * first and the second ring. `lines`: each line as [left index, right index].
+ */
+export interface RingLinks {
+  name?: string;
+  left: string[];
+  right: string[];
+  lines: [number, number][];
+}
 
 /** One way an argument’s story could go, drawn as a box (Scene 'argument'). */
 export interface ArgumentCase {
@@ -127,12 +151,19 @@ export interface ArgumentCase {
   claim?: boolean;
 }
 
-/** How a circuit's switches are wired (Scene 'circuit'): one switch, parts in a line, parts side by side, or a flipper box around a part. */
+/**
+ * How a circuit's switches are wired (Scene 'circuit'): one switch, parts in a line, parts side by side, a flipper box
+ * around a part, or a two-way pair (Circuit Lab, Lesson 5: a hall lamp with a switch at each end). In a two-way pair
+ * each switch has a lever that touches its top end (up) or its bottom end (down), and two wires join the ends of the
+ * first switch to the ends of the second. The wires cross on the way: the first switch's top end joins the second
+ * switch's bottom end, and its bottom end joins the second's top end. So power gets through when the switches differ.
+ */
 export type CircuitPart =
   | { t: 'switch'; name: string }
   | { t: 'line'; parts: CircuitPart[] }
   | { t: 'side'; parts: CircuitPart[] }
-  | { t: 'flip'; part: CircuitPart };
+  | { t: 'flip'; part: CircuitPart }
+  | { t: 'twoway'; names: [string, string] };
 
 /** One circuit drawn as a still frame (Scene 'circuit'). */
 export interface CircuitFrame {
@@ -141,6 +172,8 @@ export interface CircuitFrame {
   part: CircuitPart;
   /** Switch name -> closed (true) or open (false). Left out: the switches are drawn with no state. */
   closed?: Record<string, boolean>;
+  /** Two-way switch name -> up (true) or down (false). Left out: the two-way switches are drawn with no state. */
+  up?: Record<string, boolean>;
   /** The lamp: on (true), off (false), or null for a lamp to work out. Left out: a plain lamp. */
   lamp?: boolean | null;
 }
@@ -156,6 +189,11 @@ export interface CircuitTable {
   /** Rows picked out (0-based), named by `markLabel`. */
   marked?: number[];
   markLabel?: string;
+  /**
+   * The words for a switch box, true first: ["Up", "Down"] for two-way switches, ["True", "False"] for a table that
+   * two-way and plain switches share (true is up or closed). Left out: "Closed" and "Open".
+   */
+  inputWords?: [string, string];
 }
 
 /** The labels a contrast picture uses, so a card puzzle never says "sign" or "test world". All optional. */
@@ -816,6 +854,12 @@ export interface LessonDef {
    * the lesson is done. Put a term on the lesson whose card introduces it, never on a later one.
    */
   terms?: GlossaryTerm[];
+  /**
+   * The one lesson where a kid reads logic symbols (Truth Tables, “Say it with symbols”): ¬ for NOT, ∧ for AND, ∨ for
+   * OR, → for IF … THEN and ↔ for IF AND ONLY IF. Every other lesson keeps symbols out of what a kid reads, and the
+   * symbol bans in the tests skip this lesson's strings; the reading level still applies to its words.
+   */
+  symbols?: true;
 }
 
 /**

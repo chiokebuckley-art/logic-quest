@@ -8,6 +8,7 @@
  *  - line-vs-side (Lesson 2): in a line power must pass every switch; side by side one closed path is enough.
  *  - closed-vs-lit (Lesson 3): the switch being closed is not the lamp being on (a flipper box does the opposite).
  *  - looks-vs-works (Lesson 4): two circuits looking alike is not two circuits having the same table.
+ *  - up-vs-differ (Lesson 5): one switch of a two-way pair being up is not the lamp being on; the switches must differ.
  */
 import { rowsFor, sameRow, type Row } from './tables';
 import {
@@ -18,8 +19,13 @@ import {
   FLIP,
   LAB,
   LINE,
+  PICK_POOL,
   SIDE,
+  SIDE_TWIN,
   SW,
+  TRUE_CAPTION,
+  TRUE_FALSE,
+  TWO,
   circuitScene,
   circuitTable,
   differRows,
@@ -27,6 +33,7 @@ import {
   frame,
   partWords,
   passes,
+  pos,
   rowClause,
   rowShort,
   sameJob,
@@ -668,6 +675,315 @@ export function sameBoard(): DrillStep {
     closing: 'Back to the board: compare the lamps, row by row.',
     done: 'Right. They look different, but the lamps agree in every row. So they do the same job.',
   });
+}
+
+
+// ---------- Lesson 5: the two-way switch ----------
+
+export const L5_CARDS = { hall: 0, wires: 1, contrast: 2, side: 3, example: 4, pick: 5 } as const;
+export const UP_VS_DIFFER: Distinction = { id: 'up-vs-differ', a: 'One switch of the two-way pair is up.', b: 'The two switches differ, one up and one down, so the lamp is on.' };
+/** A case of the two-way pair in short: “A up, B down”. */
+const twoLabel = (r: Row) => rowShort(r, t, TWO);
+const BOTH_UP: Row = [true, true];
+/** The rows (0-based) where a circuit's lamp is on. */
+const onRows = (n: Net) => ROWS2.flatMap((r, k) => (passes(n, r) ? [k] : []));
+
+const UP_AS_ON =
+  'You may be treating “a switch is up” and “the lamp is on” as the same thing. They are two different things. The lamp is on only when the switches differ. With both up, they match, so the lamp is off.';
+const DOWN_AS_OFF =
+  'You may be treating “a switch is down” and “the lamp is off” as the same thing. They are two different things. With one switch down and the other up, they differ, so the lamp is on.';
+const MATCH_AS_ON = 'You may be treating “the switches match” and “the lamp is on” as the same thing. It is the other way round. The lamp is on when the switches differ: one up and one down.';
+const TWO_AS_SIDE =
+  'You may be treating the two-way pair like switches side by side. They are two different things. Side by side, both closed lights the lamp. In a two-way pair, both up leaves it off.';
+const LOOKS_LIKE_TABLE = 'You may be treating “it matches row 1” and “it has the table” as the same thing. One row is not enough. A circuit has the table only when it matches every row.';
+
+export const TWO_Q: ConfusedQuestion = {
+  q: 'Switch A of a two-way pair is up. Is the lamp on?',
+  options: [{ label: 'It depends on switch B', right: true }, { label: 'Yes. Up means on' }, { label: 'Not sure' }],
+  teach: 'It depends on switch B. A two-way pair lights the lamp only when its switches differ. If B is down, the lamp is on. If B is up too, it is off.',
+};
+export const TWO_SIDE_Q: ConfusedQuestion = {
+  q: 'Both switches of a two-way pair are up. Is the lamp on, like side by side?',
+  options: [{ label: 'No. Both up, they match, so it is off', right: true }, { label: 'Yes. It works like side by side' }, { label: 'Not sure' }],
+  teach: 'No. Side by side, two closed paths still light the lamp. A two-way pair lights the lamp only when its switches differ. Both up, they match, so the lamp is off.',
+};
+
+/** Do the two switches of the pair match (both up or both down)? */
+function matchMark(id: string, r: Row): DrillMark {
+  const same = r[0] === r[1];
+  const said = `${Sw(0)} is ${pos(r[0])} and switch ${t.names[1]} is ${pos(r[1])}.`;
+  return {
+    id,
+    label: `Do ${t.names[0]} and ${t.names[1]} match?`,
+    options: YES_NO.map((o) => ({ ...o })),
+    answer: yn(same),
+    why: { [yn(!same)]: same ? `${said} Both are ${pos(r[0])}, so they match.` : `${said} One is up and one is down, so they differ.` },
+  };
+}
+
+/** The rule a table shows: the lamp is on when the switches match, or when they differ. Worked out from every row. */
+function ruleMark(id: string, n: Net): DrillMark {
+  const differ = ROWS2.every((r) => passes(n, r) === (r[0] !== r[1]));
+  const match = ROWS2.every((r) => passes(n, r) === (r[0] === r[1]));
+  if (differ === match) throw new Error('ruleMark: the lamp is not a match-or-differ rule');
+  const answer = differ ? 'differ' : 'match';
+  const k = ROWS2.findIndex((r) => (r[0] === r[1]) === differ);
+  return {
+    id,
+    label: 'The lamp is on when the switches…',
+    options: [{ id: 'match', label: 'Match' }, { id: 'differ', label: 'Differ' }],
+    answer,
+    why: { [differ ? 'match' : 'differ']: `Look at row ${k + 1}: ${explainRow(n, ROWS2[k], t).join(' ')}` },
+  };
+}
+
+/** In which row do two circuits' lamps differ? Only one row does. */
+function differRowMark(id: string, n1: Net, n2: Net): DrillMark {
+  const diff = differRows(n1, n2);
+  if (diff.length !== 1) throw new Error('differRowMark: one row only');
+  const why: Record<string, string> = {};
+  ROWS2.forEach((r, j) => {
+    if (j !== diff[0]) why[`r${j + 1}`] = `In row ${j + 1}, both lamps are ${lampId(passes(n1, r))}. Look for the row where one is on and the other is off.`;
+  });
+  return { id, label: 'In which row do the lamps differ?', options: ROWS2.map((_, j) => ({ id: `r${j + 1}`, label: `Row ${j + 1}` })), answer: `r${diff[0] + 1}`, why };
+}
+
+export const hallScene = (): CircuitScene => {
+  const r: Row = [true, false];
+  return circuitScene([frame(TWO, t, { row: r, lamp: passes(TWO, r) })], { caption: `Switch A is up and switch B is down. The lamp is ${lampId(passes(TWO, r))}.` });
+};
+export const wiresScene = (): CircuitScene =>
+  circuitScene([frame(TWO, t, { row: BOTH_UP, lamp: passes(TWO, BOTH_UP) })], { caption: `Both switches are up. ${twoWayWhyShort(passes(TWO, BOTH_UP))} The lamp is ${lampId(passes(TWO, BOTH_UP))}.` });
+function twoWayWhyShort(through: boolean): string {
+  return through ? 'Both levers touch the same wire.' : 'Their levers touch different wires.';
+}
+export const sideVsTwoScene = (): CircuitScene =>
+  circuitScene([frame(SIDE_TWIN, t, { name: 'Side by side', row: BOTH_UP, lamp: passes(SIDE_TWIN, BOTH_UP) }), frame(TWO, t, { name: 'Two-way pair', row: BOTH_UP, lamp: passes(TWO, BOTH_UP) })], {
+    caption: `Side by side, both closed: the lamp is ${lampId(passes(SIDE_TWIN, BOTH_UP))}. Two-way pair, both up: the lamp is ${lampId(passes(TWO, BOTH_UP))}.`,
+  });
+export const twoExampleScene = (): CircuitScene =>
+  circuitScene([frame(TWO, t)], { table: circuitTable([TWO], t, { blank: (k) => k > 1 }), caption: 'Rows 1 and 2 are worked out. Rows 3 and 4 are blank.' });
+/** Lesson 5's three circuits, in a fixed order: plain switches side by side, the two-way pair, plain switches in a line. */
+const PICK_SHOWN: readonly Net[] = [PICK_POOL[1], PICK_POOL[0], PICK_POOL[2]];
+const pickFrames = () => PICK_SHOWN.map((n, j) => frame(n, t, { name: `Circuit ${j + 1}` }));
+export const pickExampleScene = (): CircuitScene => circuitScene(pickFrames(), { table: circuitTable([TWO], t, { inputWords: TRUE_FALSE }), caption: TRUE_CAPTION });
+
+/** Card 1: a switch at each end. */
+export function hallCard(): IdeaCard {
+  return {
+    title: 'A switch at each end',
+    scene: hallScene(),
+    body: [
+      'A long hall has one lamp and a switch at each end. You can work the lamp from either end.',
+      'Each one is a two-way switch. Its lever is up or down, and it sends power along one of two wires.',
+      `Here switch A is up and switch B is down, and the lamp is ${lampId(passes(TWO, [true, false]))}.`,
+    ],
+  };
+}
+
+/** Card 2: follow the wires. Both up: the levers touch different wires. */
+export function wiresCard(): IdeaCard {
+  if (passes(TWO, BOTH_UP) || !passes(TWO, [true, false])) throw new Error('wiresCard: the switches must differ to light the lamp');
+  return {
+    title: 'Follow the wires',
+    scene: wiresScene(),
+    body: [
+      'The two wires cross on the way. So the wire from the top of A ends at the bottom of B.',
+      'Power gets through only when both levers touch the same wire. That happens when the switches differ: one up and one down.',
+      'Here both switches are up, so their levers touch different wires. The lamp is off. Flip either switch, and it comes on.',
+    ],
+  };
+}
+
+/** One switch up, then both up: the same claim, and only one lamp on. */
+export function upVsDifferContrast(): Extract<Scene, { kind: 'contrast' }> {
+  const differ: Row = [true, false];
+  if (!passes(TWO, differ) || passes(TWO, BOTH_UP)) throw new Error('upVsDifferContrast: one up is on, both up is off');
+  const panel = (r: Row, because: string, then?: string): ContrastPanel => ({
+    world: `${Sw(0)} up, switch ${t.names[1]} ${pos(r[1])}.`,
+    who: SAM,
+    says: 'Switch A is up, so the lamp is on.',
+    truth: passes(TWO, r),
+    because,
+    ...(then ? { then } : {}),
+  });
+  return {
+    kind: 'contrast',
+    pairs: [panel(differ, 'A is up and B is down. They differ, so both levers touch the same wire.'), panel(BOTH_UP, 'B is up too. They match, so the levers touch different wires.', 'Switch A is up, but the lamp is off.')],
+    ask: { q: 'Switch A is up in both. Why is only one lamp on?', a: 'A two-way pair lights the lamp only when its switches differ. In the second case, switch B is up too.' },
+    words: { worldTag: 'Two-way pair', ...LAMP_TAGS },
+  };
+}
+
+export function upVsDifferCard(): IdeaCard {
+  return {
+    title: 'Up is not the same as on',
+    distinction: UP_VS_DIFFER.id,
+    body: ['One switch being up does not tell you the lamp. Look at both switches.', 'Both cases below have switch A up. Only one lamp is on.'],
+    scene: upVsDifferContrast(),
+  };
+}
+
+/** Card 4: not like side by side. The two tables differ in one row only: both true. */
+export function sideVsTwoCard(): IdeaCard {
+  const diff = differRows(SIDE_TWIN, TWO);
+  if (diff.length !== 1 || diff[0] !== 0) throw new Error('sideVsTwoCard: side by side and the two-way pair differ in row 1 only');
+  return {
+    title: 'Not like side by side',
+    scene: sideVsTwoScene(),
+    body: [
+      'Side by side is OR, from NOT, AND, OR. One closed switch or both lights the lamp.',
+      'A two-way pair is one but not both, from Truth Tables. Grown-ups call it exclusive or, so a two-way switch is exclusive or in wires.',
+      'In a table, up is like True, just as closed is. So the two tables differ in one row only: row 1, with both switches True.',
+    ],
+  };
+}
+
+/** Card 5: the worked table, rows 1 and 2. */
+export function twoExampleCard(): IdeaCard {
+  return {
+    title: 'Example: the two-way table',
+    scene: twoExampleScene(),
+    body: [
+      'A table lists every case, one row each. Up is like True, so row 1 has both switches up.',
+      `Row 1: ${explainRow(TWO, ROWS2[0], t).join(' ')}`,
+      `Row 2: ${explainRow(TWO, ROWS2[1], t).join(' ')}`,
+      'Now you fill rows 3 and 4.',
+    ],
+  };
+}
+
+/** Card 6: from a table to a circuit. Row 1 crosses out side by side and the line. */
+export function pickCard(): IdeaCard {
+  const [c1, c2, c3] = PICK_SHOWN;
+  if (!passes(c1, BOTH_UP) || passes(c2, BOTH_UP) || !passes(c3, BOTH_UP) || !sameJob(c2, TWO) || sameJob(c1, TWO) || sameJob(c3, TWO)) throw new Error('pickCard: row 1 rules out circuits 1 and 3');
+  return {
+    title: 'From a table to a circuit',
+    scene: pickExampleScene(),
+    body: [
+      'Which circuit has this table? True means up for a two-way switch, and closed for a plain one.',
+      'Row 1 has every switch True. Circuits 1 and 3 light the lamp there, but the table says off. Cross them out.',
+      'Circuit 2, the two-way pair, matches every row. It has this table.',
+    ],
+  };
+}
+
+/** Do, board 1 (right after the contrast): four cases of the pair. Do A and B match? Then the lamp. */
+export function upVsDifferBoard(): DrillStep {
+  const cases: Row[] = [[true, false], [true, true], [false, false], [false, true]];
+  const rows: DrillRow[] = cases.map((r, j) => {
+    const id = `c${j + 1}`;
+    return {
+      id,
+      label: `Case ${j + 1}: ${twoLabel(r)}`,
+      marks: [matchMark(`${id}-match`, r), lampMark(`${id}-lamp`, TWO, r, { compare: { says: 'A two-way pair lights the lamp only when its switches differ.', world: `${twoLabel(r)}.` } })],
+    };
+  });
+  const misconceptions: Misconception[] = [
+    ...cases.flatMap((r, j) => (!passes(TWO, r) && r[0] && r[1] ? [{ id: 'up-as-on', when: 'picks' as const, picks: { [`c${j + 1}-lamp`]: 'on' }, text: UP_AS_ON }] : [])),
+    ...cases.flatMap((r, j) => (passes(TWO, r) && !r[0] ? [{ id: 'down-as-off', when: 'picks' as const, picks: { [`c${j + 1}-lamp`]: 'off' }, text: DOWN_AS_OFF }] : [])),
+  ];
+  return {
+    id: 's10.l5-do1',
+    title: 'Match or differ?',
+    body: ['Here is the two-way pair from the card. For each case, ask: do A and B match?', 'Then mark the lamp. It is on only when the switches differ.'],
+    scene: circuitScene([frame(TWO, t)]),
+    twin: 'The two-way pair from the card. No case is set yet.',
+    afterCard: L5_CARDS.contrast,
+    distinction: UP_VS_DIFFER.id,
+    scaffold: 'full',
+    steps: ['Look at each switch: up or down.', 'Ask: do the two switches match or differ?', 'Mark the lamp: on if they differ, off if they match.'],
+    rows,
+    misconceptions,
+    confused: [TWO_Q, TWO_SIDE_Q],
+    words: words$('Those two ideas are apart now. Back to the board: look at both switches.'),
+    done: 'Right. One switch up is not enough to know. The lamp is on only when the switches differ: one up and one down.',
+  };
+}
+
+/** Do, board 2 (after the side-by-side card): both lamps in rows 1 and 4, then the one row where they differ. */
+export function sideVsTwoBoard(): DrillStep {
+  const ks = [0, 3];
+  const diff = differRows(SIDE_TWIN, TWO);
+  return {
+    id: 's10.l5-do2',
+    title: 'Two-way or side by side?',
+    body: ['Here are side by side and the two-way pair. Rows 2 and 3 are filled in.', 'Mark both lamps in rows 1 and 4. Then pick the row where the lamps differ.'],
+    scene: circuitScene([frame(SIDE_TWIN, t, { name: 'Side by side' }), frame(TWO, t, { name: 'Two-way pair' })], {
+      table: circuitTable([SIDE_TWIN, TWO], t, { blank: (k) => ks.includes(k), lampHeads: ['Side by side', 'Two-way'], inputWords: TRUE_FALSE }),
+      caption: 'True means closed for side by side, and up for the two-way pair.',
+    }),
+    twin: 'The two circuits from the card, with no case set, and their table.',
+    afterCard: L5_CARDS.side,
+    rows: [
+      ...ks.flatMap((k): DrillRow[] => [
+        { id: `r${k + 1}-side`, label: `Row ${k + 1}. Side by side: ${rowShort(ROWS2[k], t, SIDE_TWIN)}`, marks: [lampMark(`r${k + 1}-side`, SIDE_TWIN, ROWS2[k])] },
+        { id: `r${k + 1}-two`, label: `Row ${k + 1}. Two-way pair: ${twoLabel(ROWS2[k])}`, marks: [lampMark(`r${k + 1}-two`, TWO, ROWS2[k])] },
+      ]),
+      { id: 'which', label: 'The whole table', marks: [differRowMark('which', SIDE_TWIN, TWO)] },
+    ],
+    misconceptions: [{ id: 'two-as-side', when: 'picks', picks: { 'r1-two': 'on' }, text: TWO_AS_SIDE }],
+    confused: [TWO_SIDE_Q, SIDE_Q],
+    words: words$('Back to the board: work out each lamp on its own.'),
+    done: `Right. The lamps differ only in ${rowsWord(diff)}. Side by side, both closed is on. In the two-way pair, both up is off.`,
+  };
+}
+
+/** Do, board 3 (the worked table): rows 3 and 4, then the rule. */
+export function twoTableBoard(): DrillStep {
+  return {
+    id: 's10.l5-do3',
+    title: 'Fill the two-way table',
+    body: ['Rows 1 and 2 are worked out on the card. Mark the lamp in rows 3 and 4.', 'Then finish the rule: is the lamp on when the switches match, or when they differ?'],
+    scene: twoExampleScene(),
+    afterCard: L5_CARDS.example,
+    rows: [
+      ...[2, 3].map((k) => ({ id: `r${k + 1}`, label: `Row ${k + 1}: ${twoLabel(ROWS2[k])}`, marks: [lampMark(`r${k + 1}-lamp`, TWO, ROWS2[k])] })),
+      { id: 'rule', label: 'The whole table', marks: [ruleMark('rule', TWO)] },
+    ],
+    misconceptions: [
+      ...[2, 3].flatMap((k) => (passes(TWO, ROWS2[k]) && !ROWS2[k][0] ? [{ id: 'down-as-off', when: 'picks' as const, picks: { [`r${k + 1}-lamp`]: 'off' }, text: DOWN_AS_OFF }] : [])),
+      { id: 'match-as-on', when: 'picks', picks: { rule: 'match' }, text: MATCH_AS_ON },
+    ],
+    confused: [TWO_Q],
+    words: words$('Back to the board: do the switches match or differ?'),
+    done: `Right. The lamp is on in ${rowsWord(onRows(TWO))}, where the switches differ. That is one but not both.`,
+  };
+}
+
+/** Do, board 4 (a twin of the worked pick): the same three circuits and a new table, side by side’s. */
+export function pickBoard(): DrillStep {
+  const target = SIDE_TWIN;
+  const cases: [number, number][] = [[0, 0], [1, 0], [2, 0], [2, 1]];
+  const right = PICK_SHOWN.findIndex((n) => sameJob(n, target));
+  if (PICK_SHOWN.filter((n) => sameJob(n, target)).length !== 1) throw new Error('pickBoard: one circuit has the table');
+  const col = ROWS2.map((r) => passes(target, r));
+  const pickWhy: Record<string, string> = {};
+  PICK_SHOWN.forEach((n, j) => {
+    if (j === right) return;
+    const k = differRows(n, target)[0];
+    pickWhy[`c${j + 1}`] = `In row ${k + 1}, circuit ${j + 1}’s lamp is ${lampId(passes(n, ROWS2[k]))}, but the table says ${lampId(col[k])}. One row that does not match rules a circuit out.`;
+  });
+  return {
+    id: 's10.l5-do4',
+    title: 'Which circuit has this table?',
+    body: ['Here are the same three circuits with a new table. Mark the lamps the board asks for.', 'Compare each lamp with the table. Then pick the circuit that has this table.'],
+    scene: circuitScene(pickFrames(), { table: circuitTable([target], t, { inputWords: TRUE_FALSE }), caption: TRUE_CAPTION }),
+    twin: 'The same three circuits. The table is new: it is side by side’s.',
+    afterCard: L5_CARDS.pick,
+    rows: [
+      ...cases.map(([j, k]): DrillRow => ({ id: `r${k + 1}-c${j + 1}`, label: `Row ${k + 1}. Circuit ${j + 1}: ${rowShort(ROWS2[k], t, PICK_SHOWN[j])}`, marks: [lampMark(`r${k + 1}-c${j + 1}`, PICK_SHOWN[j], ROWS2[k])] })),
+      {
+        id: 'pick',
+        label: 'The whole table',
+        marks: [{ id: 'pick', label: 'Which circuit has this table?', options: PICK_SHOWN.map((_, j) => ({ id: `c${j + 1}`, label: `Circuit ${j + 1}` })), answer: `c${right + 1}`, why: pickWhy }],
+      },
+    ],
+    misconceptions: [{ id: 'one-row-enough', when: 'picks', picks: { pick: 'c3' }, text: LOOKS_LIKE_TABLE }],
+    confused: [SAME_Q],
+    words: words$('Back to the board: check each circuit row by row.'),
+    done: `Right. Circuit ${right + 1} matches the table in every row. One row that does not match rules a circuit out.`,
+  };
 }
 
 /** For tests: the cases a board uses, by row id, when they are rows of the two-switch table. */

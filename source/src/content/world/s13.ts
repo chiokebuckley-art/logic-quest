@@ -36,6 +36,14 @@ export const S13_WORLD: StopWorld = {
         { who: 'Spam filter builders', kind: 'work', text: 'Spam is junk email. People who build spam filters ask how often a word shows up in good email too. A word common in both tells the filter little.' },
       ],
     },
+    's13.l5': {
+      why: 'Both means two things at once, so it is never more than one count alone. For either, add the two counts, then take away the overlap once.',
+      uses: [
+        { who: 'You, guessing on a quiz', kind: 'life', text: 'A quiz has two yes or no questions you do not know. Each guess is right 1 time in every 2, and one does not affect the other. So both are right only 1 time in every 4.' },
+        { who: 'Board game designers', kind: 'work', text: 'Two fair cubes do not affect each other. Each shows a 6 only 1 time in every 6, so both show a 6 just 1 time in every 36. So designers make two 6s a rare prize.' },
+        { who: 'Librarians', kind: 'work', text: 'A librarian counts the kids who borrowed a book or a movie this month. Kids who borrowed both are on both lists. So she adds the lists, then takes those kids away once.' },
+      ],
+    },
   },
   skills: {
     // s13.l1 Likely, not certain
@@ -57,6 +65,14 @@ export const S13_WORLD: StopWorld = {
     's13.clue': [
       'A dog that barks at everything is a weak clue that someone is at the door. The doorbell is a stronger clue, because it rarely rings when no one is there.',
       'A metal detector beeps over bottle caps as well as coins. On a beach full of caps, most beeps are caps, so do not expect a coin under every beep.',
+    ],
+    // s13.l5 And, or, with chances
+    's13.both': [
+      'Two fair coins do not affect each other. Of the times the first lands heads, the second lands heads 1 time in every 2. So both land heads 1 time in every 4.',
+      'Both can never be more than one count alone. If 8 kids in your class play chess, at most 8 of them play chess and piano.',
+    ],
+    's13.either': [
+      'Say 12 kids in a class play soccer, 10 play piano, and 4 do both. Then 18 kids do at least one of them, not 22.',
     ],
     's13.why': [
       'Asking why helps you find the real reason. “The coin has no memory” explains a streak better than “tails is due.”',

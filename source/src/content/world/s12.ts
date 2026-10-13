@@ -36,6 +36,22 @@ export const S12_WORLD: StopWorld = {
         { who: 'Science teachers', kind: 'work', text: 'Long ago, most people thought the sun went around the Earth. Careful checks showed the Earth goes around the sun. Science goes by the facts, not by a vote.' },
       ],
     },
+    's12.l5': {
+      why: 'A claim is true or false because of the facts. Who says it, or how famous they are, does not change that.',
+      uses: [
+        { who: 'You, in a class debate', kind: 'life', text: 'A classmate says your idea is silly because you are new. That says nothing about your idea. Ask them to talk about the idea itself.' },
+        { who: 'Debate coaches', kind: 'work', text: 'A debate coach teaches students to answer the other side’s real point. Twisting it into something sillier may get a laugh, but it proves nothing.' },
+        { who: 'News reporters', kind: 'work', text: 'When a famous actor talks about medicine, a careful reporter also asks a doctor. Being famous for one thing does not make someone an expert in another.' },
+      ],
+    },
+    's12.l6': {
+      why: 'One step does not have to lead to the next, and coming first is not the same as causing. Ask for a reason for each link.',
+      uses: [
+        { who: 'You, at bedtime', kind: 'life', text: 'You ask to stay up ten minutes late. A sibling says soon you will stay up all night, every night. One late night does not have to lead there.' },
+        { who: 'Medicine testers', kind: 'work', text: 'Some people feel better after they take a new medicine. Testers compare them with people who did not take it. Feeling better after is not proof the medicine did it.' },
+        { who: 'Car mechanics', kind: 'work', text: 'A car starts to make a noise after new tires go on. A good mechanic does not blame the tires right away. She checks what else changed too.' },
+      ],
+    },
   },
   skills: {
     // s12.l1 Flip tricks
@@ -53,5 +69,12 @@ export const S12_WORLD: StopWorld = {
     's12.hasty': ['You read two pages of a book, and they are slow. The rest of the book could still be great.'],
     's12.popular': ['Lots of kids think goldfish forget everything in seconds. But tests show goldfish can learn tricks. Check the facts, not the crowd.'],
     's12.why': ['When a claim turns out true, still ask what proved it. A lucky guess and a good reason are not the same.'],
+    // s12.l5 Tricks about people
+    's12.person': ['A friend says a recipe must be bad because the cook is grumpy. A grumpy cook can still write a great recipe. Judge the recipe by how it tastes.'],
+    's12.twist': ['You say the game needs one new rule. Someone says you want to change the whole game. Point back to what you really said.'],
+    's12.authority': ['A famous runner says a phone game is good for your eyes. Being fast says nothing about eyes. Ask an eye doctor instead.'],
+    // s12.l6 Tricks about time
+    's12.slope': ['Someone says that if you miss one piano lesson, you will quit music for good. Ask what would make each step happen.'],
+    's12.after': ['You wore a new hat, and then you got an A on a test. The hat did not do it. You studied.'],
   },
 };

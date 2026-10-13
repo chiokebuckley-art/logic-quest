@@ -3,9 +3,12 @@
  * the left, the switches in the middle, a lamp on the right, and the wire back along the bottom. A switch is two
  * contacts and a lever: flat across the gap when closed, raised when open, dashed when the case is not set. Switches in
  * a line follow each other on one wire; side by side, they sit on branches between two rails; a flipper box is a dashed
- * box around its inside, tagged “Flipper”. Every label is 15 or 16 units, so it stays at 12 px or more at phone width.
- * Words carry the meaning (closed, open, on, off), never colour alone. Under the frames, a table of cases is a real
- * table with the words Closed, Open, On and Off. The same picture is read in words by circuitSpeech.
+ * box around its inside, tagged “Flipper”. A two-way pair (Lesson 5) is two switches, each with a lever from its middle
+ * end to its top end (up) or its bottom end (down), and two wires between them that cross: the first switch's top end
+ * runs to the second switch's bottom end. Every label is 15 or 16 units, so it stays at 12 px or more at phone width.
+ * Words carry the meaning (closed, open, up, down, on, off), never colour alone. Under the frames, a table of cases is a
+ * real table with the words Closed, Open (or the table's own switch words), On and Off. The same picture is read in
+ * words by circuitSpeech.
  */
 import type { ReactNode } from 'react';
 import type { CircuitFrame, CircuitPart, Scene } from '../../engine/types';
@@ -32,6 +35,13 @@ const CLOSED = '#7dffbf';
 const OPEN = '#ff8fa3';
 const FLIPPER = '#c4a8ff';
 const LAMP_ON = '#ffd84d';
+const LEVER = '#8fd3ff';
+/** A two-way switch: 48 wide; its two ends sit 14 above and 14 below the wire. Two switches with 40 of crossing wires between. */
+const TW_W = 48;
+const TW_GAP = 40;
+const TW_H = 76;
+const TW_MID = 38;
+const TW_END = 14;
 
 interface Box {
   w: number;
@@ -74,13 +84,70 @@ function switchBox(name: string, closed: boolean | undefined): Box {
   };
 }
 
+/**
+ * A two-way pair: switch one's middle end on the left, its top and bottom ends on the right; then the two wires, crossed;
+ * then switch two, mirrored. Each lever runs from a switch's middle end to its top end (up) or bottom end (down), dashed
+ * and touching neither when the case is not set. The name sits over each switch, and up or down under it.
+ */
+function twoWayBox(names: [string, string], up: Record<string, boolean> | undefined): Box {
+  const w = 2 * TW_W + TW_GAP;
+  return {
+    w,
+    h: TW_H,
+    mid: TW_MID,
+    draw: (x, y, key) => {
+      const m = y + TW_MID;
+      const top = m - TW_END;
+      const bottom = m + TW_END;
+      // Switch one: middle end at a1, top and bottom ends at e1. Switch two: ends at e2, middle end at a2.
+      const a1 = x + 9;
+      const e1 = x + TW_W - 9;
+      const e2 = x + TW_W + TW_GAP + 9;
+      const a2 = x + w - 9;
+      const lever = (from: number, to: number, v: boolean | undefined, k: string) =>
+        v === undefined ? (
+          <line key={k} x1={from} y1={m} x2={from + (to - from) * 0.75} y2={m} className="play-circ-lever" strokeDasharray="4 3" />
+        ) : (
+          <line key={k} x1={from} y1={m} x2={to} y2={v ? top : bottom} stroke={LEVER} strokeWidth={4} strokeLinecap="round" />
+        );
+      const label = (cx: number, name: string, v: boolean | undefined) => (
+        <g key={`l-${name}`}>
+          <text x={cx} y={y + 12} fontSize={LABEL} fontWeight={800} textAnchor="middle" className="play-circ-text">{name}</text>
+          {v !== undefined && (
+            <text x={cx} y={y + TW_H - 2} fontSize={SMALL} fontWeight={700} textAnchor="middle" fill={LEVER}>{v ? 'up' : 'down'}</text>
+          )}
+        </g>
+      );
+      const [v1, v2] = [up?.[names[0]], up?.[names[1]]];
+      return (
+        <g key={key}>
+          {wire(x, m, a1, m, 'in')}
+          {wire(a2, m, x + w, m, 'out')}
+          {/* The two wires between the switches cross: top end to bottom end, and bottom end to top end. */}
+          {wire(e1, top, e2, bottom, 'w1')}
+          {wire(e1, bottom, e2, top, 'w2')}
+          {lever(a1, e1, v1, 'lv1')}
+          {lever(a2, e2, v2, 'lv2')}
+          {[[a1, m], [e1, top], [e1, bottom], [e2, top], [e2, bottom], [a2, m]].map(([cx, cy], i) => (
+            <circle key={`d${i}`} cx={cx} cy={cy} r={4} className="play-circ-dot" />
+          ))}
+          {label(x + TW_W / 2, names[0], v1)}
+          {label(x + TW_W + TW_GAP + TW_W / 2, names[1], v2)}
+        </g>
+      );
+    },
+  };
+}
+
 /** Lay out a part: its size, where its wire runs, and how to draw it at a place. */
-function layout(p: CircuitPart, closed: Record<string, boolean> | undefined): Box {
+function layout(p: CircuitPart, closed: Record<string, boolean> | undefined, up?: Record<string, boolean>): Box {
   switch (p.t) {
     case 'switch':
       return switchBox(p.name, closed?.[p.name]);
+    case 'twoway':
+      return twoWayBox(p.names, up);
     case 'flip': {
-      const inner = layout(p.part, closed);
+      const inner = layout(p.part, closed, up);
       const w = inner.w + 2 * PAD;
       const h = inner.h + TAG + PAD;
       const mid = TAG + inner.mid;
@@ -100,7 +167,7 @@ function layout(p: CircuitPart, closed: Record<string, boolean> | undefined): Bo
       };
     }
     case 'line': {
-      const parts = p.parts.map((x) => layout(x, closed));
+      const parts = p.parts.map((x) => layout(x, closed, up));
       const mid = Math.max(...parts.map((b) => b.mid));
       const h = Math.max(...parts.map((b) => mid - b.mid + b.h));
       const w = parts.reduce((s, b) => s + b.w, 0) + GAP * (parts.length - 1);
@@ -124,7 +191,7 @@ function layout(p: CircuitPart, closed: Record<string, boolean> | undefined): Bo
       };
     }
     case 'side': {
-      const parts = p.parts.map((x) => layout(x, closed));
+      const parts = p.parts.map((x) => layout(x, closed, up));
       const inner = Math.max(...parts.map((b) => b.w));
       const w = inner + 2 * RAIL;
       const tops: number[] = [];
@@ -194,7 +261,7 @@ function Lamp({ x, m, lamp }: { x: number; m: number; lamp: boolean | null | und
 
 /** One frame: its name, the loop, and the parts on it. */
 function Frame({ f, speech }: { f: CircuitFrame; speech: string }) {
-  const net = layout(f.part, f.closed);
+  const net = layout(f.part, f.closed, f.up);
   const top = f.name ? 26 : 6;
   const m = top + Math.max(net.mid, 24);
   const netY = m - net.mid;
@@ -218,6 +285,9 @@ function Frame({ f, speech }: { f: CircuitFrame; speech: string }) {
     </svg>
   );
 }
+
+/** A switch box's words when the table names none. */
+const INPUT_WORDS: [string, string] = ['Closed', 'Open'];
 
 export function CircuitPicture({ scene, labelId }: { scene: CircuitData; labelId?: string }) {
   const tb = scene.table;
@@ -254,7 +324,7 @@ export function CircuitPicture({ scene, labelId }: { scene: CircuitData; labelId
                       {v === null ? (
                         <span className="play-circ-blank"><span className="play-sr">blank</span></span>
                       ) : (
-                        <span className={`play-circ-v is-${v ? 'yes' : 'no'}`}>{lamp ? (v ? 'On' : 'Off') : v ? 'Closed' : 'Open'}</span>
+                        <span className={`play-circ-v is-${v ? 'yes' : 'no'}`}>{lamp ? (v ? 'On' : 'Off') : (tb.inputWords ?? INPUT_WORDS)[v ? 0 : 1]}</span>
                       )}
                     </td>
                   );

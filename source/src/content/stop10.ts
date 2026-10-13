@@ -8,6 +8,8 @@
  *  l3 The flipper: NOT        a flipper box (an inverter) does the opposite of its inside; trap: a closed switch inside one
  *  l4 From table to circuit   which circuit has this table, fill a circuit's table, do two circuits do the same job;
  *                             trap and conflict: two circuits that look different and have the same table
+ *  l5 The two-way switch      a hall lamp with a switch at each end: on when exactly one switch is up (exclusive or);
+ *                             fill its table, one row next to side by side, which circuit has a table; trap: both up
  *
  * Every lesson is See -> Do -> Quiz. Every answer, explanation, hint case and board mark comes from the circuit model in
  * ../engine/puzzles/circuits.ts (the same table is checked with Stop 9's truth tables and Stop 2's card rules); the
@@ -19,6 +21,7 @@ import {
   LINE_VS_SIDE,
   LOOKS_VS_WORKS,
   ONE_VS_ALL,
+  UP_VS_DIFFER,
   bothScene,
   closedOpenScene,
   closedVsLitBoard,
@@ -28,6 +31,7 @@ import {
   flipSideBoard,
   flipTableBoard,
   flipTableScene,
+  hallCard,
   lineExampleScene,
   lineScene,
   lineTableBoard,
@@ -39,19 +43,29 @@ import {
   oneVsAllBoard,
   oneVsAllCard,
   orderScene,
+  pickBoard,
+  pickCard,
   sameBoard,
   sameExampleScene,
   sideExampleScene,
   sideScene,
   sideTableBoard,
+  sideVsTwoBoard,
+  sideVsTwoCard,
   tableScene,
   threeLineBoard,
   threeSideBoard,
+  twoExampleCard,
+  twoTableBoard,
+  upVsDifferBoard,
+  upVsDifferCard,
+  wiresCard,
 } from '../engine/puzzles/circuitBoards';
 import {
   A,
   B,
   BOTH_CLOSED,
+  BOTH_UP,
   C,
   FLIP_CLOSED,
   LINE,
@@ -64,8 +78,10 @@ import {
   bridgeItem,
   caseItem,
   columnItem,
+  compareItem,
   lampItem,
   matchItem,
+  pickItem,
   sameItem,
   whyItem,
   type CircuitMade,
@@ -78,7 +94,7 @@ import { tableScratch } from '../engine/puzzles/tableBoards';
 import type { ChooseItem, Item, LessonDef, Rng, StopDef } from '../engine/types';
 
 const STOP = 10;
-const L1 = 's10.l1', L2 = 's10.l2', L3 = 's10.l3', L4 = 's10.l4';
+const L1 = 's10.l1', L2 = 's10.l2', L3 = 's10.l3', L4 = 's10.l4', L5 = 's10.l5';
 
 /** A made item as a Stop 10 item: its id, lesson and skill (`s10.<tag>`). */
 const finish = (m: CircuitMade, id: string, lesson: string): ChooseItem => ({ id, stop: STOP, lesson, skill: `s${STOP}.${m.tag}`, ...m.item });
@@ -321,13 +337,43 @@ const l4: LessonDef = {
   pass: { firstTry: 3, include: [LOOKS_DIFFER] },
 };
 
-const lessons = [l1, l2, l3, l4];
+const l5: LessonDef = {
+  id: L5,
+  title: 'The two-way switch',
+  ideas: [hallCard(), wiresCard(), upVsDifferCard(), sideVsTwoCard(), twoExampleCard(), pickCard()],
+  drill: [upVsDifferBoard(), sideVsTwoBoard(), twoTableBoard(), pickBoard()],
+  distinctions: [UP_VS_DIFFER],
+  terms: [
+    {
+      term: 'two-way switch',
+      means: 'A switch whose lever is up or down. A pair of them, one at each end, lights the lamp when exactly one is up.',
+      also: 'exclusive or in wires',
+    },
+  ],
+  // The quiz: a plain case, the trap (both up: alone, or next to side by side), the lamp column, then which circuit has
+  // a table.
+  practice: practiceOf(L5, (rng) => {
+    const one = distinctItems();
+    const used = new Set<string>();
+    const s = packSkins(rng, 4);
+    return [
+      one(() => lampItem(rng, { skin: s[0], avoid: used, fam: 'two' })),
+      one(() => (rng.chance(0.5) ? compareItem(rng, { skin: s[1], avoid: used, trap: true }) : lampItem(rng, { skin: s[1], avoid: used, fam: 'two', trap: true }))),
+      one(() => columnItem(rng, { skin: s[2], avoid: used, fam: 'two' })),
+      one(() => pickItem(rng, { skin: s[3], avoid: used })),
+    ];
+  }),
+  pass: { firstTry: 3, include: [BOTH_UP] },
+};
+
+const lessons = [l1, l2, l3, l4, l5];
 
 // ---------- check, Arcade, new examples, warm-up ----------
 
 /**
- * 9 items: two from each lesson, then the why item last. The conflict items: one switch closed in a line, both closed
- * side by side, a closed switch in a flipper box, and two circuits whose looks point the wrong way.
+ * 10 items: two from each of lessons 1 to 4, one from lesson 5, then the why item last. The conflict items: one switch
+ * closed in a line, both closed side by side, a closed switch in a flipper box, two circuits whose looks point the wrong
+ * way, and (most of the time) a two-way pair with both switches up, alone or next to side by side.
  */
 function check(rng: Rng): Item[] {
   const one = distinctItems();
@@ -349,6 +395,16 @@ function check(rng: Rng): Item[] {
     [L3, other('flip', null, undefined)],
     [L4, () => sameItem(rng, { skin: skin(), avoid: used, same: rng.chance(0.6) })],
     [L4, () => (rng.chance(0.7) ? matchItem(rng, { skin: skin(), avoid: used }) : columnItem(rng, { skin: skin(), avoid: used, fam: 'mixed' }))],
+    [
+      L5,
+      () =>
+        rng.pick([
+          () => compareItem(rng, { skin: skin(), avoid: used, trap: true }),
+          () => lampItem(rng, { skin: skin(), avoid: used, fam: 'two', trap: true }),
+          () => pickItem(rng, { skin: skin(), avoid: used }),
+          () => columnItem(rng, { skin: skin(), avoid: used, fam: 'two' }),
+        ])(),
+    ],
     [WHY_LESSON[why], () => whyItem(rng, { kind: why })],
   ];
   return plan.map(([lesson, make], i) => finish(one(make), `s${STOP}-c${i + 1}`, lesson));
@@ -368,24 +424,31 @@ const ARCADE: [string, (rng: Rng) => CircuitMade][] = [
   [L4, (rng) => matchItem(rng, { skin: rng.pick(SKINS) })],
   [L4, (rng) => sameItem(rng, { skin: rng.pick(SKINS), same: rng.chance(0.5) })],
   [L4, (rng) => columnItem(rng, { skin: rng.pick(SKINS), fam: 'mixed' })],
+  [L5, (rng) => lampItem(rng, { skin: rng.pick(SKINS), fam: 'two', trap: rng.chance(0.5) })],
+  [L5, (rng) => columnItem(rng, { skin: rng.pick(SKINS), fam: 'two' })],
+  [L5, (rng) => compareItem(rng, { skin: rng.pick(SKINS), trap: rng.chance(0.5) })],
+  [L5, (rng) => pickItem(rng, { skin: rng.pick(SKINS) })],
 ];
 function arcade(rng: Rng): Item {
   const [lesson, make] = rng.pick(ARCADE);
   return finish(make(rng), `s${STOP}-arcade`, lesson);
 }
 
-const FAM_OF: Record<string, Fam> = { 's10.series': 'line', 's10.parallel': 'side', 's10.not': 'flip' };
-const TRAP_TAGS: readonly string[] = [ONE_CLOSED.tag, BOTH_CLOSED.tag, FLIP_CLOSED.tag];
+const FAM_OF: Record<string, Fam> = { 's10.series': 'line', 's10.parallel': 'side', 's10.not': 'flip', 's10.xor': 'two' };
+const TRAP_TAGS: readonly string[] = [ONE_CLOSED.tag, BOTH_CLOSED.tag, FLIP_CLOSED.tag, BOTH_UP.tag];
 const answerOf = (it: Item) => (it.kind === 'choose' ? it.answer : '');
 const isLamp = (it: Item) => it.kind === 'choose' && it.choices.length === 2 && it.choices.every((c) => c.id === 'on' || c.id === 'off');
 const isSame = (it: Item) => it.kind === 'choose' && it.choices.length === 2 && it.choices.every((c) => c.id === 'yes' || c.id === 'no');
+/** A Lesson 5 row next to side by side: which lamps are on. */
+const isCompare = (it: Item) => it.kind === 'choose' && it.choices.some((c) => c.id === 'only-side');
 
 /**
  * New examples after a miss. A missed lamp question gets a pair: the trap again (or the same lamp) and one with the
  * other lamp, so repeating one answer never passes the set. A missed "same job" question gets one pair that agrees and
- * one that does not, the missed kind first. A missed why gets a why item of the same lesson, then the lesson's trap
- * (Lesson 4: the other kind of why), both on the missed skill. Everything else uses the default (one item with the
- * same skill).
+ * one that does not, the missed kind first. A missed row next to side by side (Lesson 5) gets the same kind of row
+ * first (the trap row, or a row where the lamps agree) and then the other kind, so the answers differ. A missed why
+ * gets a why item of the same lesson, then the lesson's trap (Lesson 4: the other kind of why), both on the missed
+ * skill. Everything else uses the default (one item with the same skill).
  */
 function fresh(missed: Item, rng: Rng): Item[] {
   const skin = () => rng.pick(SKINS);
@@ -408,6 +471,12 @@ function fresh(missed: Item, rng: Rng): Item[] {
     const a = trap ? lampItem(rng, { skin: skin(), fam, trap: true }) : lampItem(rng, { skin: skin(), fam, want: was });
     const aOn = a.item.answer === 'on';
     const b = lampItem(rng, { skin: skin(), fam, want: !aOn });
+    return [a, b].map((m) => finish(m, 'new', missed.lesson));
+  }
+  if (isCompare(missed)) {
+    const trap = !!missed.tags?.includes(BOTH_UP.tag);
+    const a = compareItem(rng, { skin: skin(), trap });
+    const b = compareItem(rng, { skin: skin(), trap: !trap });
     return [a, b].map((m) => finish(m, 'new', missed.lesson));
   }
   if (missed.skill === 's10.match' && isSame(missed)) {
@@ -445,5 +514,6 @@ export const stop10: StopDef = {
     's10.parallel': 'Circuit Lab: switches side by side need just one closed path',
     's10.not': 'Circuit Lab: a flipper box does the opposite of its inside',
     's10.match': 'Circuit Lab: match a circuit to its table, and spot the same job',
+    's10.xor': 'Circuit Lab: a two-way switch pair lights the lamp when its switches differ',
   },
 };

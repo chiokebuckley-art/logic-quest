@@ -8,8 +8,13 @@
  *  - if-false-vs-broken (Lesson 3): the IF part being false is not the sentence being broken; it is True there.
  *  - some-vs-every (Lesson 4, reminded in Lesson 5): agreeing in some rows is not meaning the same; true in most rows is
  *    not always true.
+ *  - or-vs-one (Lesson 6): plain OR includes both; BUT NOT BOTH leaves out the row where both parts are true.
+ *  - one-way-vs-both (Lesson 7): → points one way (IF … THEN); ↔ points both ways (IF AND ONLY IF).
+ *
+ * Lesson 7 is the one lesson where a kid reads logic symbols (LessonDef.symbols); its pieces print sentences with sym().
  */
 import { YES_NO } from '../drill';
+import { createRng } from '../rng';
 import type { BoardWords, ConfusedQuestion, ContrastPanel, Distinction, DrillMark, DrillRow, DrillStep, IdeaCard, Misconception, Scene } from '../types';
 import {
   A,
@@ -17,9 +22,14 @@ import {
   AND,
   B,
   IF,
+  IFF,
   KIND_CHOICES,
   NOT,
+  OP_WORD,
   OR,
+  SYMBOL,
+  SYM_OPS,
+  XOR,
   PQ,
   TF_CHOICES,
   TOPICS,
@@ -33,8 +43,21 @@ import {
   rowsWord,
   sameRow,
   say,
+  sameColumn,
+  differRows,
+  colLabel,
+  sym,
+  symMisreads,
+  senId,
+  toSymbols,
+  toWords,
   tableScene,
   tf,
+  column,
+  parseSymbols,
+  symHead,
+  usesOp,
+  type SymOp,
   type Kind,
   type Row,
   type Sen,
@@ -77,16 +100,23 @@ export function needs(s: Sen, names: readonly string[]): string {
       return `${w(s)} needs ${w(s.a)} or ${w(s.b)} true, or both.`;
     case 'if':
       return `${w(s)} is false only if ${w(s.a)} is true and ${w(s.b)} is false.`;
+    case 'iff':
+      return `${w(s)} needs ${w(s.a)} and ${w(s.b)} to match.`;
+    case 'xor':
+      return `${w(s)} needs exactly one of ${w(s.a)} and ${w(s.b)} true.`;
   }
 }
 
-/** One table row on a board: a mark per sentence, True or False, each wrong option with its reason. `given`: shown marked. */
-function sentenceMarks(rowId: string, r: Row, cols: readonly Sen[], names: readonly string[], o: { given?: (j: number) => boolean; compare?: boolean } = {}): DrillMark[] {
+/**
+ * One table row on a board: a mark per sentence, True or False, each wrong option with its reason. `given`: shown marked.
+ * `symbols`: each mark named in symbols (Lesson 7).
+ */
+function sentenceMarks(rowId: string, r: Row, cols: readonly Sen[], names: readonly string[], o: { given?: (j: number) => boolean; compare?: boolean; symbols?: boolean } = {}): DrillMark[] {
   return cols.map((s, j): DrillMark => {
     const v = holds(s, r);
     return {
       id: `${rowId}-c${j}`,
-      label: say(s, names),
+      label: o.symbols ? sym(s, names) : say(s, names),
       options: TF(),
       answer: tfId(v),
       ...(o.given?.(j) ? { given: true } : {}),
@@ -358,6 +388,7 @@ function columnsBoard(o: {
   distinction?: string;
   words?: BoardWords;
   extra?: DrillRow[];
+  symbols?: boolean;
 }): DrillStep {
   const rows = rowsFor(o.n);
   return {
@@ -368,7 +399,7 @@ function columnsBoard(o: {
     ...(o.twin ? { twin: o.twin } : {}),
     afterCard: o.afterCard,
     rows: [
-      ...rows.map((r, k) => ({ id: `r${k + 1}`, label: rowLabel(r, k, o.names), marks: sentenceMarks(`r${k + 1}`, r, o.cols, o.names, { given: o.given, compare: true }) })),
+      ...rows.map((r, k) => ({ id: `r${k + 1}`, label: rowLabel(r, k, o.names), marks: sentenceMarks(`r${k + 1}`, r, o.cols, o.names, { given: o.given, compare: true, symbols: o.symbols }) })),
       ...(o.extra ?? []),
     ],
     ...(o.scaffold ? { scaffold: o.scaffold } : {}),
@@ -775,6 +806,338 @@ export function mostBoard(): DrillStep {
   return step;
 }
 
+// ---------- Lesson 6: both ways, and one but not both ----------
+
+export const L6_CARDS = { iff: 0, xor: 1, contrast: 2, same: 3, story: 4 } as const;
+export const IFF_SEN = IFF(A, B);
+export const XOR_SEN = XOR(A, B);
+/** One but not both, said with words met before: OR, and not both. */
+export const OR_NOT_BOTH = AND(OR(A, B), NOT(AND(A, B)));
+/** The story rule: B IF AND ONLY IF A (Leo lines up IF AND ONLY IF the bell rings). */
+export const L6_TOPIC = topicById('bell');
+export const IFF_STORY = IFF(B, A);
+/** The rows (0-based) where a sentence is True, and where it is False. */
+export const trueRowsOf = (s: Sen): number[] => rowsFor(2).flatMap((r, k) => (holds(s, r) ? [k] : []));
+export const falseRowsOf = (s: Sen): number[] => rowsFor(2).flatMap((r, k) => (holds(s, r) ? [] : [k]));
+/** Row 1: both parts true (the row one but not both leaves out). */
+export const BOTH_TRUE_ROW = rowsFor(2).findIndex((r) => r.every(Boolean));
+
+export const iffScene = (): TableScene => tableScene({ names: ABC, n: 2, cols: [IF(A, B), IF(B, A), IFF_SEN], caption: 'Two IF rules, one each way. Both kept: IF AND ONLY IF.' });
+export const xorScene = (): TableScene =>
+  tableScene({ names: ABC, n: 2, cols: [OR(A, B), XOR_SEN], marked: [BOTH_TRUE_ROW], markLabel: 'Both true', caption: 'Plain OR, and one but not both.' });
+export const orNotBothScene = (): TableScene => tableScene({ names: ABC, n: 2, cols: [OR_NOT_BOTH, XOR_SEN], caption: 'The two columns match in every row.' });
+export const iffStoryScene = (): TableScene =>
+  tableScene({ names: ABC, n: 2, cols: [IFF_STORY], topic: L6_TOPIC, marked: falseRowsOf(IFF_STORY), markLabel: 'Breaks it', caption: `The rule: ${L6_TOPIC.parts[1].yes} IF AND ONLY IF ${L6_TOPIC.parts[0].yes}.` });
+
+export const OR_VS_ONE: Distinction = {
+  id: 'or-vs-one',
+  a: 'Plain OR: true when one part or both parts are true.',
+  b: 'BUT NOT BOTH: true when exactly one part is true.',
+};
+
+/** The contrast: the same row, both parts true. Plain OR is True there; one but not both is False. */
+export function xorContrast(): Extract<Scene, { kind: 'contrast' }> {
+  const r = rowsFor(2)[BOTH_TRUE_ROW];
+  const panel = (s: Sen): ContrastPanel => ({ world: `Row ${BOTH_TRUE_ROW + 1}: ${rowShort(r, ABC)}.`, who: 'The sentence', says: say(s, ABC), truth: holds(s, r), because: reason(s, r, ABC) });
+  return {
+    kind: 'contrast',
+    pairs: [panel(OR(A, B)), panel(XOR_SEN)],
+    ask: { q: 'The same row, with both parts true. Why is only one True?', a: 'Plain OR includes both. BUT NOT BOTH leaves out the row where both parts are true.' },
+    words: { worldTag: 'Row', saysWord: 'is', truth: 'True', untruth: 'False' },
+  };
+}
+
+export function xorContrastCard(): IdeaCard {
+  const r = rowsFor(2)[BOTH_TRUE_ROW];
+  return {
+    title: 'When both parts are true',
+    distinction: OR_VS_ONE.id,
+    body: [
+      `Look at row ${BOTH_TRUE_ROW + 1}, where A and B are both true.`,
+      `${quote(OR(A, B), ABC)} is ${TFw(holds(OR(A, B), r))} there. Plain OR includes both.`,
+      `${quote(XOR_SEN, ABC)} is ${TFw(holds(XOR_SEN, r))} there. That is the one row it leaves out.`,
+    ],
+    scene: xorContrast(),
+  };
+}
+
+const XOR_AS_OR =
+  'You may be treating BUT NOT BOTH and plain OR as the same thing. They are two different things. When both parts are true, A OR B is true, but A OR B BUT NOT BOTH is false.';
+const XOR_QUESTION: ConfusedQuestion = {
+  q: 'A is true and B is true. Is A OR B BUT NOT BOTH true?',
+  options: [{ label: 'No. Both are true, and it leaves that out', right: true }, { label: 'Yes. OR includes both' }, { label: 'Not sure' }],
+  teach: 'No. BUT NOT BOTH needs exactly one part true. When both are true, it is false. Plain OR would be true there.',
+};
+const IFF_AS_IF =
+  'You may be treating IF AND ONLY IF and plain IF as the same thing. They are two different things. IF AND ONLY IF works both ways, so B true with A false breaks it.';
+const IFF_QUESTION: ConfusedQuestion = {
+  q: 'A is false and B is true. Is A IF AND ONLY IF B true?',
+  options: [{ label: 'No. The two parts do not match', right: true }, { label: 'Yes. The IF part is false' }, { label: 'Not sure' }],
+  teach: 'No. IF AND ONLY IF needs the two parts to match. Here A is false and B is true, so it is false. Plain IF A, THEN B would be true.',
+};
+
+/** Do, board 1 (after the both-ways card): IF A, THEN B is given; fill the rule the other way, then IF AND ONLY IF. */
+export function bothWaysBoard(): DrillStep {
+  const one = IF(A, B);
+  const cols = [one, IF(B, A), IFF_SEN];
+  // A row where the rule one way is True but IF AND ONLY IF is False: marking it True reads it one way only.
+  const oneWay = rowsFor(2).flatMap((r, k) => (holds(one, r) && !holds(IFF_SEN, r) ? [k] : []));
+  return columnsBoard({
+    id: 's9.l6-do1',
+    title: 'Both ways',
+    body: ['IF A, THEN B is filled in. Fill the rule the other way: IF B, THEN A.', 'Then fill A IF AND ONLY IF B. It is True only where both rules are True.'],
+    names: ABC,
+    n: 2,
+    cols,
+    given: (j) => j === 0,
+    scene: tableScene({ names: ABC, n: 2, cols, blank: (_k, j) => j > 0, caption: 'Fill IF B, THEN A. Then A IF AND ONLY IF B.' }),
+    twin: 'The columns for IF B, THEN A and for A IF AND ONLY IF B are blank.',
+    afterCard: L6_CARDS.iff,
+    misconceptions: oneWay.map((k) => ({ id: 'iff-as-if', when: 'picks' as const, picks: { [`r${k + 1}-c2`]: 'true' }, text: IFF_AS_IF })),
+    confused: [IFF_QUESTION],
+    done: `Right. A IF AND ONLY IF B is True only in ${rowsWord(trueRowsOf(IFF_SEN))}, where both IF rules are True.`,
+  });
+}
+
+/** Do, board 2 (right after the contrast): fill plain OR and one but not both, then the one row where they differ. */
+export function xorBoard(): DrillStep {
+  const cols = [OR(A, B), XOR_SEN];
+  const rows = rowsFor(2);
+  const d = differRows(cols[0], cols[1], 2);
+  const why: Record<string, string> = {};
+  rows.forEach((r, j) => {
+    if (!d.includes(j)) why[`row${j + 1}`] = `In row ${j + 1}, ${quote(cols[0], ABC)} is ${tf(holds(cols[0], r))} and ${quote(cols[1], ABC)} is ${tf(holds(cols[1], r))} too. They agree there.`;
+  });
+  return columnsBoard({
+    id: 's9.l6-do2',
+    title: 'One, or both?',
+    body: ['Fill A OR B and A OR B BUT NOT BOTH, one row at a time.', 'Then find the row where they differ.'],
+    names: ABC,
+    n: 2,
+    cols,
+    scene: tableScene({ names: ABC, n: 2, cols, blank: () => true, caption: 'Fill both columns. Then find the row where they differ.' }),
+    twin: 'Both columns, with every box blank.',
+    afterCard: L6_CARDS.contrast,
+    distinction: OR_VS_ONE.id,
+    scaffold: 'full',
+    misconceptions: [
+      { id: 'xor-as-or', when: 'picks', picks: { [`r${BOTH_TRUE_ROW + 1}-c1`]: 'true' }, text: XOR_AS_OR },
+      { id: 'or-one', when: 'picks', picks: { [`r${BOTH_TRUE_ROW + 1}-c0`]: 'false' }, text: OR_ONE },
+    ],
+    confused: [XOR_QUESTION, OR_QUESTION],
+    words: { ...TABLE_WORDS, closing: 'Those two ideas are apart now. Back to the board: plain OR includes both, and BUT NOT BOTH does not.' },
+    extra: [{
+      id: 'differ',
+      label: 'Both columns together',
+      marks: [{ id: 'differ', label: 'In which row do they differ?', options: rows.map((_, j) => ({ id: `row${j + 1}`, label: `Row ${j + 1}` })), answer: `row${d[0] + 1}`, why }],
+    }],
+    done: `Right. They differ only in row ${d[0] + 1}, where both parts are true. Plain OR is True there, and BUT NOT BOTH is False.`,
+  });
+}
+
+/** Do, board 3 (after the same-meaning card): fill NOT (A AND B) and OR, and not both; then compare with one but not both. */
+export function orNotBothBoard(): DrillStep {
+  const cols = [OR(A, B), NOT(AND(A, B)), OR_NOT_BOTH, XOR_SEN];
+  const same = sameColumn(OR_NOT_BOTH, XOR_SEN, 2);
+  const d = differRows(OR_NOT_BOTH, XOR_SEN, 2);
+  return columnsBoard({
+    id: 's9.l6-do3',
+    title: 'OR, and not both',
+    body: ['A OR B and A OR B BUT NOT BOTH are filled in. Fill NOT (A AND B) in each row.', `Then join the two with AND: ${quote(OR_NOT_BOTH, ABC, '.')} Last, compare.`],
+    names: ABC,
+    n: 2,
+    cols,
+    given: (j) => j === 0 || j === 3,
+    scene: tableScene({ names: ABC, n: 2, cols, blank: (_k, j) => j === 1 || j === 2, caption: 'Fill NOT (A AND B). Then the AND of the two.' }),
+    twin: 'The helper columns are there too, and two of them are blank.',
+    afterCard: L6_CARDS.same,
+    confused: [XOR_QUESTION],
+    extra: [{
+      id: 'verdict',
+      label: 'All four rows together',
+      marks: [{
+        id: 'verdict',
+        label: `Same meaning as ${quote(XOR_SEN, ABC)}?`,
+        options: YES_NO.map((o) => ({ ...o })),
+        answer: same ? 'yes' : 'no',
+        why: same ? { no: `The two columns match in every row: ${colLabel(column(XOR_SEN, 2))}.` } : { yes: `They differ in ${rowsWord(d)}.` },
+      }],
+    }],
+    done: `Right. ${quote(OR_NOT_BOTH, ABC)} matches ${quote(XOR_SEN, ABC)} in every row. They mean the same.`,
+  });
+}
+
+// ---------- Lesson 7: say it with symbols ----------
+
+export const L7_CARDS = { words: 0, basic: 1, arrows: 2, contrast: 3, worked: 4 } as const;
+export const ARROWS: [Sen, Sen] = [IF(A, B), IFF(A, B)];
+/** The row that tells the two arrows apart (row 3: A false, B true). */
+export const ARROW_ROW = differRows(ARROWS[0], ARROWS[1], 2)[0];
+/** The worked example: two sentences in words, then in symbols. */
+export const SYM_WORKED: [Sen, Sen] = [NOT(AND(A, B)), IF(NOT(B), NOT(A))];
+
+export const symBasicScene = (): TableScene => tableScene({ names: ABC, n: 2, cols: [NOT(A), AND(A, B), OR(A, B)], symbols: true, caption: 'NOT, AND and OR, written with symbols.' });
+export const arrowsScene = (): TableScene =>
+  tableScene({ names: ABC, n: 2, cols: ARROWS, symbols: true, marked: [ARROW_ROW], markLabel: 'They differ', caption: 'One arrow points one way. The other points both ways.' });
+/** The worked example's table: the sentence in words, and the same sentence in symbols (read back by the parser). Their columns match. */
+export function symWorkedScene(): TableScene {
+  const [s] = SYM_WORKED;
+  const t = tableScene({ names: ABC, n: 2, cols: [s], caption: 'The same sentence in words and in symbols. The columns match.' });
+  const inSymbols = toSymbols(say(s, ABC), ABC);
+  const back = parseSymbols(inSymbols, ABC);
+  return { ...t, heads: [...t.heads, inSymbols], cells: t.cells.map((row, k) => [...row, holds(back, rowsFor(2)[k])]) };
+}
+
+export const ONE_WAY_VS_BOTH: Distinction = {
+  id: 'one-way-vs-both',
+  a: 'The arrow → points one way: IF … THEN.',
+  b: 'The arrow ↔ points both ways: IF AND ONLY IF.',
+};
+
+/** The contrast: the same row (A false, B true) under each arrow. */
+export function arrowContrast(): Extract<Scene, { kind: 'contrast' }> {
+  const r = rowsFor(2)[ARROW_ROW];
+  const panel = (s: Sen): ContrastPanel => ({ world: `Row ${ARROW_ROW + 1}: ${rowShort(r, ABC)}.`, who: 'The sentence', says: sym(s, ABC), truth: holds(s, r), because: reason(s, r, ABC) });
+  return {
+    kind: 'contrast',
+    pairs: [panel(ARROWS[0]), panel(ARROWS[1])],
+    ask: { q: 'The same row. Why is only one True?', a: '→ asks for nothing when A is false. ↔ works both ways, so B true with A false breaks it.' },
+    words: { worldTag: 'Row', saysWord: 'is', truth: 'True', untruth: 'False' },
+  };
+}
+
+export function arrowContrastCard(): IdeaCard {
+  const r = rowsFor(2)[ARROW_ROW];
+  const [one, both] = ARROWS;
+  return {
+    title: 'One way is not both ways',
+    distinction: ONE_WAY_VS_BOTH.id,
+    body: [
+      'The two arrows look alike, but they say different things.',
+      '→ only asks for B when A is true. ↔ also asks for A when B is true.',
+      `Row ${ARROW_ROW + 1} shows it. “${sym(one, ABC)}” is ${TFw(holds(one, r))} there, but “${sym(both, ABC)}” is ${TFw(holds(both, r))}.`,
+      'So reading → as ↔ changes the sentence.',
+    ],
+    scene: arrowContrast(),
+  };
+}
+
+const ARROW_AS_BOTH =
+  'You may be treating → and ↔ as the same thing. They are two different things. → points one way: IF … THEN. ↔ points both ways: IF AND ONLY IF.';
+const ARROW_QUESTION: ConfusedQuestion = {
+  q: 'Does “A → B” say the same as “A ↔ B”?',
+  options: [{ label: 'No. → points one way, and ↔ both ways', right: true }, { label: 'Yes. Both are arrows' }, { label: 'Not sure' }],
+  teach: 'No. “A → B” is IF A, THEN B. It asks for nothing when A is false. “A ↔ B” is A IF AND ONLY IF B. It works both ways.',
+};
+
+/** Do, board 1 (after the card of the five symbols): each symbol's word, in a new order. */
+export function symbolWordBoard(): DrillStep {
+  const order: SymOp[] = ['and', 'if', 'not', 'iff', 'or'];
+  const rows: DrillRow[] = order.map((op) => ({
+    id: `s-${op}`,
+    label: `The symbol ${SYMBOL[op]}`,
+    marks: [{
+      id: `m-${op}`,
+      label: `Which word is ${SYMBOL[op]}?`,
+      options: SYM_OPS.map((x) => ({ id: x, label: OP_WORD[x] })),
+      answer: op,
+      why: Object.fromEntries(SYM_OPS.filter((x) => x !== op).map((x) => [x, `${SYMBOL[op]} is ${OP_WORD[op]}. ${OP_WORD[x]} is ${SYMBOL[x]}.`])),
+    }],
+  }));
+  return {
+    id: 's9.l7-do1',
+    title: 'Each symbol’s word',
+    body: ['Here are the five symbols in a new order. Tap the word each one stands for.'],
+    afterCard: L7_CARDS.words,
+    rows,
+    misconceptions: [{ id: 'arrow-as-both', when: 'picks', picks: { 'm-if': 'iff' }, text: ARROW_AS_BOTH }],
+    confused: [ARROW_QUESTION],
+    words: { ...TABLE_WORDS, closing: 'Back to the board: one word, one symbol.' },
+    done: `Right. ${SYM_OPS.map((op) => `${SYMBOL[op]} is ${OP_WORD[op]}`).join(', ')}.`,
+  };
+}
+
+/** Do, board 2 (right after the contrast): fill both arrows in every row, then the row that tells them apart. */
+export function arrowBoard(): DrillStep {
+  const rows = rowsFor(2);
+  const [one, both] = ARROWS;
+  const why: Record<string, string> = {};
+  rows.forEach((r, j) => {
+    if (j !== ARROW_ROW) why[`row${j + 1}`] = `In row ${j + 1}, “${sym(one, ABC)}” is ${tf(holds(one, r))} and “${sym(both, ABC)}” is ${tf(holds(both, r))} too. They agree there.`;
+  });
+  const r = rows[ARROW_ROW];
+  return columnsBoard({
+    id: 's9.l7-do2',
+    title: 'One way or both ways?',
+    body: ['Fill the column for each arrow, one row at a time.', 'Then find the row that tells the two arrows apart.'],
+    names: ABC,
+    n: 2,
+    cols: ARROWS,
+    symbols: true,
+    scene: tableScene({ names: ABC, n: 2, cols: ARROWS, symbols: true, blank: () => true, caption: 'Fill both arrows. Then find where they differ.' }),
+    twin: 'The same two arrows, with every box blank.',
+    afterCard: L7_CARDS.contrast,
+    distinction: ONE_WAY_VS_BOTH.id,
+    scaffold: 'full',
+    // The one-way arrow marked like the both-ways one, in the row that tells them apart.
+    misconceptions: [{ id: 'arrow-as-both', when: 'picks', picks: { [`r${ARROW_ROW + 1}-c0`]: tfId(holds(both, r)) }, text: ARROW_AS_BOTH }],
+    confused: [ARROW_QUESTION],
+    words: { ...TABLE_WORDS, closing: 'Those two ideas are apart now. Back to the board: does the arrow point one way or both ways?' },
+    extra: [{
+      id: 'differ',
+      label: 'Both arrows together',
+      marks: [{ id: 'differ', label: 'Which row tells them apart?', options: rows.map((_, j) => ({ id: `row${j + 1}`, label: `Row ${j + 1}` })), answer: `row${ARROW_ROW + 1}`, why }],
+    }],
+    done: `Right. They differ only in row ${ARROW_ROW + 1}. “${sym(one, ABC)}” is ${TFw(holds(one, r))} there, and “${sym(both, ABC)}” is ${TFw(holds(both, r))}.`,
+  });
+}
+
+/** Board 3's sentences: three to write in symbols, two to say in words. */
+export const SYM_BOARD: { toSymbols: readonly Sen[]; toWords: readonly Sen[] } = {
+  toSymbols: [NOT(OR(A, B)), IF(A, NOT(B)), IFF(A, B)],
+  toWords: [IF(NOT(A), B), AND(NOT(A), B)],
+};
+
+/** One mark of the translation board: the right translation (through the parser) and two wrong ones, each with its reason. */
+function translateMark(id: string, s: Sen, to: 'symbols' | 'words', seed: number): { mark: DrillMark; trapId?: string } {
+  const rng = createRng(seed);
+  const right = to === 'symbols' ? toSymbols(say(s, ABC), ABC) : toWords(sym(s, ABC), ABC);
+  const wrongs = symMisreads(rng, s, 2, usesOp(s, 'if') ? 'arrow-both' : undefined);
+  const show = (x: Sen) => (to === 'symbols' ? sym(x, ABC) : say(x, ABC));
+  const options = rng.shuffle([{ id: senId(s, ABC), label: right }, ...wrongs.map((w) => ({ id: senId(w.sen, ABC), label: show(w.sen) }))]);
+  const why = Object.fromEntries(wrongs.map((w) => [senId(w.sen, ABC), `${symHead(w.m, to, s, w.sen)} “${sym(w.sen, ABC)}” says ${say(w.sen, ABC)} in words.`]));
+  const trap = wrongs.find((w) => w.m === 'arrow-both');
+  return { mark: { id, label: to === 'symbols' ? 'In symbols' : 'In words', options, answer: senId(s, ABC), why }, ...(trap ? { trapId: senId(trap.sen, ABC) } : {}) };
+}
+
+/** Do, board 3 (after the worked example): three sentences into symbols, then two back into words. */
+export function translateBoard(): DrillStep {
+  const rows: DrillRow[] = [];
+  const traps: Misconception[] = [];
+  SYM_BOARD.toSymbols.forEach((s, j) => {
+    const { mark, trapId } = translateMark(`w${j + 1}`, s, 'symbols', 90 + j);
+    rows.push({ id: `w${j + 1}`, label: `In words: ${say(s, ABC)}`, marks: [mark] });
+    if (trapId) traps.push({ id: 'arrow-as-both', when: 'picks', picks: { [mark.id]: trapId }, text: ARROW_AS_BOTH });
+  });
+  SYM_BOARD.toWords.forEach((s, j) => {
+    const { mark, trapId } = translateMark(`y${j + 1}`, s, 'words', 95 + j);
+    rows.push({ id: `y${j + 1}`, label: `In symbols: ${sym(s, ABC)}`, marks: [mark] });
+    if (trapId) traps.push({ id: 'arrow-as-both', when: 'picks', picks: { [mark.id]: trapId }, text: ARROW_AS_BOTH });
+  });
+  return {
+    id: 's9.l7-do3',
+    title: 'Words and symbols',
+    body: ['Write each of the first three sentences in symbols. Then say the last two in words.', 'One word, one symbol. Keep the brackets where they are.'],
+    twin: 'New sentences and no table: three to write in symbols, two to say in words.',
+    afterCard: L7_CARDS.worked,
+    rows,
+    misconceptions: traps,
+    confused: [ARROW_QUESTION],
+    words: { ...TABLE_WORDS, closing: 'Back to the board: one word, one symbol.' },
+    done: 'Right. Each word became its symbol, and each symbol its word. The brackets stayed where they were.',
+  };
+}
+
 // ---------- the thinking board on a quiz item ----------
 
 /**
@@ -790,9 +1153,19 @@ export function tableScratch(m: TableMade): DrillStep | undefined {
   const names = m.names;
   const blank = scene.heads.slice(scene.inputs).filter((_, j) => scene.cells.some((r) => r[scene.inputs + j] === null));
   const cols: Sen[] = [];
+  // A heading in symbols (Lesson 7) names its sentence in symbols; the board then names every mark in symbols too.
+  const inSymbols = (x: Sen) => {
+    try {
+      return sym(x, names);
+    } catch {
+      return null;
+    }
+  };
+  let symbols = false;
   for (const head of blank) {
-    const s = m.sens.find((x) => say(x, names) === head);
+    const s = m.sens.find((x) => say(x, names) === head) ?? m.sens.find((x) => inSymbols(x) === head);
     if (!s) continue;
+    if (say(s, names) !== head) symbols = true;
     for (const x of stepsOf(s)) if (!cols.some((c) => say(c, names) === say(x, names))) cols.push(x);
   }
   if (!cols.length) return undefined;
@@ -805,7 +1178,7 @@ export function tableScratch(m: TableMade): DrillStep | undefined {
       cols.length > blank.length ? 'Fill the small parts first. Then fill each sentence, one row at a time.' : 'Fill each sentence, one row at a time.',
       'This board is only for thinking. Nothing on it is checked.',
     ],
-    rows: rowsFor(m.n).map((r, k) => ({ id: `r${k + 1}`, label: rowLabel(r, k, names), marks: sentenceMarks(`r${k + 1}`, r, cols, names) })),
+    rows: rowsFor(m.n).map((r, k) => ({ id: `r${k + 1}`, label: rowLabel(r, k, names), marks: sentenceMarks(`r${k + 1}`, r, cols, names, { symbols }) })),
     words: { ...TABLE_WORDS, closing: 'Back to the question: look at one row at a time.' },
     done: '',
   };

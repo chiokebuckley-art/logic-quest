@@ -3,7 +3,7 @@
  * Also the plain-English words for cards, scenes and items, shared by speech and screen-reader labels.
  * Everything here is safe to import in tests and on a server: nothing touches `window` until called.
  */
-import type { Item, Scene, Thing } from '../engine/types';
+import type { CircuitPart, Item, Scene, Thing } from '../engine/types';
 import { observatorySpeech } from './components/scenes/speech';
 import { partWords, swName } from '../engine/puzzles/circuits';
 
@@ -59,6 +59,8 @@ export function spoken(text: string): string {
   let t = text;
   // Grid marks and dashes as words: "A check mark (✓) means yes" loses the symbol; a lone ✓ becomes "check mark".
   t = t.replace(/\s*\((✓|✗)\)/g, '').replace(/✗s\b/g, 'crosses').replace(/✓/g, 'check mark').replace(/✗/g, 'cross').replace(/\s–\s/g, ', ');
+  // The symbols lesson's signs are said by name (the lesson teaches them): not sign, and sign, or sign, arrow, double arrow.
+  t = t.replace(/¬/g, ' not sign ').replace(/∧/g, ' and sign ').replace(/∨/g, ' or sign ').replace(/↔/g, ' double arrow ').replace(/→/g, ' arrow ');
   // Only brackets around logic words are read out; "(tallest first)" in plain prose stays as it is.
   for (let i = 0; i < 3; i++) t = t.replace(/\(([^()]*\b(?:AND|OR|NOT)\b[^()]*)\)/g, ', open bracket, $1, close bracket,');
   t = t.replace(/\bNOT\s*,\s*open bracket/g, 'not, open bracket');
@@ -271,21 +273,26 @@ export function tableSpeech(scene: Extract<Scene, { kind: 'table' }>): string[] 
 
 /**
  * Circuits (Circuit Lab) in words: the loop, then each frame's wiring ("Circuit 1 has switches A and B in a line."), each
- * switch closed or open, and the lamp on, off or to work out. Then the table row by row ("Row 2: A closed, B open, Lamp
- * off."), a blank box read as blank, and the caption.
+ * switch closed or open (a two-way switch up or down, and the two wires of a two-way pair crossing), and the lamp on, off
+ * or to work out. Then the table row by row ("Row 2: A closed, B open, Lamp off.", or the table's own switch words), a
+ * blank box read as blank, and the caption.
  */
 export function circuitSpeech(scene: Extract<Scene, { kind: 'circuit' }>): string[] {
   const cap = (x: string) => x.charAt(0).toUpperCase() + x.slice(1);
+  const twoWay = (p: CircuitPart): boolean => p.t === 'twoway' || (p.t === 'flip' ? twoWay(p.part) : p.t !== 'switch' && p.parts.some(twoWay));
   const lines: string[] = [scene.circuits.length === 1 ? 'A circuit: one loop from a battery, through the switches, to a lamp.' : 'Each circuit is one loop from a battery, through the switches, to a lamp.'];
   for (const f of scene.circuits) {
     lines.push(`${f.name ?? 'It'} has ${partWords(f.part)}.`);
+    if (twoWay(f.part)) lines.push('Between the two-way switches, the two wires cross.');
     if (f.closed) lines.push(...Object.entries(f.closed).map(([n, v]) => `${cap(swName(n))} is ${v ? 'closed' : 'open'}.`));
+    if (f.up) lines.push(...Object.entries(f.up).map(([n, v]) => `${cap(swName(n))} is ${v ? 'up' : 'down'}.`));
     if (f.lamp === null) lines.push('Is the lamp on or off?');
     else if (f.lamp !== undefined) lines.push(`The lamp is ${f.lamp ? 'on' : 'off'}.`);
   }
   const tb = scene.table;
   if (tb) {
-    const word = (v: boolean | null, j: number) => (v === null ? 'blank' : j < tb.inputs ? (v ? 'closed' : 'open') : v ? 'on' : 'off');
+    const inputs = tb.inputWords?.map((x) => x.toLowerCase()) ?? ['closed', 'open'];
+    const word = (v: boolean | null, j: number) => (v === null ? 'blank' : j < tb.inputs ? inputs[v ? 0 : 1] : v ? 'on' : 'off');
     lines.push(`A table. Columns: ${tb.heads.join('; ')}.`);
     tb.cells.forEach((row, k) => {
       const mark = tb.marked?.includes(k) && tb.markLabel ? ` (${tb.markLabel.toLowerCase()})` : '';
@@ -298,15 +305,19 @@ export function circuitSpeech(scene: Extract<Scene, { kind: 'circuit' }>): strin
 
 /**
  * A count picture (Clues & Chances) in words: the group, the rows and columns, each box ("Needs glasses and Flagged:
- * 5."), each row and column in all, the picked row or column, and the caption. A blank box is read as blank.
+ * 5."), each row and column in all, the picked row or column (or both: "Picked out: Red and Big."), and the caption. A
+ * blank box is read as blank; a picture to fill reads the counts in all it gives.
  */
 export function countsSpeech(scene: Extract<Scene, { kind: 'counts' }>): string[] {
   const word = (v: number | null) => (v === null ? 'blank' : String(v));
   const sum = (x: number | null, y: number | null) => (x === null || y === null ? null : x + y);
   const [[a, b], [c, d]] = scene.cells;
-  const rowT = [sum(a, b), sum(c, d)];
-  const colT = [sum(a, c), sum(b, d)];
-  const picked = scene.pick?.row !== undefined ? scene.rows[scene.pick.row] : scene.pick?.col !== undefined ? scene.cols[scene.pick.col] : undefined;
+  // A count in all is the sum of its boxes, or the one the picture gives when its boxes are blank.
+  const rowT = [scene.rowTotals?.[0] ?? sum(a, b), scene.rowTotals?.[1] ?? sum(c, d)];
+  const colT = [scene.colTotals?.[0] ?? sum(a, c), scene.colTotals?.[1] ?? sum(b, d)];
+  // A row, a column, or both at once (they share one box).
+  const named = [scene.pick?.row !== undefined ? scene.rows[scene.pick.row] : undefined, scene.pick?.col !== undefined ? scene.cols[scene.pick.col] : undefined].filter((x): x is string => x !== undefined);
+  const picked = named.length ? named.join(' and ') : undefined;
   return [
     `A count picture of ${scene.title}.`,
     `Rows: ${scene.rows.join('; ')}. Columns: ${scene.cols.join('; ')}.`,
@@ -319,19 +330,50 @@ export function countsSpeech(scene: Extract<Scene, { kind: 'counts' }>): string[
 
 /**
  * A rings picture (All, Some, None) in words: the rings, then the cards in each part, the circled cards, the cards not
- * placed yet and the caption. Rings with no cards in them are named only.
+ * placed yet, the crossed and starred parts (one part per sentence), and the caption. Rings with no cards in them are
+ * named only. Three rings name only the parts that hold cards. A links picture reads each frame: the two groups, then
+ * each name on the left with its lines (“Ava: a line to Kim.”), or “Ben has no line.”
  */
 export function ringsSpeech(scene: Extract<Scene, { kind: 'rings' }>): string[] {
   const names = (ts: readonly Thing[]) => (ts.length ? ts.map(thingName).join(', ') : 'nothing');
-  const [a, b] = scene.rings;
-  const lines = [b === undefined ? `One ring: ${a}.` : `Two rings that overlap: ${a} and ${b}.`];
-  const placed = [...scene.a, ...scene.both, ...scene.b, ...scene.out];
+  const list = (xs: readonly string[]) => (xs.length <= 2 ? xs.join(' and ') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
+  const [a, b, c] = scene.rings;
+  if (scene.links) {
+    const lines = [`Two rings side by side: ${a} and ${b ?? ''}. A line joins two names.`];
+    for (const f of scene.links) {
+      // One short sentence for each name on the left: its lines, or that it has none.
+      const to = (i: number) => f.lines.filter(([l]) => l === i).map(([, r]) => f.right[r]);
+      lines.push(
+        `${f.name ? `${f.name}. ` : ''}${a}: ${list(f.left)}. ${b ?? ''}: ${list(f.right)}.`,
+        ...(f.lines.length ? [] : ['No lines.']),
+        ...f.left.map((n, i) => (to(i).length ? `${n}: a line to ${list(to(i))}.` : `${n} has no line.`)),
+      );
+    }
+    if (scene.caption) lines.push(asSentence(scene.caption));
+    return lines;
+  }
+  const three = c !== undefined;
+  const lines = [b === undefined ? `One ring: ${a}.` : three ? `Three rings that overlap: ${a}, ${b} and ${c}.` : `Two rings that overlap: ${a} and ${b}.`];
+  const parts = { a: scene.a, both: scene.both, b: scene.b, c: scene.c ?? [], ac: scene.ac ?? [], bc: scene.bc ?? [], abc: scene.abc ?? [], out: scene.out };
+  /** Where a part is, in words. */
+  const where = (p: keyof typeof parts): string => {
+    if (!three) return { a: `only in the ${a} ring`, both: 'in both rings', b: `only in the ${b} ring`, c: '', ac: '', bc: '', abc: '', out: b === undefined ? 'outside the ring' : 'outside both rings' }[p];
+    return { a: `only in the ${a} ring`, both: `in the ${a} and ${b} rings only`, b: `only in the ${b} ring`, c: `only in the ${c} ring`, ac: `in the ${a} and ${c} rings only`, bc: `in the ${b} and ${c} rings only`, abc: 'in all three rings', out: 'outside every ring' }[p];
+  };
+  const cap = (x: string) => x.charAt(0).toUpperCase() + x.slice(1);
+  const placed = Object.values(parts).flat();
   if (placed.length) {
     if (b === undefined) lines.push(`In the ${a} ring: ${names(scene.a)}.`, `Outside the ring: ${names(scene.out)}.`);
-    else lines.push(`Only in the ${a} ring: ${names(scene.a)}.`, `In both rings: ${names(scene.both)}.`, `Only in the ${b} ring: ${names(scene.b)}.`, `Outside both rings: ${names(scene.out)}.`);
+    else if (!three) lines.push(`Only in the ${a} ring: ${names(scene.a)}.`, `In both rings: ${names(scene.both)}.`, `Only in the ${b} ring: ${names(scene.b)}.`, `Outside both rings: ${names(scene.out)}.`);
+    else for (const p of ['a', 'both', 'b', 'ac', 'abc', 'bc', 'c', 'out'] as const) if (parts[p].length) lines.push(`${cap(where(p))}: ${names(parts[p])}.`);
   }
   const marked = placed.filter((t) => scene.marked?.includes(t.id));
   if (marked.length) lines.push(`Circled: ${names(marked)}.`);
+  // One part per sentence, so a long list is never one long sentence.
+  const [x0, ...xs] = scene.crossed ?? [];
+  if (x0) lines.push(`Gray, so no card can be here: ${where(x0)}.`, ...xs.map((p) => `Also gray: ${where(p)}.`));
+  const [s0, ...ss] = scene.starred ?? [];
+  if (s0) lines.push(`A star, so a card must be here: ${where(s0)}.`, ...ss.map((p) => `Also a star: ${where(p)}.`));
   if (scene.loose?.length) lines.push(`Not placed yet: ${names(scene.loose)}.`);
   if (scene.caption) lines.push(asSentence(scene.caption));
   return lines;

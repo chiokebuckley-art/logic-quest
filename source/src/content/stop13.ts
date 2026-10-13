@@ -1,7 +1,8 @@
 /**
  * Stop 13 · Clues & Chances (id s13; a side-track stop that opens after Spot the Trick).
  * How sure can you be? Counts give a word for a chance; each fair try is new; counts out of 100 say how common
- * something is; and a clue tells you a lot only when you would rarely see it if you were wrong.
+ * something is; a clue tells you a lot only when you would rarely see it if you were wrong; and two things that do not
+ * affect each other combine on the same picture: both is one box, either is a row and a column with the overlap once.
  *
  *  l1 Likely, not certain   Ways to Think’s four words from counts; the word comes from the counts, not one draw
  *  l2 Each draw is new       a fair coin has no memory; a draw put back leaves the bag the same (independent), a
@@ -9,19 +10,28 @@
  *  l3 Out of 100             base rates on a count picture: a row, a column, a box; the common group can win
  *  l4 Would I see this clue if I were wrong?   strong and weak clues; false alarms; how often a test is right is
  *                            not how often its yes is right
+ *  l5 And, or, with chances  two things that do not affect each other on the count picture: both (and) is one box,
+ *                            the first row split into groups; either (or) is a row and a column, the overlap once
  *
  * Every lesson is See -> Do -> Quiz, and every pack holds its trap (the pass rule asks for it): one draw judging the
- * word (one-draw), a streak making something due (due), the rare group picked for a clue (base-rate), and a yes from
- * a good test for a rare thing (false-alarm). Every answer, explanation, hint case and board mark comes from
+ * word (one-draw), a streak making something due (due), the rare group picked for a clue (base-rate), a yes from a
+ * good test for a rare thing (false-alarm), and adding for both (add-both) or adding for either without taking the
+ * overlap away (overlap). Every answer, explanation, hint case and board mark comes from
  * ../engine/puzzles/chances.ts, counts.ts and chanceBoards.ts. The check ends with the why item (pick the reason).
  * The warm-up is a Ways to Think item: a good guess is not a proof.
  */
 import {
   BACK_VS_KEPT,
+  BOTH_VS_EITHER,
   COUNTS_VS_DRAW,
   JAR,
   RIGHT_VS_FLAG,
   ROW_VS_COLUMN,
+  apartCard,
+  balloonTwinBoard,
+  bothCard,
+  bothEitherBoard,
+  bothEitherCard,
   commonWinsCard,
   eyesBoard,
   eyesCard,
@@ -39,10 +49,12 @@ import {
   keptContrastCard,
   l1ExampleCard,
   l1WordBoard,
+  pairExampleCard,
   rainBoard,
   rainCard,
   rowColumnBoard,
   rowColumnCard,
+  trapsCard,
 } from '../engine/puzzles/chanceBoards';
 import {
   DRAW_FORMS,
@@ -64,16 +76,22 @@ import {
   type SkinId,
 } from '../engine/puzzles/chances';
 import {
+  ADD_BOTH,
   BASE_RATE,
   CLUE_TOPICS,
   COUNT_SKINS,
+  EITHER_FORMS,
   FALSE_ALARM,
   FARM_PIC,
   GROUP_TOPICS,
+  OVERLAP,
+  PAIR_TOPICS,
   TEST_TOPICS,
   WHY_LESSON,
   alarmItem,
   answerItem,
+  bothItem,
+  eitherItem,
   fitsItem,
   moreItem,
   ofItem,
@@ -315,11 +333,51 @@ const l4: LessonDef = {
   pass: { firstTry: 3, include: [FALSE_ALARM] },
 };
 
-const lessons = [l1, l2, l3, l4];
+// ---------- Lesson 5: and, or, with chances ----------
+
+const l5: LessonDef = {
+  id: 's13.l5',
+  title: 'And, or, with chances',
+  ideas: [
+    // See: both at once, on the balloon picture. Then why both comes from one row when the two things do not affect each other.
+    bothCard(),
+    apartCard(),
+    // The contrast (both, or either) first, and its board right after it.
+    bothEitherCard(),
+    // Then See: both, then either, worked step by step. Its twin board (more red balloons, the boxes blank) comes right after it.
+    pairExampleCard(),
+    trapsCard(),
+  ],
+  drill: [bothEitherBoard(2), balloonTwinBoard(3)],
+  distinctions: [BOTH_VS_EITHER],
+  terms: [
+    { term: 'both', also: 'and', means: 'Two things at once, like red and big. On a count picture, it is one box.' },
+    { term: 'either', also: 'or', means: 'One thing, the other, or both. On a count picture, it is a row and a column, with their shared box counted once.' },
+    { term: 'overlap', means: 'The ones in a row and in a column at once: the box where they meet. Count it only once.' },
+  ],
+  practice: practiceOf('s13.l5', (rng) => {
+    const one = distinctItems();
+    const used = new Set<string>();
+    const [a, b, c] = rng.shuffle(COUNT_SKINS);
+    // Both, then either on a whole picture, then both again, then either from the rows (both first, then either).
+    return [
+      one(() => bothItem(rng, { skin: a, avoid: used })),
+      one(() => eitherItem(rng, { skin: b, avoid: used, form: 'picture' })),
+      one(() => bothItem(rng, { skin: c, avoid: used })),
+      one(() => eitherItem(rng, { skin: anyCountSkin(rng), avoid: used, form: 'rows' })),
+    ];
+  }),
+  pass: { firstTry: 3, include: [ADD_BOTH, OVERLAP] },
+};
+
+const lessons = [l1, l2, l3, l4, l5];
 
 // ---------- check, Arcade, new examples, warm-up ----------
 
-/** 9 items: two from each lesson in order (a trap first in each pair: every trap is a conflict item), then the why item last. */
+/**
+ * 10 items: two from each of Lessons 1 to 4 in order (a trap first in each pair: every trap is a conflict item), one
+ * from Lesson 5 (both or either, each a trap), then the why item last.
+ */
 function check(rng: Rng): Item[] {
   const one = distinctItems();
   const used = new Set<string>();
@@ -332,6 +390,7 @@ function check(rng: Rng): Item[] {
     ['s13.l3', one(() => rng.pick([readItem, fitsItem, ofItem])(rng, { skin: anyCountSkin(rng), avoid: used }))],
     ['s13.l4', one(() => alarmItem(rng, { skin: anyCountSkin(rng), avoid: used, want: 'rare' }))],
     ['s13.l4', one(() => (rng.chance(0.5) ? strongItem(rng, { skin: anyCountSkin(rng), avoid: used }) : answerItem(rng, { skin: anyCountSkin(rng), avoid: used })))],
+    ['s13.l5', one(() => (rng.chance(0.5) ? bothItem(rng, { skin: anyCountSkin(rng), avoid: used }) : eitherItem(rng, { skin: anyCountSkin(rng), avoid: used, form: rng.pick(EITHER_FORMS) })))],
   ];
   const why = one(() => whyItem(rng, { avoid: used }));
   const kind = why.model.t === 'why' ? why.model.kind : 'alarm';
@@ -355,6 +414,8 @@ const ARCADE: [string, (rng: Rng) => AnyMade][] = [
   ['s13.l4', (rng) => answerItem(rng, { skin: anyCountSkin(rng) })],
   ['s13.l4', (rng) => alarmItem(rng, { skin: anyCountSkin(rng), want: rng.pick(['rare', 'common'] as const) })],
   ['s13.l4', (rng) => whyItem(rng)],
+  ['s13.l5', (rng) => bothItem(rng, { skin: anyCountSkin(rng) })],
+  ['s13.l5', (rng) => eitherItem(rng, { skin: anyCountSkin(rng) })],
 ];
 function arcade(rng: Rng): Item {
   const [lesson, make] = rng.pick(ARCADE);
@@ -365,14 +426,15 @@ function arcade(rng: Rng): Item {
 /**
  * The topic a count item was about, so a new example is about another one in the same skin. Its opening line and its
  * picture’s first column together name it: a group topic and a test topic can share an opening line (“A deck has 100
- * cards.”), but never a column.
+ * cards.”), but never a column. A Lesson 5 topic has an opening line of its own.
  */
 function topicOf(it: Item): { id: string; skin: CountSkin } | undefined {
   const col = it.scene?.kind === 'counts' ? it.scene.cols[0] : undefined;
   return (
     GROUP_TOPICS.find((t) => it.prompt.startsWith(t.setting) && col === t.clue.yes) ??
     TEST_TOPICS.find((t) => it.prompt.startsWith(t.setting) && col === t.test.yesCol) ??
-    CLUE_TOPICS.find((t) => it.prompt.startsWith(t.question))
+    CLUE_TOPICS.find((t) => it.prompt.startsWith(t.question)) ??
+    PAIR_TOPICS.find((t) => it.prompt.startsWith(t.setting))
   );
 }
 
@@ -382,8 +444,8 @@ const WHY_BY_ANSWER: Record<string, WhyKind> = { new: 'due', count: 'common', al
 /**
  * New examples after a miss. A missed trap gets a pair whose answers differ (a word right against the draw and a word
  * wrong with it; a coin and a bag that does change; the common group winning and the rare one; mostly false alarms
- * and mostly right), so repeating one answer never passes the set. Other kinds get one new item of the same kind
- * about another topic.
+ * and mostly right; both and either about another topic, so adding never passes the set), so repeating one answer
+ * never passes the set. Other kinds get one new item of the same kind about another topic.
  */
 function fresh(missed: Item, rng: Rng): Item[] {
   if (missed.kind !== 'choose') return [];
@@ -412,6 +474,10 @@ function fresh(missed: Item, rng: Rng): Item[] {
       if (ids.includes('has')) return [make(alarmItem(rng, { skin, avoid, want: 'rare' })), make(alarmItem(rng, { skin, avoid, want: 'common' }))];
       if (ids.includes('none')) return [make(strongItem(rng, { skin, avoid }))];
       return [make(answerItem(rng, { skin, avoid }))];
+    case `s${STOP}.both`:
+      return [make(bothItem(rng, { skin, avoid })), make(eitherItem(rng, { skin, avoid, form: rng.pick(EITHER_FORMS) }))];
+    case `s${STOP}.either`:
+      return [make(eitherItem(rng, { skin, avoid, form: rng.pick(EITHER_FORMS) })), make(bothItem(rng, { skin, avoid }))];
     case `s${STOP}.why`: {
       const kind = WHY_BY_ANSWER[missed.answer] ?? 'alarm';
       const other = rng.pick((['due', 'common', 'alarm', 'weak'] as WhyKind[]).filter((k) => k !== kind));
@@ -451,6 +517,8 @@ export const stop13: StopDef = {
     's13.hundred': 'Clues & Chances: counts out of 100 and how common each group is',
     's13.clue': 'Clues & Chances: how often you would see a clue if you were wrong',
     's13.why': 'Clues & Chances: why a chance or a clue comes out as it does',
+    's13.both': 'Clues & Chances: both at once, for two things that do not affect each other (one box)',
+    's13.either': 'Clues & Chances: either, a row and a column with the overlap counted once',
     's13.guess': 'Clues & Chances warm-up: a good guess is not a proof (from Ways to Think)',
   },
 };

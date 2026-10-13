@@ -44,6 +44,22 @@ export const S11_WORLD: StopWorld = {
         { who: 'Software testers', kind: 'work', text: 'A tester runs a program many times, and it works each time. That does not prove it always works. One run that fails shows there is a bug to fix.' },
       ],
     },
+    's11.l6': {
+      why: 'Named rules are moves that always work. Knowing their shapes, you can check a step fast, and spot a step that only sounds like one.',
+      uses: [
+        { who: 'You, finding your scarf', kind: 'life', text: 'Your scarf is in your backpack or in your coat pocket. You check the backpack, and it is not there. One or the other: it must be in your pocket.' },
+        { who: 'Car mechanics', kind: 'work', text: 'If a car battery is dead, the lights will not turn on. A mechanic sees the lights turn on, so the battery is not dead. The THEN part did not happen, so the IF part did not either.' },
+        { who: 'Game programmers', kind: 'work', text: 'A game says: if you collect 3 keys, the gate opens. If the gate opens, a new level starts. A programmer joins the two rules with the chain rule: 3 keys start a new level.' },
+      ],
+    },
+    's11.l7': {
+      why: 'To prove a claim about every case, show the first case and the step to the next. Checking many cases, one by one, never covers them all.',
+      uses: [
+        { who: 'You, climbing a ladder', kind: 'life', text: 'You can reach any rung of a ladder if you can reach the first rung, and from each rung you can reach the next one. Those two facts cover every rung.' },
+        { who: 'Computer scientists', kind: 'work', text: 'A program can repeat the same steps thousands of times. Computer scientists show the count is right at the start, and each pass keeps it right. Then it is right after every pass.' },
+        { who: 'You, counting', kind: 'life', text: 'You can count as high as you like. You know where to start, at 1, and you know how to get from any number to the next. Those two facts reach every number.' },
+      ],
+    },
   },
   skills: {
     's11.method': [
@@ -62,6 +78,13 @@ export const S11_WORLD: StopWorld = {
     's11.counter': [
       'Someone says every month has at least 30 days. February has fewer. That one month is enough to show the claim is false.',
       'A store sign says every shirt is on sale. One shirt with a full price tag shows the sign is wrong.',
+    ],
+    's11.rules': [
+      'A pool sign says: if the gate is locked, the pool is closed. The gate is open today. That does not show the pool is open: that is the NOT trick.',
+      'A coach says: if you miss practice, you sit out the next game. A player did not sit out, so that player did not miss practice.',
+    ],
+    's11.induction': [
+      'A knitting pattern says each row has as many stitches as the row before. Row 1 has 20 stitches. So every row has 20, however long the scarf gets.',
     ],
     's11.why': [
       'When a friend explains why something must be true, ask what each part rests on. “It just is” is not a reason. A reason names what it uses.',

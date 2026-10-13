@@ -17,9 +17,11 @@
  *    (in the group and failing it breaks it; in the group and holding fits; outside says nothing), and Proof
  *    Lantern's sequence families (roleOf).
  *
- * Kinds (skill tags): method (l1), cite (l2), cases (l3), crash (l4), counter (l5), and why (the closing item of the
- * check). Every pass rule asks for its lesson's trap: only examples (l1), a true step that uses nothing (l2), a case
- * left out (l3), a guess that does not crash (l4), examples that fit an every claim (l5).
+ * Kinds (skill tags): method (l1), cite (l2), cases (l3), crash (l4), counter (l5), rules (l6, in ./proofRules.ts),
+ * induction (l7, in ./proofInduction.ts), and why (the closing item of the check). Every pass rule asks for its
+ * lesson's trap: only examples (l1), a true step that uses nothing (l2), a case left out (l3), a guess that does not
+ * crash (l4), examples that fit an every claim (l5), a step that looks like a rule and is not (l6), checked cases
+ * offered as the step to the next (l7).
  *
  * Every answer, explanation, wrong-choice feedback, hint case and teach case is computed here from the models. Only
  * the rng passed in is used, so the same seed always gives the same item.
@@ -34,7 +36,7 @@ import type { ItemCore, Made } from './statements';
 export type { CaseRole };
 
 export const STOP = 11;
-export const LESSONS = { method: 's11.l1', cite: 's11.l2', cases: 's11.l3', crash: 's11.l4', counter: 's11.l5' } as const;
+export const LESSONS = { method: 's11.l1', cite: 's11.l2', cases: 's11.l3', crash: 's11.l4', counter: 's11.l5', rules: 's11.l6', induction: 's11.l7' } as const;
 
 export type ProofSkin = 'everyday' | 'fantasy' | 'abstract';
 export const PROOF_SKINS: readonly ProofSkin[] = ['everyday', 'fantasy', 'abstract'];
@@ -66,6 +68,12 @@ export type ProofKind =
   | 'counter-which'
   | 'counter-trap'
   | 'counter-one'
+  | 'rule-name'
+  | 'rule-conclude'
+  | 'rule-trap'
+  | 'ind-parts'
+  | 'ind-missing'
+  | 'ind-proves'
   | 'why';
 
 export type Method = 'chain' | 'cases' | 'crash' | 'counter' | 'examples';
@@ -94,6 +102,8 @@ export const TRAPS = {
   cases: { tag: 'case-left-out', label: 'a proof that leaves a case out' },
   crash: { tag: 'no-crash', label: 'a guess that does not crash' },
   counter: { tag: 'examples-not-proof', label: 'examples that fit an every claim' },
+  rules: { tag: 'looks-like-rule', label: 'a step that looks like a rule and is not' },
+  induction: { tag: 'checks-as-step', label: 'checked cases offered as the step to the next' },
 } as const;
 export const WHY_TAG = 'why';
 
@@ -1609,8 +1619,11 @@ export function methodItem(rng: Rng, o: { method: Method; skin: ProofSkin }): Pr
 // =====================================================================================================================
 
 export type WhyFamily = Exclude<Method, 'examples'>;
+/** Every family a closing why item can come from: the four ways, named rules (l6) and the domino proof (l7). */
+export type WhyAny = WhyFamily | 'rules' | 'induction';
+export const WHY_FAMILIES: readonly WhyAny[] = [...WAYS, 'rules', 'induction'];
 /** The lesson that teaches each family's reason. */
-export const WHY_LESSON: Readonly<Record<WhyFamily, string>> = { chain: LESSONS.cite, cases: LESSONS.cases, crash: LESSONS.crash, counter: LESSONS.counter };
+export const WHY_LESSON: Readonly<Record<WhyAny, string>> = { chain: LESSONS.cite, cases: LESSONS.cases, crash: LESSONS.crash, counter: LESSONS.counter, rules: LESSONS.rules, induction: LESSONS.induction };
 
 export function whyItem(rng: Rng, o: { family?: WhyFamily; skin?: ProofSkin } = {}): ProofMade {
   const family = o.family ?? rng.pick(WAYS);

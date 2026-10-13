@@ -10,12 +10,20 @@
  *  l4 Suppose and crash    a guess that crashes proves its opposite (a proof by contradiction); trap: a guess that
  *                          holds up proves nothing
  *  l5 One is enough        one counterexample breaks an every claim; trap: examples that fit never prove one
+ *  l6 Rules with names     the IF part happened, the THEN part did not happen, one or the other, the chain rule, Flip
+ *                          and NOT; trap: a step that looks like a rule and is not (the flip trick, the NOT trick)
+ *  l7 Dominoes             the first case and the step to the next prove every case (induction); trap: checked cases
+ *                          offered as the step
  *
- * Kid words first (chain, cases, suppose and crash, counterexample); each grown-up word (proof, direct proof, axiom,
- * definition, proof by cases, contradiction, counterexample) is named once, on the card that introduces it, and in
+ * Lesson 4 also carries the liar card: “This sentence is false.” crashes both ways, so it is not a statement.
+ *
+ * Kid words first (chain, cases, suppose and crash, counterexample, dominoes); each grown-up word (proof, direct proof,
+ * axiom, definition, proof by cases, contradiction, counterexample, modus ponens, modus tollens, disjunctive syllogism,
+ * chain rule, proof by contrapositive, induction, base case, step) is named once, on the card that introduces it, and in
  * that lesson's terms. Every lesson is See -> Do -> Quiz; every answer, explanation, hint case and board mark comes from
- * ../engine/puzzles/proofs.ts and ../engine/puzzles/proofBoards.ts. The check ends with the why item. The warm-up
- * (bridge) is Proof Lantern's “proved, a good guess, or false?” item.
+ * ../engine/puzzles/proofs.ts, ../engine/puzzles/proofBoards.ts, ../engine/puzzles/proofRules.ts (lesson 6) and
+ * ../engine/puzzles/proofInduction.ts (lesson 7). The check ends with the why item. The warm-up (bridge) is Proof
+ * Lantern's “proved, a good guess, or false?” item.
  */
 import {
   CRASH_VS_HOLDS,
@@ -59,6 +67,7 @@ import {
   STOP,
   TRAPS,
   WAYS,
+  WHY_FAMILIES,
   WHY_LESSON,
   bridgeItem,
   brokenStepItem,
@@ -86,8 +95,55 @@ import {
   type Method,
   type ProofMade,
   type ProofSkin,
-  type WhyFamily,
+  type WhyAny,
 } from '../engine/puzzles/proofs';
+import {
+  CONTRAST_STEPS,
+  LOOKALIKES,
+  MOVES,
+  MOVE_LABEL,
+  RULES,
+  RULE_EXAMPLES,
+  RULE_VS_LOOKALIKE,
+  breakWorld,
+  moveOf,
+  ruleCasesBoard,
+  ruleConcludeItem,
+  ruleNameBoard,
+  ruleNameItem,
+  ruleTrapItem,
+  ruleWhyItem,
+  ruleWorkedScene,
+  rulesContrast,
+  rulesLookBoard,
+  stepLine as ruleStepLine,
+  leftWorld,
+  worldText,
+  WORKED_RULE,
+  type MoveId,
+} from '../engine/puzzles/proofRules';
+import {
+  CHECKS_VS_STEP,
+  WORKED_STAIR,
+  claimText,
+  firstLine,
+  inductionContrast,
+  inductionPartsBoard,
+  inductionTwinBoard,
+  inductionWhyItem,
+  inductionWorkedScene,
+  IND_SKINS,
+  caseHolds,
+  firstHolds,
+  missingPartItem,
+  stepHolds,
+  provesEveryItem,
+  stepLine as indStepLine,
+  twoPartsItem,
+  valueAt,
+  type IndClaim,
+  type ProvesShape,
+} from '../engine/puzzles/proofInduction';
 import type { Item, LessonDef, Rng, StopDef } from '../engine/types';
 
 /** A made item as a Stop 12 item: its id, lesson and skill (`s11.<tag>`). */
@@ -374,6 +430,16 @@ const l4: LessonDef = {
       scene: crashWorkedScene(),
       body: [...crashWorkedLines(), `That guess crashes. So ${KX} is ${aKind(flipKind(K.kind))}.`],
     },
+    {
+      // The liar card: one card, no item. Both guesses crash, so the sentence is not a statement (Stop 1's word).
+      title: 'A sentence that crashes both ways',
+      body: [
+        'Here is a strange sentence: “This sentence is false.”',
+        'Suppose it is true. Then what it says holds, so it is false. That guess crashes.',
+        'Suppose it is false. It says it is false, and that is right, so it is true. That guess crashes too.',
+        'Both guesses crash. So it is not a statement. In Stop 1, a statement is a sentence that is true or false.',
+      ],
+    },
   ],
   drill: [crashGuessBoard(), crashFollowBoard()],
   distinctions: [CRASH_VS_HOLDS],
@@ -460,32 +526,218 @@ const l5: LessonDef = {
   pass: { firstTry: 3, include: [TRAPS.counter] },
 };
 
-const lessons = [l1, l2, l3, l4, l5];
+// ---------- Lesson 6: rules with names ----------
+
+const RX = RULE_EXAMPLES;
+const sayRule = (m: MoveId) => ruleStepLine(RX[m]);
+const look = CONTRAST_STEPS.look;
+
+const l6: LessonDef = {
+  id: LESSONS.rules,
+  title: 'Rules with names',
+  ideas: [
+    {
+      title: 'Rules with names',
+      body: [
+        'Some proof steps have the same shape again and again.',
+        'A shape that always works is a rule. Whenever its givens are true, its claim is true too.',
+        'You have used these rules before. Now each one gets a name.',
+      ],
+    },
+    {
+      title: 'The IF part, and the THEN part',
+      body: [
+        `${MOVE_LABEL.mp}: “${sayRule('mp')}” Grown-ups call this modus ponens.`,
+        `${MOVE_LABEL.mt}: “${sayRule('mt')}” This one is modus tollens.`,
+        'You used both moves with if–then rules.',
+      ],
+    },
+    {
+      title: 'One or the other',
+      body: [`“${sayRule('ds')}”`, 'One side is ruled out, so the other side must be true.', 'Grown-ups call this disjunctive syllogism.'],
+    },
+    {
+      title: 'The chain rule',
+      body: [
+        `“${sayRule('chain')}”`,
+        'The THEN part of the first rule is the IF part of the second. So the two rules join into one.',
+        'It is the same idea as the chain rule for who came first. Grown-ups also call it hypothetical syllogism.',
+      ],
+    },
+    {
+      title: 'Proof by Flip and NOT',
+      body: [
+        'Flip and NOT turns a rule around and puts NOT on each part.',
+        `“${ruleStepLine({ ...RX.contra, givens: [RX.contra.claim], claim: RX.contra.givens[0] }).replace(/ So .*$/, '')}” becomes “${ruleStepLine(RX.contra).replace(/ So .*$/, '')}”`,
+        'The two always mean the same. So to prove the rule, you may prove its Flip and NOT instead.',
+        'Grown-ups call this a proof by contrapositive.',
+      ],
+    },
+    {
+      title: 'Rules and look-alikes',
+      distinction: RULE_VS_LOOKALIKE.id,
+      scene: rulesContrast(),
+      body: [
+        'Some steps sound like rules, but they are not. They are look-alikes.',
+        `Both steps here start from the same rule. The first is “${MOVE_LABEL.mt}.” It follows.`,
+        `The second is “${MOVE_LABEL.da}.” A case breaks it: ${worldText(look, breakWorld(look))}`,
+        `“${MOVE_LABEL.ac}” is a look-alike too. It goes back from the THEN part to the IF part.`,
+      ],
+    },
+    {
+      title: 'Example: is it a rule?',
+      scene: ruleWorkedScene(),
+      body: [
+        `The step: “${ruleStepLine(WORKED_RULE)}”`,
+        'List every case. Cross out each case where a given is false.',
+        `Only one case is left: ${worldText(WORKED_RULE, leftWorld(WORKED_RULE))} The claim is true there.`,
+        `So the step follows. It is “${MOVE_LABEL[moveOf(WORKED_RULE)!]}.”`,
+      ],
+    },
+  ],
+  drill: [rulesLookBoard(), ruleCasesBoard(), ruleNameBoard()],
+  distinctions: [RULE_VS_LOOKALIKE],
+  terms: [
+    { term: 'modus ponens', also: 'the IF part happened', means: 'A rule: when an if–then rule holds and its IF part happened, its THEN part happened too.' },
+    { term: 'modus tollens', also: 'the THEN part did not happen', means: 'A rule: when an if–then rule holds and its THEN part did not happen, its IF part did not happen either.' },
+    { term: 'disjunctive syllogism', also: 'one or the other', means: 'A rule: when one of two things is true and the first one is not, the second one is.' },
+    { term: 'chain rule', also: 'hypothetical syllogism', means: 'A rule that joins two if–then rules, when the THEN part of the first is the IF part of the second.' },
+    { term: 'proof by contrapositive', also: 'proof by Flip and NOT', means: 'To prove an if–then rule, prove its Flip and NOT instead. The two always mean the same.' },
+  ],
+  practice: practiceOf(LESSONS.rules, (rng) => {
+    const one = distinctItems();
+    const used = new Set<string>();
+    const [a, b, c] = rng.shuffle(PROOF_SKINS);
+    // Name a rule, give the claim a rule allows, the trap (the step that is no rule), one more, then why a rule may be used.
+    return [
+      one(() => ruleNameItem(rng, { skin: a, move: rng.pick(RULES), avoid: used })),
+      one(() => ruleConcludeItem(rng, { skin: b, move: rng.pick(RULES), avoid: used })),
+      one(() => ruleTrapItem(rng, { skin: c, avoid: used })),
+      one(() => (rng.chance(0.5) ? ruleNameItem : ruleConcludeItem)(rng, { skin: rng.pick(PROOF_SKINS), move: rng.pick(MOVES) })),
+      one(() => ruleWhyItem(rng, { skin: rng.pick(PROOF_SKINS) })),
+    ];
+  }),
+  pass: { firstTry: 3, include: [TRAPS.rules] },
+};
+
+// ---------- Lesson 7: dominoes ----------
+
+const ST = WORKED_STAIR;
+/** Card 5's two failures, worked out from the model: a number list with no first case, and one with no step. */
+const oddList = (a: number, d: number): IndClaim => ({ skin: IND_SKINS.terms, a, d, prop: { kind: 'odd' } });
+const NO_FIRST = oddList(4, 2);
+const NO_STEP = oddList(3, 3);
+if (firstHolds(NO_FIRST) || !stepHolds(NO_FIRST) || !firstHolds(NO_STEP) || stepHolds(NO_STEP) || caseHolds(NO_STEP, 2)) throw new Error('stop11: card 5 needs a list with no first case and one with no step');
+
+const l7: LessonDef = {
+  id: LESSONS.induction,
+  title: 'Dominoes',
+  ideas: [
+    {
+      title: 'A line of dominoes',
+      body: [
+        'Picture a long line of dominoes. Push the first one, and it knocks over the next.',
+        'If each domino knocks over the next, they all fall. Even one far down the line falls.',
+        'Two things make that work: the first one falls, and each one knocks over the next.',
+      ],
+    },
+    {
+      title: 'Two parts prove every case',
+      body: [
+        'A claim about every case can be proved the same way.',
+        'The first case: show the claim holds for case 1. That is the first domino. Grown-ups call it the base case.',
+        'The step to the next: show that if the claim holds for one case, it holds for the next. Grown-ups call this part the step.',
+        'The two parts together make a domino proof. Grown-ups call it induction.',
+      ],
+    },
+    {
+      title: 'Checked cases are not the step',
+      distinction: CHECKS_VS_STEP.id,
+      scene: inductionContrast(),
+      body: [
+        `Both tries start from the first case: ${firstLine(ST, false)}`,
+        'The first try then shows the step to the next. It passes the claim from any step to the next one.',
+        'The second try only checks more steps. The checking stops at step 4, so nothing reaches step 5.',
+      ],
+    },
+    {
+      title: 'Example: an odd staircase',
+      scene: inductionWorkedScene(),
+      body: [`Claim: ${claimText(ST)}`, firstLine(ST), indStepLine(ST), 'Both parts hold. So every step is odd, all the way to step 100 and past it.'],
+    },
+    {
+      title: 'Both parts are needed',
+      body: [
+        `Here are two number lists, each with the claim “${claimText(NO_FIRST)}”`,
+        `With no first case, nothing starts. Start at ${NO_FIRST.a} and add ${NO_FIRST.d}. The step to the next holds, but term 1 is ${valueAt(NO_FIRST, 1)}. So no term is odd.`,
+        `With no step to the next, the line can stop. Start at ${NO_STEP.a} and add ${NO_STEP.d}. Term 1 is ${valueAt(NO_STEP, 1)}, which is odd, but term 2 is ${valueAt(NO_STEP, 2)}.`,
+        'Checked cases are not enough either. They stop where the checking stops.',
+      ],
+    },
+  ],
+  drill: [inductionPartsBoard(), inductionTwinBoard()],
+  distinctions: [CHECKS_VS_STEP],
+  terms: [
+    { term: 'induction', also: 'the domino proof', means: 'A proof that a claim holds for every case. Show the first case, then show that each case passes the claim to the next.' },
+    { term: 'base case', also: 'the first domino', means: 'The first case of a domino proof. It shows the claim holds at the start.' },
+    { term: 'step', also: 'the step to the next', means: 'The part of a domino proof that shows this: if the claim holds for one case, it holds for the next case too.' },
+  ],
+  practice: practiceOf(LESSONS.induction, (rng) => {
+    const one = distinctItems();
+    const [a, b, c] = rng.shuffle(PROOF_SKINS);
+    // A claim with its two parts, the part that is missing, the trap (checked cases offered as the step), one more
+    // argument to judge, then why the two parts prove every case.
+    return [
+      one(() => twoPartsItem(rng, { skin: a })),
+      one(() => missingPartItem(rng, { skin: b })),
+      one(() => provesEveryItem(rng, { skin: c, shape: 'checks' })),
+      one(() => provesEveryItem(rng, { skin: rng.pick(PROOF_SKINS), shape: rng.pick<ProvesShape>(['both', 'nofirst', 'nostep']) })),
+      one(() => inductionWhyItem(rng, { skin: rng.pick(PROOF_SKINS) })),
+    ];
+  }),
+  pass: { firstTry: 3, include: [TRAPS.induction] },
+};
+
+const lessons = [l1, l2, l3, l4, l5, l6, l7];
 
 // ---------- check, Arcade, new examples, warm-up ----------
 
+/** The closing why item of any family: the four ways (proofs.ts), named rules (l6) or the domino proof (l7). */
+function whyOf(rng: Rng, family: WhyAny, skin?: ProofSkin): ProofMade {
+  if (family === 'rules') return ruleWhyItem(rng, { skin });
+  if (family === 'induction') return inductionWhyItem(rng, { skin });
+  return whyItem(rng, { family, skin });
+}
+
 /**
- * 10 items: one from Lesson 1 and two from each other lesson, in lesson order, then the why item last. Conflict items:
- * the chain with a true claim and a step that uses nothing (l2), the proof that checks only cases where the claim is
- * true (l3), the guess that holds up (l4), and the cards where most fit and one breaks the claim (l5).
+ * 10 items: one from each of Lessons 1 to 5, two from Lesson 6 and two from Lesson 7, in lesson order, then the why
+ * item last. Conflict items, always there: the chain with a true claim and a step that uses nothing (l2), the four steps
+ * where one only looks like a rule (l6), and the checked cases offered as the step to the next (l7). The why item comes
+ * from any of the six families and is filed under the lesson that teaches its reason.
  */
 function check(rng: Rng): Item[] {
   const one = distinctItems();
   const used = new Set<string>();
   const skin = () => rng.pick(PROOF_SKINS);
+  const cases = (): ProofMade => {
+    const k = rng.int(0, 2);
+    return k === 0 ? mustCoverItem(rng, { skin: skin(), avoid: used }) : k === 1 ? leftOutItem(rng, { skin: skin(), avoid: used }) : casesTrapItem(rng, { skin: skin(), avoid: used });
+  };
+  const crash = (): ProofMade => rng.pick([crashProvesItem, breakerItem, holdsUpItem])(rng, { skin: skin() });
+  const counter = (): ProofMade => rng.pick([oneBreaksItem, whichBreaksItem, examplesTrapItem])(rng, { skin: skin() });
   const plan: [string, ProofMade][] = [
     [LESSONS.method, one(() => methodItem(rng, { method: rng.pick(METHODS), skin: skin() }))],
-    [LESSONS.cite, one(() => (rng.chance(0.5) ? brokenStepItem : citeItem)(rng, { skin: orderSkin(rng, skin()) }))],
     [LESSONS.cite, one(() => chainTrapItem(rng, { skin: orderSkin(rng, skin()) }))],
-    [LESSONS.cases, one(() => (rng.chance(0.5) ? mustCoverItem(rng, { skin: skin(), avoid: used }) : leftOutItem(rng, { skin: skin(), avoid: used })))],
-    [LESSONS.cases, one(() => casesTrapItem(rng, { skin: skin(), avoid: used }))],
-    [LESSONS.crash, one(() => (rng.chance(0.5) ? crashProvesItem : breakerItem)(rng, { skin: skin() }))],
-    [LESSONS.crash, one(() => holdsUpItem(rng, { skin: skin() }))],
-    [LESSONS.counter, one(() => oneBreaksItem(rng, { skin: skin() }))],
-    [LESSONS.counter, one(() => (rng.chance(0.5) ? whichBreaksItem : examplesTrapItem)(rng, { skin: skin() }))],
+    [LESSONS.cases, one(cases)],
+    [LESSONS.crash, one(crash)],
+    [LESSONS.counter, one(counter)],
+    [LESSONS.rules, one(() => (rng.chance(0.5) ? ruleNameItem : ruleConcludeItem)(rng, { skin: skin(), move: rng.pick(RULES) }))],
+    [LESSONS.rules, one(() => ruleTrapItem(rng, { skin: skin() }))],
+    [LESSONS.induction, one(() => (rng.chance(0.5) ? twoPartsItem(rng, { skin: skin() }) : missingPartItem(rng, { skin: skin() })))],
+    [LESSONS.induction, one(() => provesEveryItem(rng, { skin: skin(), shape: 'checks' }))],
   ];
-  const family = rng.pick(WAYS);
-  plan.push([WHY_LESSON[family], one(() => whyItem(rng, { family, skin: skin() }))]);
+  const family = rng.pick(WHY_FAMILIES);
+  plan.push([WHY_LESSON[family], one(() => whyOf(rng, family, skin()))]);
   return plan.map(([lesson, m], i) => finish(m, `s${STOP}-c${i + 1}`, lesson));
 }
 
@@ -504,25 +756,38 @@ const ARCADE: [string, (rng: Rng) => ProofMade][] = [
   [LESSONS.counter, (rng) => whichBreaksItem(rng, { skin: rng.pick(PROOF_SKINS) })],
   [LESSONS.counter, (rng) => examplesTrapItem(rng, { skin: rng.pick(PROOF_SKINS) })],
   [LESSONS.counter, (rng) => oneBreaksItem(rng, { skin: rng.pick(PROOF_SKINS) })],
+  [LESSONS.rules, (rng) => ruleNameItem(rng, { skin: rng.pick(PROOF_SKINS) })],
+  [LESSONS.rules, (rng) => ruleConcludeItem(rng, { skin: rng.pick(PROOF_SKINS) })],
+  [LESSONS.rules, (rng) => ruleTrapItem(rng, { skin: rng.pick(PROOF_SKINS) })],
+  [LESSONS.induction, (rng) => twoPartsItem(rng, { skin: rng.pick(PROOF_SKINS) })],
+  [LESSONS.induction, (rng) => missingPartItem(rng, { skin: rng.pick(PROOF_SKINS) })],
+  [LESSONS.induction, (rng) => provesEveryItem(rng, { skin: rng.pick(PROOF_SKINS) })],
 ];
 function arcade(rng: Rng): Item {
   if (rng.chance(0.15)) {
-    const family = rng.pick(WAYS);
-    return finish(whyItem(rng, { family }), `s${STOP}-arcade`, WHY_LESSON[family]);
+    const family = rng.pick(WHY_FAMILIES);
+    return finish(whyOf(rng, family), `s${STOP}-arcade`, WHY_LESSON[family]);
   }
   const [lesson, make] = rng.pick(ARCADE);
   return finish(make(rng), `s${STOP}-arcade`, lesson);
 }
 
-const FAMILY_OF: Record<string, WhyFamily> = { [LESSONS.cite]: 'chain', [LESSONS.cases]: 'cases', [LESSONS.crash]: 'crash', [LESSONS.counter]: 'counter' };
+const FAMILY_OF: Record<string, WhyAny> = {
+  [LESSONS.cite]: 'chain',
+  [LESSONS.cases]: 'cases',
+  [LESSONS.crash]: 'crash',
+  [LESSONS.counter]: 'counter',
+  [LESSONS.rules]: 'rules',
+  [LESSONS.induction]: 'induction',
+};
 const has = (it: Item, s: string) => it.prompt.includes(s);
 const tagged = (it: Item, tag: string) => !!it.tags?.includes(tag);
 const answerOf = (it: Item) => (it.kind === 'choose' ? it.answer : '');
 
 /**
  * New examples after a miss. A missed trap gets another trap and a question with another answer, so repeating one
- * answer never passes the set. A missed way gets the same way in a new skin and another way. A missed why gets the
- * same reason and one from another lesson.
+ * answer never passes the set. A missed way gets the same way in a new skin and another way. A missed rule gets the
+ * same rule and another one. A missed why gets the same reason and one from another lesson.
  */
 function fresh(missed: Item, rng: Rng): Item[] {
   const make = (m: ProofMade, lesson = missed.lesson) => finish(m, 'new', lesson);
@@ -550,10 +815,30 @@ function fresh(missed: Item, rng: Rng): Item[] {
       if (tagged(missed, TRAPS.counter.tag)) return [make(examplesTrapItem(rng, { skin: skin() })), make(oneBreaksItem(rng, { skin: skin() }))];
       if (has(missed, 'What do they show')) return [make(oneBreaksItem(rng, { skin: skin() })), make(examplesTrapItem(rng, { skin: skin() }))];
       return [make(whichBreaksItem(rng, { skin: skin() }))];
+    case 's11.rules': {
+      if (tagged(missed, TRAPS.rules.tag)) return [make(ruleTrapItem(rng, { skin: skin() })), make(ruleNameItem(rng, { skin: skin(), move: rng.pick(RULES) }))];
+      if (has(missed, 'Which rule does it use')) {
+        const m = answerOf(missed) as MoveId;
+        const other = rng.pick(RULES.filter((x) => x !== m));
+        return [make(ruleNameItem(rng, { skin: skin(), move: m })), make(ruleNameItem(rng, { skin: skin(), move: other }))];
+      }
+      return [make(ruleConcludeItem(rng, { skin: skin(), move: rng.pick(RULES) })), make(ruleConcludeItem(rng, { skin: skin(), move: rng.pick(LOOKALIKES) }))];
+    }
+    case 's11.induction': {
+      if (tagged(missed, TRAPS.induction.tag)) return [make(provesEveryItem(rng, { skin: skin(), shape: 'checks' })), make(provesEveryItem(rng, { skin: skin(), shape: 'both' }))];
+      if (has(missed, 'Which part is missing')) {
+        const shape = answerOf(missed) === 'first' ? 'nofirst' : 'nostep';
+        return [make(missingPartItem(rng, { skin: skin(), shape })), make(missingPartItem(rng, { skin: skin(), shape: shape === 'nofirst' ? 'nostep' : 'nofirst' }))];
+      }
+      if (has(missed, 'Which two prove')) return [make(twoPartsItem(rng, { skin: skin() })), make(missingPartItem(rng, { skin: skin() }))];
+      // The same kind of argument as the missed one, and one with another answer (the checked cases answer “no step”).
+      const same: ProvesShape = answerOf(missed) === 'yes' ? 'both' : answerOf(missed) === 'nofirst' ? 'nofirst' : 'nostep';
+      return [make(provesEveryItem(rng, { skin: skin(), shape: same })), make(provesEveryItem(rng, { skin: skin(), shape: same === 'nostep' ? 'both' : 'checks' }))];
+    }
     case 's11.why': {
-      const f = FAMILY_OF[missed.lesson] ?? rng.pick(WAYS);
-      const other = rng.pick(WAYS.filter((x) => x !== f));
-      return [make(whyItem(rng, { family: f, skin: skin() }), WHY_LESSON[f]), make(whyItem(rng, { family: other, skin: skin() }), WHY_LESSON[other])];
+      const f = FAMILY_OF[missed.lesson] ?? rng.pick(WHY_FAMILIES);
+      const other = rng.pick(WHY_FAMILIES.filter((x) => x !== f));
+      return [make(whyOf(rng, f, skin()), WHY_LESSON[f]), make(whyOf(rng, other, skin()), WHY_LESSON[other])];
     }
   }
   return [];
@@ -581,6 +866,8 @@ export const stop11: StopDef = {
     's11.cases': 'Proof: cover every case the givens leave',
     's11.crash': 'Proof: suppose the opposite; a crash proves the claim',
     's11.counter': 'Proof: one counterexample breaks an every claim; examples never prove one',
+    's11.rules': 'Proof: name the rule a step uses, and spot a step that only looks like one',
+    's11.induction': 'Proof: prove every case with the first case and the step to the next',
     's11.why': 'Proof: why a proof works',
   },
 };

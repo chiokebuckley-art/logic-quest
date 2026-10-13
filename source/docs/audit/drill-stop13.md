@@ -23,6 +23,12 @@ quiz packs, reading level, the closing why item and the warm-up like every other
 - **A clue or a test:** a clue is strong when you would rarely see it if you were wrong (`strongerClue`). A test is right
   for the yes box plus the no box (`rightFor`); a flag is right only in its own column, so a good test for a rare thing can
   have mostly false alarms.
+- **A pair picture** (Lesson 5, the same `counts` scene): 100 things split by two things that do not affect each other.
+  The rows are the first thing, the columns the second, and the second is k in every m in each row (`pairPic`, `partOf`:
+  the row split into groups of m, with k from each group). Every count is read from its boxes (`pairCounts`): both is
+  the box the row and the column share; either is the three boxes with one thing or both; adding the row and the column
+  counts that shared box (the overlap) twice. Never fractions and never percent: counts and groups only. A picture to
+  fill shows each row’s count in all beside blank boxes (the scene’s `rowTotals`; `colTotals` too), read aloud as blank.
 
 Skins: everyday, fantasy and abstract.
 
@@ -112,19 +118,59 @@ test right for most, yet most of its yes answers are false alarms; a conflict it
 
 **Terms.** false alarm; strong clue. **Distinction.** `right-vs-flag`.
 
+## s13.l5 · And, or, with chances
+
+**Model.** The balloons: 100 balloons at a fair, 10 red, and size does not depend on color: 1 in every 2 balloons is big
+(`BALLOONS_PIC`: 5 red and big, 5 red and not big, 45 big and not red, 45 neither). Both (red and big) is one box: 5.
+Either (red or big, or both) is the red row and the big column, 10 and 50 make 60, with the 5 counted twice taken away:
+55, the same as counting the three boxes (5, 5 and 45). The twin (`BALLOONS_TWIN`) has 40 red and 1 in every 4 big (10
+red and big, 30 red and not big, 15 big and not red, 45 neither): big in all 25, both 10, either 55.
+
+**See.** Both at once (the balloon picture; names both, and) · Things that do not affect each other (big is the same
+part of each row, so both is the red row split into groups of 2, 1 from each; if the two did affect each other, you would
+count the box itself) · Both, or either? (contrast: the same balloons, two questions: red and big gives 5, one box; red or
+big gives 55, the row and the column with their shared box once; names either, or, and overlap) · Example: both, then
+either (the picture with the red row and the big column picked out; step 1 the counts in all, step 2 both, step 3 either,
+then a check by counting boxes, and the counts as chances: one balloon picked without looking is red and big 5 in 100,
+red or big 55 in 100) · Two adding traps (never add for both; for either, take the overlap away once).
+
+**Do.** `s13.l5-do1` “Both, or either?”, right after the contrast, on the balloon picture: three questions (red and big;
+red or big, or both; big and not red), each marked both or either, then its count (5, 55, 45). Misconceptions: the row and
+the column added for both (`add-both`), the same for either (`counted-twice`), and and read as or (`and-as-or`); two “I’m
+confused” questions (where a red and big balloon sits; does or count it). `s13.l5-do2` “More red balloons”, after the
+example: twin “One thing changed: now 40 of the 100 balloons are red, and 1 in every 4 balloons is big.” The picture shows
+only each row’s count (40, 60), the boxes blank, and the caption gives the part. Big in all (25), red and big (10), red or
+big, or both (55). Misconceptions: `add-both`, `counted-twice`, and one but not both (`or-one-only`).
+
+**Quiz.** `bothItem` (a picture to fill: each row’s count, the part with the second thing; how many have both? Choices:
+the box; the row and the column added, the trap; the count for either; every thing with the second thing; and the number
+of groups when more than 1 is taken from each group, else the rest of the first row, so the right count is not always the
+smallest), `eitherItem` (how many have one, the other, or both? on a whole picture, or from the rows so both is found
+first; choices: the three boxes; the row and the column added, the trap; one but not both; both only; neither). Skills
+`s13.both` and `s13.either`. Trap tags `add-both` (adding for both) and `overlap` (adding for either without taking the
+overlap away); every one is a conflict item, and the pass rule asks for one of each. Pack: both, either on a whole
+picture, both in another skin, then either from the rows. Every hint and “Explain more simply” is one small case of 10 cards (4 red, and 1 in every 2 big, red or not: 5 big, 2
+both, 7 red or big), each count worked out from it.
+
+**Terms.** both (and); either (or); overlap. **Distinction.** `both-vs-either`.
+
 ## The stop
 
-- **Check:** 9 items, two from each lesson in order, a trap first in each pair (every trap is a conflict item), then the
-  why item last (`whyItem`, tag `why`, pick the reason). Its kind is due, common, alarm or weak, and it is filed under that
-  kind’s lesson (`WHY_LESSON`).
+- **Check:** 10 items, two from each of Lessons 1 to 4 in order, a trap first in each pair (every trap is a conflict item),
+  one from Lesson 5 (both or either, a trap), then the why item last (`whyItem`, tag `why`, pick the reason). Its kind is
+  due, common, alarm or weak, and it is filed under that kind’s lesson (`WHY_LESSON`).
 - **Warm-up (bridge):** a Ways to Think item on a good guess that is not a proof (a streak broken, what you know for sure,
   or a best guess ruled out). `bridgeFrom: 's7'`. It is finished as a Clues & Chances item (`s13.l1`, skill `s13.guess`,
   named “Clues & Chances warm-up: a good guess is not a proof (from Ways to Think)”).
 - **Arcade:** one item from any lesson. **New examples:** a missed trap gets a pair whose answers differ; other kinds get
-  one new item of the same kind about another topic; a missed why gets the same kind and another.
-- **Skill names:** `s13.likely`, `s13.due`, `s13.hundred`, `s13.clue`, `s13.why`, `s13.guess`.
+  one new item of the same kind about another topic; a missed why gets the same kind and another; a missed both or
+  either gets one of each about another topic, so adding never passes the set.
+- **Skill names:** `s13.likely`, `s13.due`, `s13.hundred`, `s13.clue`, `s13.why`, `s13.both`, `s13.either`, `s13.guess`.
 - **World:** `src/content/world/s13.ts`. **Test:** `src/engine/__tests__/chances.test.ts` (one block per lesson; answer
   balance; the closing why item; the lessons’ packs, traps, pass rules and terms; every board mark; the stop; words).
+  Lesson 5’s answers are counted again one thing at a time (in the row and in the column; in the row or in the column),
+  “do not affect each other” is checked as the same share (by division) in each row, and the right count’s place by size
+  and on screen is checked to move.
 
 ## Plan and code
 
@@ -134,7 +180,11 @@ test right for most, yet most of its yes answers are false alarms; a conflict it
   I were wrong?”.
 - The plan’s terms are likely, independent, base rate and false alarm; the code adds certain (must) and strong clue.
 - The plan names one distinction (how often the test is right vs how often its yes is right: `right-vs-flag`); the code
-  teaches one per lesson: `counts-vs-draw`, `back-vs-kept`, `row-vs-column` and `right-vs-flag`.
+  teaches one per lesson: `counts-vs-draw`, `back-vs-kept`, `row-vs-column`, `right-vs-flag` and `both-vs-either`.
+- Lesson 5 comes from the audit additions brief (`docs/AUDIT-ADDITIONS.md`, “s13 Clues & Chances: one new lesson”). Its
+  example is the brief’s own (10 of 100 red, 1 in 2 of those big, 5 of 100 red and big); “either” is said as “or both”
+  everywhere, so it never reads as one but not both. The closing why item keeps its four kinds; Lesson 5 is in the check
+  through its own slot.
 
 ## Review
 

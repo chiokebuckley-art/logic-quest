@@ -1,9 +1,11 @@
 /**
  * Stop 10 · Circuit Lab. Every answer is worked out again here by a second method: the circuit is read from the picture
  * the learner sees (the scene's wiring, switch names and states) and turned into a little graph of wires. A closed
- * switch joins its two ends; a flipper box joins its ends only when its own inside does not; then a search asks whether
- * power can get from the battery to the lamp. Rows are listed by counting in binary. “Same job” is checked with Stop 2's
- * card rules (rules.ts) over all 18 cards. None of it calls the code that set the answer.
+ * switch joins its two ends; a flipper box joins its ends only when its own inside does not; a two-way pair is six ends
+ * (each switch's middle, top and bottom), each lever joining its middle end to its top end (up) or bottom end (down),
+ * and two crossed wires joining the first switch's top to the second's bottom and its bottom to the second's top; then
+ * a search asks whether power can get from the battery to the lamp. Rows are listed by counting in binary. “Same job” is
+ * checked with Stop 2's card rules (rules.ts) over all 18 cards. None of it calls the code that set the answer.
  */
 import { renderToString } from 'react-dom/server';
 import { createElement as h } from 'react';
@@ -23,14 +25,19 @@ import {
   LAB,
   LINE_POOL,
   MATCH_POOL,
+  PICK_POOL,
   SAME_PAIRS,
   SIDE_POOL,
   TOPICS,
+  TWO,
+  TWO_TOPICS,
   bridgeItem,
   caseItem,
   columnItem,
+  compareItem,
   lampItem,
   matchItem,
+  pickItem,
   sameItem,
   toPart,
   whyItem,
@@ -53,7 +60,10 @@ const scene = (it: { scene?: Scene }) => it.scene as CircuitData;
 
 // ---------- the second method: a graph of wires ----------
 
-/** Can power get from the battery to the lamp? Each part is wires between two points; search for a path. */
+/**
+ * Can power get from the battery to the lamp? Each part is wires between two points; search for a path. `closed`: each
+ * switch by name, true for a closed plain switch or a two-way switch that is up.
+ */
 function conducts(p: CircuitPart, closed: Record<string, boolean>): boolean {
   let next = 2;
   const edges: [number, number][] = [];
@@ -62,6 +72,14 @@ function conducts(p: CircuitPart, closed: Record<string, boolean>): boolean {
       case 'switch':
         if (closed[q.name]) edges.push([from, to]);
         break;
+      case 'twoway': {
+        // Six ends: the first switch's middle (from), top and bottom; the second switch's top, bottom and middle (to).
+        const [t1, b1, t2, b2] = [next++, next++, next++, next++];
+        edges.push([from, closed[q.names[0]] ? t1 : b1], [to, closed[q.names[1]] ? t2 : b2]);
+        // The two wires between them cross: top to bottom, and bottom to top.
+        edges.push([t1, b2], [b1, t2]);
+        break;
+      }
       case 'flip':
         // A flipper box is a wire of its own that is there only when its inside, as its own loop, has no path.
         if (!conducts(q.part, closed)) edges.push([from, to]);
@@ -93,9 +111,13 @@ function conducts(p: CircuitPart, closed: Record<string, boolean>): boolean {
 /** The switch names a part uses, in drawing order. */
 function names(p: CircuitPart): string[] {
   if (p.t === 'switch') return [p.name];
+  if (p.t === 'twoway') return [...p.names];
   if (p.t === 'flip') return names(p.part);
   return p.parts.flatMap(names);
 }
+
+/** A frame's switches as drawn: plain switches closed or open, two-way switches up or down (up counts as true). */
+const statesOf = (f: { closed?: Record<string, boolean>; up?: Record<string, boolean> }) => ({ ...(f.closed ?? {}), ...(f.up ?? {}) });
 
 /** Every case of k switches by counting down in binary: all closed first, as Truth Tables lists them. */
 function countRows(k: number): boolean[][] {
@@ -119,18 +141,23 @@ function toRule(p: CircuitPart, heads: readonly string[]): Formula {
       return p.parts.map((x) => toRule(x, heads)).reduce((x, y) => and(x, y));
     case 'side':
       return p.parts.map((x) => toRule(x, heads)).reduce((x, y) => or(x, y));
+    case 'twoway': {
+      // One but not both: the first without the second, or the second without the first.
+      const [x, y] = [feat[heads.indexOf(p.names[0])], feat[heads.indexOf(p.names[1])]];
+      return or(and(x, not(y)), and(not(x), y));
+    }
   }
 }
 const cardClosed = (c: Card, heads: readonly string[]) => closedOf(heads, [c.color === 'red', c.size === 'big', c.shape === 'circle'].slice(0, heads.length));
 
 /** Which topic an item is about, from its first line. */
-const topicOf = (prompt: string) => [LAB, ...TOPICS].find((t) => prompt.startsWith(t.setting))!;
+const topicOf = (prompt: string) => [LAB, ...TOPICS, ...TWO_TOPICS].find((t) => prompt.startsWith(t.setting))!;
 
 const LAMP_FAMS: Fam[] = ['line', 'side', 'flip'];
 
 describe('the model, worked out again', () => {
   it('every circuit of every pool: the lamp by graph search in every case, and the card rule on every card, agree with the engine', () => {
-    for (const n of [...LINE_POOL, ...SIDE_POOL, ...FLIP_POOL, ...MATCH_POOL]) {
+    for (const n of [...LINE_POOL, ...SIDE_POOL, ...FLIP_POOL, ...MATCH_POOL, ...PICK_POOL]) {
       const p = toPart(n, LAB.names);
       const heads = LAB.names.slice(0, Math.max(...names(p).map((x) => LAB.names.indexOf(x))) + 1);
       const rule = toRule(p, heads);
@@ -152,9 +179,26 @@ describe('the model, worked out again', () => {
   });
 
   it('every circuit fits the 320-unit frame, so its labels stay at 12 px or more at phone width', () => {
-    for (const n of [...LINE_POOL, ...SIDE_POOL, ...FLIP_POOL, ...MATCH_POOL, ...SAME_PAIRS.flat(), ...DIFF_PAIRS.flat()]) {
-      for (const t of [LAB, ...TOPICS]) expect(frameWidth(toPart(n, t.names)), JSON.stringify(n)).toBeLessThanOrEqual(320);
+    for (const n of [...LINE_POOL, ...SIDE_POOL, ...FLIP_POOL, ...MATCH_POOL, ...SAME_PAIRS.flat(), ...DIFF_PAIRS.flat(), ...PICK_POOL]) {
+      for (const t of [LAB, ...TOPICS, ...TWO_TOPICS]) expect(frameWidth(toPart(n, t.names)), JSON.stringify(n)).toBeLessThanOrEqual(320);
     }
+  });
+
+  it('the two-way pair, by its wires: the lamp is on exactly when one switch is up, flipping either switch changes it, and the card rule agrees on every card', () => {
+    const heads = ['A', 'B'];
+    const p = toPart(TWO, heads);
+    expect(p.t).toBe('twoway');
+    const col = columnOf(p, heads);
+    expect(col).toEqual(countRows(2).map((r) => r.filter(Boolean).length === 1));
+    for (const r of countRows(2)) {
+      const on = conducts(p, closedOf(heads, r));
+      for (let i = 0; i < 2; i++) expect(conducts(p, closedOf(heads, r.map((v, j) => (j === i ? !v : v))))).toBe(!on);
+    }
+    const rule = toRule(p, heads);
+    for (const c of ALL_CARDS) expect(evaluate(rule, c)).toBe(conducts(p, cardClosed(c, heads)));
+    // Next to side by side, the tables differ in one row only: both up, both closed.
+    const side = columnOf(toPart(PICK_POOL[1], heads), heads);
+    expect(col.flatMap((v, k) => (v !== side[k] ? [k] : []))).toEqual([0]);
   });
 });
 
@@ -170,7 +214,7 @@ describe('every kind, every skin: the answer is the only choice the circuit make
       for (const [name, v] of Object.entries(f.closed!)) expect(it.prompt).toMatch(new RegExp(`${name}( switch)? is ${v ? 'closed' : 'open'}\\.`));
       // The trap, worked out from the picture.
       const states = Object.values(f.closed!);
-      const flipped = (p: CircuitPart): string[] => (p.t === 'flip' ? (p.part.t === 'switch' ? [p.part.name] : flipped(p.part)) : p.t === 'switch' ? [] : p.parts.flatMap(flipped));
+      const flipped = (p: CircuitPart): string[] => (p.t === 'flip' ? (p.part.t === 'switch' ? [p.part.name] : flipped(p.part)) : p.t === 'switch' || p.t === 'twoway' ? [] : p.parts.flatMap(flipped));
       const isTrap =
         fam === 'line' ? f.part.t === 'line' && states.some(Boolean) && !states.every(Boolean)
           : fam === 'side' ? f.part.t === 'side' && states.every(Boolean)
@@ -185,7 +229,7 @@ describe('every kind, every skin: the answer is the only choice the circuit make
   });
 
   it('fill the lamp column: the right column is the lamp in every counted row; every wrong column is shown failing in a row where it differs', () => {
-    for (const fam of [...LAMP_FAMS, 'mixed'] as Fam[]) for (const skin of SKINS) for (let seed = 1; seed <= SEEDS; seed++) {
+    for (const fam of [...LAMP_FAMS, 'mixed', 'two'] as Fam[]) for (const skin of SKINS) for (let seed = 1; seed <= SEEDS; seed++) {
       const it = choose(columnItem(createRng(seed), { skin, fam }));
       const sc = scene(it);
       const tb = sc.table!;
@@ -273,7 +317,13 @@ describe('every kind, every skin: the answer is the only choice the circuit make
       (r, skin) => sameItem(r, { skin, same: true }),
       (r, skin) => sameItem(r, { skin, same: false }),
       (r, skin) => columnItem(r, { skin, fam: 'mixed' }),
-      ...(['line-off', 'side-both', 'flip-closed', 'same', 'differ'] as WhyKind[]).map((kind) => (r: ReturnType<typeof createRng>, skin: Skin) => whyItem(r, { kind, skin })),
+      (r, skin) => lampItem(r, { skin, fam: 'two' }),
+      (r, skin) => lampItem(r, { skin, fam: 'two', trap: true }),
+      (r, skin) => columnItem(r, { skin, fam: 'two' }),
+      (r, skin) => compareItem(r, { skin, trap: true }),
+      (r, skin) => compareItem(r, { skin }),
+      (r, skin) => pickItem(r, { skin }),
+      ...(['line-off', 'side-both', 'flip-closed', 'same', 'differ', 'two-match'] as WhyKind[]).map((kind) => (r: ReturnType<typeof createRng>, skin: Skin) => whyItem(r, { kind, skin })),
     ];
     for (const make of makers) for (const skin of SKINS) for (let seed = 1; seed <= 40; seed++) {
       const it = choose(make(createRng(seed), skin));
@@ -304,7 +354,7 @@ describe('every kind, every skin: the answer is the only choice the circuit make
   });
 
   it('the answer is not always in the same place', () => {
-    for (const make of [(r: ReturnType<typeof createRng>) => columnItem(r, { skin: 'lab', fam: 'mixed' }), (r: ReturnType<typeof createRng>) => matchItem(r, { skin: 'everyday' }), (r: ReturnType<typeof createRng>) => whyItem(r, {})]) {
+    for (const make of [(r: ReturnType<typeof createRng>) => columnItem(r, { skin: 'lab', fam: 'mixed' }), (r: ReturnType<typeof createRng>) => matchItem(r, { skin: 'everyday' }), (r: ReturnType<typeof createRng>) => whyItem(r, {}), (r: ReturnType<typeof createRng>) => pickItem(r, { skin: 'fantasy' }), (r: ReturnType<typeof createRng>) => columnItem(r, { skin: 'everyday', fam: 'two' })]) {
       const at = new Set<number>();
       for (let seed = 1; seed <= SEEDS; seed++) {
         const it = choose(make(createRng(seed)));
@@ -315,8 +365,111 @@ describe('every kind, every skin: the answer is the only choice the circuit make
   });
 });
 
+describe('Lesson 5, the two-way switch: every answer worked out again from the wires the learner sees', () => {
+  it('is the lamp on or off: the drawn levers, searched for a path; the trap is both up, and only the trap', () => {
+    for (const skin of SKINS) for (const trap of [false, true]) for (let seed = 1; seed <= SEEDS; seed++) {
+      const it = choose(lampItem(createRng(seed), { skin, fam: 'two', trap }));
+      const f = scene(it).circuits[0];
+      expect(f.part.t).toBe('twoway');
+      expect(f.closed, 'a two-way pair has no closed or open switch').toBeUndefined();
+      expect(f.lamp).toBeNull();
+      const on = conducts(f.part, statesOf(f));
+      expect(it.answer).toBe(on ? 'on' : 'off');
+      for (const [name, v] of Object.entries(f.up!)) expect(it.prompt).toMatch(new RegExp(`${name}( switch)? is ${v ? 'up' : 'down'}\\.`));
+      const bothUp = Object.values(f.up!).every(Boolean);
+      expect(bothUp, `${skin} ${seed}`).toBe(trap);
+      expect(!!it.conflict).toBe(trap);
+      expect(it.tags ?? []).toEqual(trap ? ['both-up'] : []);
+      const wrong = on ? 'off' : 'on';
+      expect(it.feedback![wrong].headline.startsWith(`Your answer says ${wrong}, but`)).toBe(true);
+      // The hint works another case of the same pair, never the one asked.
+      const asked = Object.entries(f.up!).map(([n, v]) => `${n} ${v ? 'up' : 'down'}`).join(', ');
+      expect(it.hintCase!.label.startsWith('Another case:')).toBe(true);
+      expect(it.hintCase!.label).not.toContain(`${asked}.`);
+      expect(topicOf(it.prompt).skin).toBe(skin);
+    }
+  });
+
+  it('fill its table: the switch columns read Up and Down, and the three wrong columns are side by side, a line and the other way round', () => {
+    for (const skin of SKINS) for (let seed = 1; seed <= 60; seed++) {
+      const it = choose(columnItem(createRng(seed), { skin, fam: 'two' }));
+      const tb = scene(it).table!;
+      expect(tb.inputWords).toEqual(['Up', 'Down']);
+      const heads = tb.heads.slice(0, tb.inputs);
+      const rows = countRows(2);
+      const wrongs = it.choices.filter((c) => c.id !== it.answer).map((c) => c.label).sort();
+      // Each misreading, worked out from the rows: any switch up, both up, and the switches matching.
+      const label = (f: (r: boolean[]) => boolean) => rows.map((r) => lampWord(f(r))).join(', ');
+      expect(wrongs).toEqual([label((r) => r[0] || r[1]), label((r) => r[0] && r[1]), label((r) => r[0] === r[1])].sort());
+      expect(it.choices.find((c) => c.id === it.answer)!.label).toBe(columnOf(scene(it).circuits[0].part, heads).map(lampWord).join(', '));
+    }
+  });
+
+  it('one row next to side by side: both lamps worked out from each frame; the trap is both up next to both closed, where only side by side is on', () => {
+    const LABEL: Record<string, string> = { 'true,true': 'Both lamps', 'false,false': 'Neither lamp', 'true,false': 'Only the two-way lamp', 'false,true': 'Only the side-by-side lamp' };
+    const answers = new Set<string>();
+    for (const skin of SKINS) for (const trap of [false, true]) for (let seed = 1; seed <= SEEDS; seed++) {
+      const it = choose(compareItem(createRng(seed), { skin, trap }));
+      const sc = scene(it);
+      const two = sc.circuits.find((f) => f.name === 'Two-way pair')!;
+      const side = sc.circuits.find((f) => f.name === 'Side by side')!;
+      expect([two.part.t, side.part.t]).toEqual(['twoway', 'side']);
+      expect([two.lamp, side.lamp]).toEqual([null, null]);
+      // The same row of each table: up and closed are both true.
+      expect(Object.values(two.up!)).toEqual(Object.values(side.closed!));
+      const lamps = [conducts(two.part, statesOf(two)), conducts(side.part, statesOf(side))];
+      const right = LABEL[lamps.join()];
+      expect(it.choices.find((c) => c.id === it.answer)!.label, `${skin} ${seed}`).toBe(right);
+      answers.add(right);
+      const bothUp = Object.values(two.up!).every(Boolean);
+      expect(bothUp).toBe(trap);
+      if (trap) expect(right).toBe('Only the side-by-side lamp');
+      else expect(lamps[0]).toBe(lamps[1]);
+      expect(!!it.conflict).toBe(trap);
+      expect(it.tags ?? []).toEqual(trap ? ['both-up'] : []);
+      for (const c of it.choices) {
+        if (c.id === it.answer) continue;
+        const said = Object.entries(LABEL).find(([, l]) => l === c.label)![0].split(',').map((x) => x === 'true');
+        const head = it.feedback![c.id].headline;
+        expect(head.startsWith('Your answer has the')).toBe(true);
+        expect(head).toContain(said[0] !== lamps[0] ? 'two-way lamp' : 'side-by-side lamp');
+      }
+    }
+    expect([...answers].sort()).toEqual(['Both lamps', 'Neither lamp', 'Only the side-by-side lamp']);
+  });
+
+  it('which circuit has this table: True is up or closed; exactly one drawn circuit matches every row, and each other one fails a row its feedback names', () => {
+    let twoWins = 0;
+    let n = 0;
+    for (const skin of SKINS) for (let seed = 1; seed <= SEEDS; seed++) {
+      const it = choose(pickItem(createRng(seed), { skin }));
+      const sc = scene(it);
+      const tb = sc.table!;
+      expect(tb.inputWords).toEqual(['True', 'False']);
+      expect(sc.caption).toMatch(/True means up for a two-way switch, and closed for a plain switch\./);
+      expect(sc.circuits.map((f) => f.part.t).sort()).toEqual(['line', 'side', 'twoway']);
+      const heads = tb.heads.slice(0, tb.inputs);
+      expect(tb.cells.map((r) => r.slice(0, tb.inputs))).toEqual(countRows(2));
+      const target = tb.cells.map((r) => r[tb.inputs]);
+      const matching = sc.circuits.filter((f) => JSON.stringify(columnOf(f.part, heads)) === JSON.stringify(target));
+      expect(matching.length, `${skin} ${seed}`).toBe(1);
+      expect(it.choices.find((c) => c.id === it.answer)!.label).toBe(matching[0].name);
+      for (const c of it.choices) {
+        if (c.id === it.answer) continue;
+        const f = sc.circuits.find((x) => x.name === c.label)!;
+        const k = Number(/row (\d+)/.exec(it.feedback![c.id].headline)![1]) - 1;
+        expect(conducts(f.part, closedOf(heads, countRows(2)[k]))).not.toBe(target[k]);
+      }
+      n++;
+      if (matching[0].part.t === 'twoway') twoWins++;
+    }
+    expect(twoWins / n).toBeGreaterThan(0.35);
+    expect(twoWins / n).toBeLessThan(0.65);
+  });
+});
+
 describe('the closing why item', () => {
-  const RIGHT: Record<WhyKind, string> = { 'line-off': 'gap', 'side-both': 'one-path', 'flip-closed': 'flip', same: 'rows', differ: 'row' };
+  const RIGHT: Record<WhyKind, string> = { 'line-off': 'gap', 'side-both': 'one-path', 'flip-closed': 'flip', same: 'rows', differ: 'row', 'two-match': 'match' };
 
   it('the right reason is true of the circuit, worked out again; every choice is a reason; every wrong reason has its own feedback', () => {
     for (const kind of Object.keys(RIGHT) as WhyKind[]) for (const skin of SKINS) for (let seed = 1; seed <= SEEDS; seed++) {
@@ -328,7 +481,21 @@ describe('the closing why item', () => {
       for (const c of it.choices) expect(c.label.length, c.label).toBeGreaterThan(12);
       const sc = scene(it);
       const heads = m.topic.names.slice(0, 2);
-      if (kind === 'line-off' || kind === 'side-both' || kind === 'flip-closed') {
+      if (kind === 'two-match') {
+        const f = sc.circuits[0];
+        expect(f.part.t).toBe('twoway');
+        const s = statesOf(f);
+        const ups = Object.values(f.up!);
+        expect(ups[0], 'both up or both down').toBe(ups[1]);
+        expect(f.lamp).toBe(conducts(f.part, s));
+        expect(f.lamp).toBe(false);
+        // The made-up need: both switches the other way. With both flipped, the lamp is off too.
+        expect(it.choices.find((c) => c.id === 'needs')!.label).toContain(`both switches ${ups[0] ? 'down' : 'up'}`);
+        expect(conducts(f.part, Object.fromEntries(Object.entries(s).map(([x, v]) => [x, !v])))).toBe(false);
+        // Flip one switch, and the lamp comes on: the switches must differ.
+        const [first] = Object.keys(s);
+        expect(conducts(f.part, { ...s, [first]: !s[first] })).toBe(true);
+      } else if (kind === 'line-off' || kind === 'side-both' || kind === 'flip-closed') {
         const f = sc.circuits[0];
         // The lamp drawn is the lamp the switches give.
         expect(f.lamp).toBe(conducts(f.part, f.closed!));
@@ -402,8 +569,8 @@ describe('the warm-up (bridge): a Stop 9 fill-the-column item', () => {
 });
 
 describe('the lessons', () => {
-  const TRAP: Record<string, string> = { 's10.l1': 'one-closed', 's10.l2': 'both-closed', 's10.l3': 'flip-closed', 's10.l4': 'looks-differ' };
-  const SKILL: Record<string, string> = { 's10.l1': 's10.series', 's10.l2': 's10.parallel', 's10.l3': 's10.not', 's10.l4': 's10.match' };
+  const TRAP: Record<string, string> = { 's10.l1': 'one-closed', 's10.l2': 'both-closed', 's10.l3': 'flip-closed', 's10.l4': 'looks-differ', 's10.l5': 'both-up' };
+  const SKILL: Record<string, string> = { 's10.l1': 's10.series', 's10.l2': 's10.parallel', 's10.l3': 's10.not', 's10.l4': 's10.match', 's10.l5': 's10.xor' };
 
   it('every pack: 4 items of the lesson’s skill, the trap at least once, two or more skins, the same for the same seed', () => {
     for (const l of stop10.lessons) for (let seed = 1; seed <= SEEDS; seed++) {
@@ -430,7 +597,8 @@ describe('the lessons', () => {
     const sc = d.scene as CircuitData;
     const m = /^(?:Case|Row) \d+(?:\. (.+?))?: (.+)$/.exec(label);
     if (!m) return null;
-    const closed = Object.fromEntries(m[2].split(', ').map((x) => { const [n, s] = x.split(' '); return [n, s === 'closed']; }));
+    // Closed (a plain switch) and up (a two-way switch) are both true.
+    const closed = Object.fromEntries(m[2].split(', ').map((x) => { const [n, s] = x.split(' '); return [n, s === 'closed' || s === 'up']; }));
     const frame = m[1] ? sc.circuits.find((f) => f.name === m[1])! : sc.circuits[0];
     return { closed, frames: sc.circuits, frame };
   }
@@ -463,6 +631,31 @@ describe('the lessons', () => {
             const heads = sc.table!.heads.slice(0, sc.table!.inputs);
             const [c1, c2] = sc.circuits.map((f) => columnOf(f.part, heads));
             expect(mk.answer).toBe(JSON.stringify(c1) === JSON.stringify(c2) ? 'yes' : 'no');
+          } else if (c && /^Do (\w+) and (\w+) match\?$/.test(mk.label)) {
+            const [, a, b] = /^Do (\w+) and (\w+) match\?$/.exec(mk.label)!;
+            expect(mk.answer, mk.id).toBe(c.closed[a] === c.closed[b] ? 'yes' : 'no');
+          } else if (mk.label === 'The lamp is on when the switches…') {
+            // Read the rule off every counted row of the picture's pair.
+            const heads = sc.table!.heads.slice(0, sc.table!.inputs);
+            const col = columnOf(sc.circuits[0].part, heads);
+            const rows = countRows(2);
+            const differ = rows.every((rr, k) => col[k] === (rr[0] !== rr[1]));
+            const match = rows.every((rr, k) => col[k] === (rr[0] === rr[1]));
+            expect(differ !== match).toBe(true);
+            expect(mk.answer).toBe(differ ? 'differ' : 'match');
+          } else if (mk.label === 'In which row do the lamps differ?') {
+            const heads = sc.table!.heads.slice(0, sc.table!.inputs);
+            const [c1, c2] = sc.circuits.map((f) => columnOf(f.part, heads));
+            const diff = c1.flatMap((v, k) => (v !== c2[k] ? [k] : []));
+            expect(diff.length).toBe(1);
+            expect(mk.answer).toBe(`r${diff[0] + 1}`);
+          } else if (mk.label === 'Which circuit has this table?') {
+            const tb = sc.table!;
+            const heads = tb.heads.slice(0, tb.inputs);
+            const target = tb.cells.map((r) => r[tb.inputs]);
+            const fits = sc.circuits.flatMap((f, j) => (JSON.stringify(columnOf(f.part, heads)) === JSON.stringify(target) ? [j] : []));
+            expect(fits.length).toBe(1);
+            expect(mk.answer).toBe(`c${fits[0] + 1}`);
           } else if (/^How many switches must be closed/.test(mk.label)) {
             // Count the fewest closed switches that light the lamp.
             const p = sc.circuits[0].part;
@@ -479,11 +672,21 @@ describe('the lessons', () => {
     for (const l of stop10.lessons) for (const c of l.ideas) {
       if (c.scene?.kind !== 'circuit') continue;
       const sc = c.scene;
-      for (const f of sc.circuits) if (f.closed && f.lamp !== undefined && f.lamp !== null) expect(f.lamp, c.title).toBe(conducts(f.part, f.closed));
+      for (const f of sc.circuits) if ((f.closed || f.up) && f.lamp !== undefined && f.lamp !== null) expect(f.lamp, c.title).toBe(conducts(f.part, statesOf(f)));
       const tb = sc.table;
       if (!tb) continue;
       const heads = tb.heads.slice(0, tb.inputs);
       expect(tb.cells.map((r) => r.slice(0, tb.inputs))).toEqual(countRows(heads.length));
+      // The switch words: Up and Down when every frame is a two-way pair, True and False when they share a table.
+      const kinds = sc.circuits.map((f) => f.part.t === 'twoway');
+      expect(tb.inputWords, c.title).toEqual(kinds.every(Boolean) ? ['Up', 'Down'] : kinds.some(Boolean) ? ['True', 'False'] : undefined);
+      if (tb.heads.length - tb.inputs < sc.circuits.length) {
+        // A “which circuit has this table” card: one lamp column, and exactly one frame matches it.
+        expect(tb.heads.length - tb.inputs).toBe(1);
+        const target = tb.cells.map((r) => r[tb.inputs]);
+        expect(sc.circuits.filter((f) => JSON.stringify(columnOf(f.part, heads)) === JSON.stringify(target)).length, c.title).toBe(1);
+        continue;
+      }
       sc.circuits.forEach((f, j) => {
         const col = columnOf(f.part, heads);
         tb.cells.forEach((r, k) => {
@@ -494,7 +697,7 @@ describe('the lessons', () => {
   });
 
   it('distinctions: one per lesson, a contrast card whose truths are worked out again, and a board right after it', () => {
-    const want = { 's10.l1': 'one-vs-all', 's10.l2': 'line-vs-side', 's10.l3': 'closed-vs-lit', 's10.l4': 'looks-vs-works' } as Record<string, string>;
+    const want = { 's10.l1': 'one-vs-all', 's10.l2': 'line-vs-side', 's10.l3': 'closed-vs-lit', 's10.l4': 'looks-vs-works', 's10.l5': 'up-vs-differ' } as Record<string, string>;
     for (const l of stop10.lessons) {
       expect(l.distinctions?.map((d) => d.id)).toEqual([want[l.id]]);
       const k = l.ideas.findIndex((c) => c.distinction === want[l.id]);
@@ -510,6 +713,15 @@ describe('the lessons', () => {
         const heads = ['A', 'B'];
         const same = (pair: typeof SAME_LOOK_DIFF) => JSON.stringify(columnOf(toPart(pair[0], heads), heads)) === JSON.stringify(columnOf(toPart(pair[1], heads), heads));
         expect(s.pairs.map((p) => p.truth)).toEqual([same(SAME_LOOK_DIFF), same(DIFF_LOOK_SAME)]);
+        expect(s.pairs.map((p) => p.truth)).toEqual([true, false]);
+      } else if (l.id === 's10.l5') {
+        // Each panel's lamp, from its words: the two-way pair with A and B up or down.
+        const pair: CircuitPart = { t: 'twoway', names: ['A', 'B'] };
+        for (const p of s.pairs) {
+          const up = { A: /Switch A up/.test(p.world), B: /switch B up/.test(p.world) };
+          expect(/switch B (up|down)/.test(p.world), p.world).toBe(true);
+          expect(p.truth, p.world).toBe(conducts(pair, up));
+        }
         expect(s.pairs.map((p) => p.truth)).toEqual([true, false]);
       } else {
         // Each panel's lamp, from its words: which switches are closed, and whether a line, side by side or a flipper box.
@@ -552,7 +764,7 @@ describe('the lessons', () => {
 
   it('kid words first; each grown-up word is named on a card of the lesson whose terms list it', () => {
     const terms = Object.fromEntries(stop10.lessons.map((l) => [l.id, (l.terms ?? []).map((t) => t.term)]));
-    expect(terms).toEqual({ 's10.l1': ['circuit', 'closed switch', 'open switch', 'series'], 's10.l2': ['parallel'], 's10.l3': ['inverter'], 's10.l4': [] });
+    expect(terms).toEqual({ 's10.l1': ['circuit', 'closed switch', 'open switch', 'series'], 's10.l2': ['parallel'], 's10.l3': ['inverter'], 's10.l4': [], 's10.l5': ['two-way switch'] });
     for (const l of stop10.lessons) {
       const text = l.ideas.flatMap((c) => c.body).join(' ').toLowerCase();
       for (const t of l.terms ?? []) {
@@ -568,15 +780,20 @@ describe('the lessons', () => {
 });
 
 describe('the stop', () => {
-  it('the check: 9 items, two from each lesson in order, then the why item; a conflict item on every seed', () => {
+  it('the check: 10 items, two from each of lessons 1 to 4 in order, one from lesson 5, then the why item; a conflict item on every seed', () => {
+    const l5Kinds = new Set<string>();
     for (let seed = 1; seed <= 200; seed++) {
       const items = stop10.check!(createRng(seed));
-      expect(items.length).toBe(9);
-      expect(items.slice(0, 8).map((i) => i.lesson)).toEqual(['s10.l1', 's10.l1', 's10.l2', 's10.l2', 's10.l3', 's10.l3', 's10.l4', 's10.l4']);
+      expect(items.length).toBe(10);
+      expect(items.slice(0, 9).map((i) => i.lesson)).toEqual(['s10.l1', 's10.l1', 's10.l2', 's10.l2', 's10.l3', 's10.l3', 's10.l4', 's10.l4', 's10.l5']);
       expect(items.filter((i) => i.conflict).length).toBeGreaterThanOrEqual(3);
       expect(items.slice(0, 6).filter((_, k) => k % 2 === 0).every((i) => i.conflict && (i.tags ?? []).length === 1)).toBe(true);
-      expect(items[8].tags).toEqual(['why']);
+      expect(items[8].skill).toBe('s10.xor');
+      l5Kinds.add((items[8] as ChooseItem).choices.map((c) => c.id).sort().join());
+      expect(items[9].tags).toEqual(['why']);
     }
+    // Lesson 5's item is a lamp, a row next to side by side, a column or a pick, across seeds.
+    expect(l5Kinds.size).toBeGreaterThanOrEqual(4);
   });
 
   it('the Arcade gives a valid item from every lesson', () => {
@@ -586,7 +803,7 @@ describe('the stop', () => {
       lessons.add(it.lesson);
       expect(it.choices.some((c) => c.id === it.answer)).toBe(true);
     }
-    expect([...lessons].sort()).toEqual(['s10.l1', 's10.l2', 's10.l3', 's10.l4']);
+    expect([...lessons].sort()).toEqual(['s10.l1', 's10.l2', 's10.l3', 's10.l4', 's10.l5']);
   });
 
   it('new examples after a miss: a lamp question gets one of each lamp, a same-job question one of each answer, a why item a why and then the same idea again, on its skill', () => {
@@ -597,7 +814,8 @@ describe('the stop', () => {
         for (const x of set) expect(x.skill).toBe(missed.skill);
         const lamp = missed.choices.every((c) => c.id === 'on' || c.id === 'off');
         const same = missed.choices.every((c) => c.id === 'yes' || c.id === 'no');
-        if (lamp || same) {
+        const compare = missed.choices.some((c) => c.id === 'only-side');
+        if (lamp || same || compare) {
           expect(set.length).toBe(2);
           expect(new Set(set.map((x) => (x as ChooseItem).answer)).size).toBe(2);
         }
@@ -607,7 +825,7 @@ describe('the stop', () => {
       expect(set.length).toBe(2);
       expect(set[0].tags).toEqual(['why']);
       for (const x of set) expect([x.lesson, x.skill], `${why.skill} ${seed}`).toEqual([why.lesson, why.skill]);
-      // Lessons 1 to 3: then the lesson's trap as a question. Lesson 4: the other kind of why.
+      // Lessons 1 to 3 and 5: then the lesson's trap as a question. Lesson 4: the other kind of why.
       if (why.lesson === 's10.l4') expect(set[1].tags).toEqual(['why']);
       else expect(set[1].conflict && (set[1].tags ?? []).length === 1 && !set[1].tags!.includes('why')).toBe(true);
     }
@@ -623,7 +841,7 @@ describe('the stop', () => {
     expect(WORLD.s10).toBe(S10_WORLD);
     expect(SOON_WORLD.s10).toBeUndefined();
     expect(Object.keys(S10_WORLD.lessons)).toEqual(stop10.lessons.map((l) => l.id));
-    expect(Object.keys(stop10.skillNames!).sort()).toEqual(['s10.match', 's10.not', 's10.parallel', 's10.series']);
+    expect(Object.keys(stop10.skillNames!).sort()).toEqual(['s10.match', 's10.not', 's10.parallel', 's10.series', 's10.xor']);
   });
 
   it('the picture: SVG frames 320 units wide with labels of 15 or 16 units, the table in words, and the same words read aloud', () => {
@@ -632,7 +850,7 @@ describe('the stop', () => {
       for (const c of l.ideas) if (c.scene?.kind === 'circuit') scenes.push(c.scene);
       for (const d of l.drill!) scenes.push(d.scene as CircuitData);
     }
-    for (let seed = 1; seed <= 10; seed++) for (const it of stop10.check!(createRng(seed))) if (it.scene?.kind === 'circuit') scenes.push(it.scene);
+    for (let seed = 1; seed <= 10; seed++) for (const it of [...stop10.check!(createRng(seed)), ...stop10.lessons[4].practice(createRng(seed))]) if (it.scene?.kind === 'circuit') scenes.push(it.scene);
     for (const sc of scenes) {
       const html = renderToString(h(CircuitPicture, { scene: sc }));
       expect(html.match(/viewBox="0 0 (\d+)/g)!.every((v) => v.endsWith(' 320'))).toBe(true);
@@ -640,9 +858,23 @@ describe('the stop', () => {
       for (const fs of html.match(/font-size="(\d+)"/g) ?? []) expect(Number(/\d+/.exec(fs)![0])).toBeGreaterThanOrEqual(15);
       const lines = circuitSpeech(sc);
       for (const f of sc.circuits) for (const n of names(f.part)) expect(lines.join(' ')).toContain(n);
+      // A two-way pair: up or down under each lever, and the crossed wires read aloud.
+      for (const f of sc.circuits) {
+        if (f.part.t !== 'twoway') continue;
+        expect(lines.join(' ')).toContain('the two wires cross');
+        for (const [n, v] of Object.entries(f.up ?? {})) {
+          expect(html).toContain(`>${v ? 'up' : 'down'}<`);
+          expect(lines.join(' ')).toMatch(new RegExp(`${n}( switch)? is ${v ? 'up' : 'down'}\\.`));
+        }
+      }
       if (sc.table) {
         expect(lines.filter((x) => /^(Row|Case) \d+/.test(x)).length).toBe(sc.table.cells.length);
-        for (const word of ['Closed', 'Open']) if (sc.table.cells.some((r) => r.slice(0, sc.table!.inputs).includes(word === 'Closed'))) expect(html).toContain(`>${word}<`);
+        const [yes, no] = sc.table.inputWords ?? ['Closed', 'Open'];
+        for (const [word, v] of [[yes, true], [no, false]] as const) {
+          if (!sc.table.cells.some((r) => r.slice(0, sc.table!.inputs).includes(v))) continue;
+          expect(html).toContain(`>${word}<`);
+          expect(lines.join(' ')).toContain(` ${word.toLowerCase()}`);
+        }
       }
     }
   });

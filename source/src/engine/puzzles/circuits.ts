@@ -14,9 +14,16 @@
  * over all 18 cards). Every lamp, table, answer, explanation, wrong-choice feedback and hint case here is worked out
  * from the model, never written by hand. The cards' pictures, the contrast cards and the boards are in circuitBoards.ts.
  *
+ * The two-way pair (Lesson 5): a hall lamp with a switch at each end. Each two-way switch has a lever that touches its
+ * top end (up) or its bottom end (down), and two wires join the ends of switch A to the ends of switch B. The wires cross
+ * on the way, so A's top end joins B's bottom end. Power gets through when both levers touch the same wire: when the
+ * switches differ, one up and one down (exclusive or, Stop 9's one but not both). In a row, a two-way switch's true is
+ * up, the way a plain switch's true is closed. Flip either switch, and the lamp changes.
+ *
  * Question kinds (skill tags): series (lamp, column and case questions on switches in a line), parallel (the same, side
- * by side), not (the same, with flipper boxes) and match (which circuit has this table, do two circuits do the same
- * job, fill a circuit's table). The closing why items and the warm-up (a Stop 9 fill-the-column item) are here too.
+ * by side), not (the same, with flipper boxes), match (which circuit has this table, do two circuits do the same
+ * job, fill a circuit's table) and xor (the two-way pair: its lamp, its table, one row next to side by side, and which
+ * circuit has a table). The closing why items and the warm-up (a Stop 9 fill-the-column item) are here too.
  */
 import { colorIs, and as fAnd, not as fNot, or as fOr, sameMeaning, shapeIs, sizeIs, type Formula } from './rules';
 import { columnItem as tableColumnItem, column as senColumn, atom, AND as SAND, NOT as SNOT, OR as SOR, rowsFor, sameRow, type Row, type Sen, type Skin as TableSkin, type TableMade } from './tables';
@@ -28,7 +35,7 @@ export type { Made, Row };
 
 // ---------- the model ----------
 
-export type Net = { op: 'sw'; i: number } | { op: 'line'; parts: Net[] } | { op: 'side'; parts: Net[] } | { op: 'flip'; a: Net };
+export type Net = { op: 'sw'; i: number } | { op: 'line'; parts: Net[] } | { op: 'side'; parts: Net[] } | { op: 'flip'; a: Net } | { op: 'twoway'; i: number; j: number };
 
 export const SW = (i: number): Net => ({ op: 'sw', i });
 export const A = SW(0);
@@ -37,6 +44,22 @@ export const C = SW(2);
 export const LINE = (...parts: Net[]): Net => ({ op: 'line', parts });
 export const SIDE = (...parts: Net[]): Net => ({ op: 'side', parts });
 export const FLIP = (a: Net): Net => ({ op: 'flip', a });
+/** A two-way pair: switch i at one end of the hall, switch j at the other, joined by two wires that cross. */
+export const TWOWAY = (i: number, j: number): Net => ({ op: 'twoway', i, j });
+/** The hall: switches A and B as a two-way pair (Lesson 5). */
+export const TWO = TWOWAY(0, 1);
+
+/**
+ * Does power get through a two-way pair in this case? Follow the wires. Switch i's lever sends power along the wire at
+ * its top end (up) or its bottom end (down). The wires cross, so the wire from i's top end reaches j's bottom end, and
+ * the wire from i's bottom end reaches j's top end. Power gets through when j's lever touches the end that wire reaches.
+ */
+export function twoWayPasses(upI: boolean, upJ: boolean): boolean {
+  const fromI: 'top' | 'bottom' = upI ? 'top' : 'bottom';
+  const reachesJ: 'top' | 'bottom' = fromI === 'top' ? 'bottom' : 'top';
+  const jTouches: 'top' | 'bottom' = upJ ? 'top' : 'bottom';
+  return reachesJ === jTouches;
+}
 
 /** Does power get through this part in this case? In a line every part must let it through; side by side one is enough. */
 export function passes(n: Net, r: Row): boolean {
@@ -49,11 +72,22 @@ export function passes(n: Net, r: Row): boolean {
       return n.parts.some((p) => passes(p, r));
     case 'flip':
       return !passes(n.a, r);
+    case 'twoway':
+      return twoWayPasses(r[n.i], r[n.j]);
   }
 }
 
 /** How many switches the circuit has (switches are numbered from 0, A first). */
-export const switchCount = (n: Net): number => (n.op === 'sw' ? n.i + 1 : n.op === 'flip' ? switchCount(n.a) : Math.max(...n.parts.map(switchCount)));
+export const switchCount = (n: Net): number =>
+  n.op === 'sw' ? n.i + 1 : n.op === 'twoway' ? Math.max(n.i, n.j) + 1 : n.op === 'flip' ? switchCount(n.a) : Math.max(...n.parts.map(switchCount));
+
+/** The switches of a circuit that are two-way switches (by number): their true is up, not closed. */
+export function twoWaySwitches(n: Net): Set<number> {
+  if (n.op === 'twoway') return new Set([n.i, n.j]);
+  if (n.op === 'sw') return new Set();
+  if (n.op === 'flip') return twoWaySwitches(n.a);
+  return new Set(n.parts.flatMap((p) => [...twoWaySwitches(p)]));
+}
 
 /** The lamp in every row: the circuit's table. */
 export const lampColumn = (n: Net, k = switchCount(n)): boolean[] => rowsFor(k).map((r) => passes(n, r));
@@ -69,6 +103,9 @@ export function toSen(n: Net): Sen {
       return n.parts.map(toSen).reduce((x, y) => SAND(x, y));
     case 'side':
       return n.parts.map(toSen).reduce((x, y) => SOR(x, y));
+    case 'twoway':
+      // One but not both, from AND, OR and NOT: (i AND NOT j) OR (NOT i AND j).
+      return SOR(SAND(atom(n.i), SNOT(atom(n.j))), SAND(SNOT(atom(n.i)), atom(n.j)));
   }
 }
 
@@ -86,6 +123,8 @@ export function toFormula(n: Net): Formula {
       return n.parts.map(toFormula).reduce((x, y) => fAnd(x, y));
     case 'side':
       return n.parts.map(toFormula).reduce((x, y) => fOr(x, y));
+    case 'twoway':
+      return fOr(fAnd(CARD_WORDS[n.i], fNot(CARD_WORDS[n.j])), fAnd(fNot(CARD_WORDS[n.i]), CARD_WORDS[n.j]));
   }
 }
 
@@ -118,12 +157,19 @@ export function netId(n: Net): string {
     case 'line':
     case 'side':
       return `${n.op}(${n.parts.map(netId).join(',')})`;
+    case 'twoway':
+      return `twoway(${'abc'[n.i]},${'abc'[n.j]})`;
   }
 }
 
-/** Ways to misread a circuit, for the wrong columns of a "fill the lamp" question. */
-export type Misread = 'closed-stops' | 'line-as-side' | 'side-as-line' | 'side-one' | 'drop-flip' | 'flip-all';
+/**
+ * Ways to misread a circuit, for the wrong columns of a "fill the lamp" question. A two-way pair has its own: read as
+ * side by side (on when any switch is up: the OR trap), read as a line (on only when both are up), or read the other
+ * way round (on when the switches match).
+ */
+export type Misread = 'closed-stops' | 'line-as-side' | 'side-as-line' | 'side-one' | 'drop-flip' | 'flip-all' | 'two-as-side' | 'two-as-line' | 'two-match';
 export const MISREADS: readonly Misread[] = ['closed-stops', 'line-as-side', 'side-as-line', 'side-one', 'drop-flip', 'flip-all'];
+export const TWO_MISREADS: readonly Misread[] = ['two-as-side', 'two-as-line', 'two-match'];
 
 /**
  * The lamp under a misreading: a closed switch read as a shut door (it stops power), a line read as side by side (or
@@ -147,16 +193,23 @@ export function passesAs(n: Net, r: Row, m: Misread): boolean {
       }
       case 'flip':
         return m === 'drop-flip' ? go(x.a) : !go(x.a);
+      case 'twoway': {
+        const [u, v] = [r[x.i], r[x.j]];
+        if (m === 'two-as-side') return u || v;
+        if (m === 'two-as-line') return u && v;
+        if (m === 'two-match') return u === v;
+        return twoWayPasses(u, v);
+      }
     }
   };
   return go(n);
 }
 
-const has = (n: Net, op: Net['op']): boolean => n.op === op || (n.op === 'flip' ? has(n.a, op) : n.op !== 'sw' && n.parts.some((p) => has(p, op)));
+const has = (n: Net, op: Net['op']): boolean => n.op === op || (n.op === 'flip' ? has(n.a, op) : n.op !== 'sw' && n.op !== 'twoway' && n.parts.some((p) => has(p, op)));
 
 // ---------- the circuits each lesson uses ----------
 
-export type Fam = 'line' | 'side' | 'flip' | 'mixed';
+export type Fam = 'line' | 'side' | 'flip' | 'mixed' | 'two';
 
 /** Two switches in a line, and three. */
 export const LINE_POOL: readonly Net[] = [LINE(A, B), LINE(A, B, C)];
@@ -177,9 +230,13 @@ export const MATCH_POOL: readonly Net[] = [
   LINE(FLIP(A), FLIP(B)),
   SIDE(FLIP(A), FLIP(B)),
 ];
-export const POOLS: Record<Fam, readonly Net[]> = { line: LINE_POOL, side: SIDE_POOL, flip: FLIP_POOL, mixed: MATCH_POOL };
+/** The two-way pair of Lesson 5. */
+export const TWO_POOL: readonly Net[] = [TWO];
+/** The circuits a Lesson 5 table is matched against: the two-way pair, and the same two switch names side by side and in a line. */
+export const PICK_POOL: readonly Net[] = [TWO, SIDE(A, B), LINE(A, B)];
+export const POOLS: Record<Fam, readonly Net[]> = { line: LINE_POOL, side: SIDE_POOL, flip: FLIP_POOL, mixed: MATCH_POOL, two: TWO_POOL };
 /** The skill tag of each family. */
-export const FAM_TAG: Record<Fam, string> = { line: 'series', side: 'parallel', flip: 'not', mixed: 'match' };
+export const FAM_TAG: Record<Fam, string> = { line: 'series', side: 'parallel', flip: 'not', mixed: 'match', two: 'xor' };
 
 /** Two circuits that look different and have the same table (the trap of Lesson 4). */
 export const SAME_PAIRS: readonly [Net, Net][] = [
@@ -229,10 +286,22 @@ export const TOPICS: readonly Topic[] = [
 /** The lab: switches A, B and C. The cards and the boards use it. */
 export const LAB: Topic = { id: 'lab', skin: 'lab', setting: 'In the lab, a battery, switches and a lamp make one loop.', names: ['A', 'B', 'C'], lamp: 'the lamp' };
 
-/** A topic of this skin, not one already used in the set when one is left. */
-export function pickTopic(rng: Rng, skin: Skin, avoid?: Set<string>): Topic {
-  if (skin === 'lab') return LAB;
-  const pool = TOPICS.filter((t) => t.skin === skin);
+/** Lesson 5's stories: a long place with a switch at each end, and the lab's own two-way loop. */
+export const TWO_LAB: Topic = { id: 'lab', skin: 'lab', setting: 'In the lab, one lamp has a two-way switch at each end of its loop.', names: ['A', 'B', 'C'], lamp: 'the lamp' };
+export const TWO_TOPICS: readonly Topic[] = [
+  TWO_LAB,
+  { id: 'hall', skin: 'everyday', setting: 'Mia’s model house has a long hall with a switch at each end.', names: ['Front', 'Back'], lamp: 'the hall lamp' },
+  { id: 'ladder', skin: 'everyday', setting: 'Leo’s tree house has a ladder with a switch at the top and the bottom.', names: ['Top', 'Bottom'], lamp: 'the ladder lamp' },
+  { id: 'tunnel', skin: 'everyday', setting: 'Zoe’s blanket fort has a long tunnel with a switch at each end.', names: ['Door', 'Nook'], lamp: 'the tunnel lamp' },
+  { id: 'stair', skin: 'fantasy', setting: 'A wizard’s tower has a long stair with a switch at the top and the bottom.', names: ['Moon', 'Star'], lamp: 'the stair lamp' },
+  { id: 'bridge', skin: 'fantasy', setting: 'A troll lights its long bridge with a switch at each end.', names: ['East', 'West'], lamp: 'the bridge lamp' },
+  { id: 'deck', skin: 'fantasy', setting: 'Elves light the long deck of their sky ship from a switch at each end.', names: ['Bow', 'Stern'], lamp: 'the deck lamp' },
+];
+
+/** A topic of this skin, not one already used in the set when one is left. `from`: the stories to pick from (Lesson 5 has its own). */
+export function pickTopic(rng: Rng, skin: Skin, avoid?: Set<string>, from: readonly Topic[] = TOPICS): Topic {
+  if (skin === 'lab') return from.find((t) => t.skin === 'lab') ?? LAB;
+  const pool = from.filter((t) => t.skin === skin);
   const fresh = pool.filter((t) => !avoid?.has(t.id));
   const t = rng.pick(fresh.length ? fresh : pool);
   avoid?.add(t.id);
@@ -260,6 +329,8 @@ export function toPart(n: Net, names: readonly string[]): CircuitPart {
     case 'line':
     case 'side':
       return { t: n.op, parts: n.parts.map((p) => toPart(p, names)) };
+    case 'twoway':
+      return { t: 'twoway', names: [names[n.i], names[n.j]] };
   }
 }
 
@@ -273,6 +344,8 @@ export function partWords(p: CircuitPart): string {
       return swName(p.name);
     case 'flip':
       return p.part.t === 'switch' ? `a flipper box on ${swName(p.part.name)}` : `${partWords(p.part)}, inside one flipper box`;
+    case 'twoway':
+      return `${swNames(p.names)} as a two-way pair`;
     case 'line':
     case 'side': {
       const how = p.t === 'line' ? 'in a line' : 'side by side';
@@ -289,15 +362,22 @@ export const words = (n: Net, t: Topic) => partWords(toPart(n, t.names));
 const swOf = (i: number, t: Topic) => swName(t.names[i]);
 const SwOf = (i: number, t: Topic) => cap(swOf(i, t));
 const state = (v: boolean) => (v ? 'closed' : 'open');
+/** A two-way switch's lever: up or down. */
+export const pos = (v: boolean) => (v ? 'up' : 'down');
 const lampWord = (v: boolean) => (v ? 'on' : 'off');
 const LampWord = (v: boolean) => (v ? 'On' : 'Off');
+/** Switch i's state in this circuit: up or down for a two-way switch, closed or open for a plain one. */
+const stateIn = (n: Net | undefined) => {
+  const two = n ? twoWaySwitches(n) : new Set<number>();
+  return (v: boolean, i: number) => (two.has(i) ? pos(v) : state(v));
+};
 
-/** A case in short: "A closed, B open", "Moon closed, Star open". */
-export const rowShort = (r: Row, t: Topic) => r.map((v, i) => `${t.names[i]} ${state(v)}`).join(', ');
-/** A case as sentences: "Switch A is closed. Switch B is open." */
-export const rowSentences = (r: Row, t: Topic) => r.map((v, i) => `${SwOf(i, t)} is ${state(v)}.`).join(' ');
-/** A case inside a sentence: "switch A is closed and switch B is open". */
-export const rowClause = (r: Row, t: Topic) => listAnd(r.map((v, i) => `${swOf(i, t)} is ${state(v)}`));
+/** A case in short: "A closed, B open", "Moon closed, Star open"; for a two-way pair (`n`), "A up, B down". */
+export const rowShort = (r: Row, t: Topic, n?: Net) => r.map((v, i) => `${t.names[i]} ${stateIn(n)(v, i)}`).join(', ');
+/** A case as sentences: "Switch A is closed. Switch B is open." (or up and down, for a two-way pair). */
+export const rowSentences = (r: Row, t: Topic, n?: Net) => r.map((v, i) => `${SwOf(i, t)} is ${stateIn(n)(v, i)}.`).join(' ');
+/** A case inside a sentence: "switch A is closed and switch B is open" (or up and down, for a two-way pair). */
+export const rowClause = (r: Row, t: Topic, n?: Net) => listAnd(r.map((v, i) => `${swOf(i, t)} is ${stateIn(n)(v, i)}`));
 /** A fixed id for a case: "r-cc" for both closed, "r-co" for A closed and B open. */
 export const rowId = (r: Row) => `r-${r.map((v) => (v ? 'c' : 'o')).join('')}`;
 /** "On, Off, Off, Off": a lamp column from row 1 down. */
@@ -340,11 +420,22 @@ function insideLine(n: Net, r: Row, t: Topic): string {
   return `Inside the box, ${swOf(swIndex(p), t)} is closed, so power gets through.`;
 }
 
+/** A two-way pair in this case: "Switch A is up and switch B is down." / "Switches A and B are both up." */
+function twoWayLine(i: number, j: number, r: Row, t: Topic): string {
+  return r[i] === r[j] ? `${cap(swNames([t.names[i], t.names[j]]))} are both ${pos(r[i])}.` : `${SwOf(i, t)} is ${pos(r[i])} and ${swOf(j, t)} is ${pos(r[j])}.`;
+}
+
+/** Why a two-way pair lets power through or not, from the wires: both levers on one wire, or on different wires. */
+export const twoWayWhy = (through: boolean) => (through ? 'They differ, so both levers touch the same wire. Power gets through.' : 'They match, so the two levers touch different wires. Power has no path.');
+
 /** Why the lamp is on or off in this case: one to three short sentences, the last one "So the lamp is on." */
 export function explainRow(n: Net, r: Row, t: Topic): string[] {
   const on = passes(n, r);
   const out: string[] = [];
   switch (n.op) {
+    case 'twoway':
+      out.push(twoWayLine(n.i, n.j, r, t), twoWayWhy(on));
+      break;
     case 'sw':
     case 'flip':
       if (n.op === 'flip' && n.a.op !== 'sw') out.push(insideLine(n.a, r, t), passes(n.a, r) ? 'The flipper box does the opposite, so it stops power.' : 'The flipper box does the opposite, so it lets power through.');
@@ -377,6 +468,10 @@ export function explainRow(n: Net, r: Row, t: Topic): string[] {
 export function decider(n: Net, r: Row, t: Topic): string {
   const on = passes(n, r);
   switch (n.op) {
+    case 'twoway':
+      return r[n.i] === r[n.j]
+        ? `both switches are ${pos(r[n.i])}, so they match, and the lamp is on only when they differ`
+        : `${swOf(n.i, t)} is ${pos(r[n.i])} and ${swOf(n.j, t)} is ${pos(r[n.j])}, so they differ`;
     case 'sw':
       return `${swOf(n.i, t)} is ${state(r[n.i])}`;
     case 'flip':
@@ -406,6 +501,7 @@ export function lampRule(n: Net, t: Topic): string {
   const on = rows.filter((r) => passes(n, r));
   const off = rows.filter((r) => !passes(n, r));
   const L = cap(t.lamp);
+  if (n.op === 'twoway') return `${L} is on only when the switches differ: one up and one down.`;
   if (!on.length) return `${L} is never on.`;
   if (!off.length) return `${L} is always on.`;
   if (on.length === 1) return `${L} is on only when ${rowClause(on[0], t)}.`;
@@ -424,28 +520,32 @@ export const T_SIDE: Term = { word: 'Side by side', meaning: 'two or more paths 
 export const T_FLIP: Term = { word: 'A flipper box', meaning: 'a box that does the opposite of its inside. Grown-ups call it an inverter.' };
 export const T_TABLE: Term = { word: 'A circuit’s table', meaning: 'every case of the switches, one row each, with the lamp on or off.' };
 export const T_SAME: Term = { word: 'The same job', meaning: 'the lamps agree in every row of the table. Looks do not decide it.' };
+export const T_TWO: Term = { word: 'A two-way switch', meaning: 'a switch whose lever is up or down. It sends power along one of two wires.' };
+export const T_PAIR: Term = { word: 'A two-way pair', meaning: 'a switch at each end of a hall, joined by two wires that cross. The lamp is on when the switches differ.' };
+export const T_MATCH: Term = { word: 'Match', meaning: 'both switches are up, or both are down. Differ means one is up and one is down.' };
 
 export const BASE_RULE = 'A closed switch lets power pass. An open switch leaves a gap.';
 export const LINE_RULE = 'In a line, power must pass every part. One gap stops it.';
 export const SIDE_RULE = 'Side by side, power needs just one path. Two closed paths still light the lamp.';
 export const FLIP_RULE = 'A flipper box does the opposite of its inside. It lets power through only when its inside would stop it.';
+export const TWO_RULE = 'A two-way pair lights the lamp when its switches differ: one up and one down. Flip either switch, and the lamp changes.';
 
 /** The rule for a circuit: the switch rule, then each way it is wired. */
 export function ruleFor(n: Net): string {
-  return [BASE_RULE, ...(has(n, 'line') ? [LINE_RULE] : []), ...(has(n, 'side') ? [SIDE_RULE] : []), ...(has(n, 'flip') ? [FLIP_RULE] : [])].join(' ');
+  return [...(has(n, 'sw') ? [BASE_RULE] : []), ...(has(n, 'line') ? [LINE_RULE] : []), ...(has(n, 'side') ? [SIDE_RULE] : []), ...(has(n, 'flip') ? [FLIP_RULE] : []), ...(has(n, 'twoway') ? [TWO_RULE] : [])].join(' ');
 }
 
 /** The words the explanation of these circuits needs. */
 export function termsFor(nets: Net | readonly Net[], extra: Term[] = []): Term[] {
   const ns = Array.isArray(nets) ? nets : [nets as Net];
   const any = (op: Net['op']) => ns.some((n) => has(n, op));
-  return [T_CIRCUIT, T_CLOSED, T_OPEN, ...(any('line') ? [T_LINE] : []), ...(any('side') ? [T_SIDE] : []), ...(any('flip') ? [T_FLIP] : []), ...extra];
+  return [T_CIRCUIT, ...(any('sw') ? [T_CLOSED, T_OPEN] : []), ...(any('line') ? [T_LINE] : []), ...(any('side') ? [T_SIDE] : []), ...(any('flip') ? [T_FLIP] : []), ...(any('twoway') ? [T_TWO, T_PAIR, T_MATCH] : []), ...extra];
 }
 
 const LAMP_WORDS = { truth: 'on', untruth: 'off' } as const;
 
 /** One case of a circuit, worked out: its switches, the lamp, and why. */
-export function rowCase(n: Net, r: Row, k: number, t: Topic, label = `Row ${k + 1}: ${rowShort(r, t)}.`): TeachCase {
+export function rowCase(n: Net, r: Row, k: number, t: Topic, label = `Row ${k + 1}: ${rowShort(r, t, n)}.`): TeachCase {
   const lines = explainRow(n, r, t);
   return { label, truths: [{ who: cap(t.lamp), value: passes(n, r) }], note: lines.slice(0, -1).join(' '), words: { ...LAMP_WORDS } };
 }
@@ -461,6 +561,7 @@ function teachRows(n: Net, asked?: Row): { r: Row; k: number }[] {
 
 const REMEMBER = ['Follow the power from the battery to the lamp.', 'Ask: “Can power get all the way around the loop?”'];
 const FLIP_REMEMBER = 'At a flipper box, ask what its inside would do. Then do the opposite.';
+const TWO_REMEMBER = 'At a two-way pair, ask: “Do the switches match or differ?”';
 
 /** The teaching for one circuit: its rule, its words, what it does, its cases and the smallest worked example. */
 export function circuitTeach(n: Net, t: Topic, asked?: Row, extra: Partial<Teach> = {}): Teach {
@@ -471,36 +572,60 @@ export function circuitTeach(n: Net, t: Topic, asked?: Row, extra: Partial<Teach
     meaning: `${cap(words(n, t))}. ${lampRule(n, t)}`,
     casesTitle: 'The cases for this circuit',
     cases: teachRows(n, asked).map(({ r: x, k }) => rowCase(n, x, k, t)),
-    remember: [...REMEMBER, ...(has(n, 'flip') ? [FLIP_REMEMBER] : [])],
-    simpler: [`Start at the battery and follow the wire. ${rowSentences(r, t)}`, ...explainRow(n, r, t)],
+    remember: [...REMEMBER, ...(has(n, 'flip') ? [FLIP_REMEMBER] : []), ...(has(n, 'twoway') ? [TWO_REMEMBER] : [])],
+    simpler: [`Start at the battery and follow the wire. ${rowSentences(r, t, n)}`, ...explainRow(n, r, t)],
     ...extra,
   };
 }
 
 // ---------- scenes ----------
 
-/** One circuit as a still frame: its wiring, and (for one case) each switch's state and the lamp. */
+/**
+ * One circuit as a still frame: its wiring, and (for one case) each switch's state and the lamp. A plain switch's state
+ * goes in `closed`; a two-way switch's lever goes in `up`.
+ */
 export function frame(n: Net, t: Topic, o: { name?: string; row?: Row; lamp?: boolean | null } = {}): CircuitFrame {
   const f: CircuitFrame = { ...(o.name ? { name: o.name } : {}), part: toPart(n, t.names) };
-  if (o.row) f.closed = Object.fromEntries(o.row.map((v, i) => [t.names[i], v]));
+  if (o.row) {
+    const two = twoWaySwitches(n);
+    const plain = o.row.flatMap((v, i) => (two.has(i) ? [] : [[t.names[i], v] as const]));
+    const levers = o.row.flatMap((v, i) => (two.has(i) ? [[t.names[i], v] as const] : []));
+    if (plain.length) f.closed = Object.fromEntries(plain);
+    if (levers.length) f.up = Object.fromEntries(levers);
+  }
   if (o.lamp !== undefined) f.lamp = o.lamp;
   return f;
+}
+
+/** A table's switch words: Up and Down when every switch is two-way, True and False when two-way and plain switches share it. */
+export const UP_DOWN: [string, string] = ['Up', 'Down'];
+export const TRUE_FALSE: [string, string] = ['True', 'False'];
+function tableWords(nets: readonly Net[]): [string, string] | undefined {
+  const two = nets.map((n) => twoWaySwitches(n).size);
+  if (nets.every((n, j) => two[j] > 0 && two[j] === switchCount(n))) return UP_DOWN;
+  return two.some((x) => x > 0) ? TRUE_FALSE : undefined;
 }
 
 /**
  * A circuit's table: the switches as Closed or Open, then a lamp column for each circuit. `blank`: lamp boxes left blank
  * (row index, lamp index). `rows`: which rows to show (default every row).
  */
-export function circuitTable(nets: readonly Net[], t: Topic, o: { blank?: (k: number, j: number) => boolean; rows?: readonly Row[]; lampHeads?: string[]; rowWord?: string; marked?: number[]; markLabel?: string } = {}): CircuitTable {
+export function circuitTable(
+  nets: readonly Net[],
+  t: Topic,
+  o: { blank?: (k: number, j: number) => boolean; rows?: readonly Row[]; lampHeads?: string[]; rowWord?: string; marked?: number[]; markLabel?: string; inputWords?: [string, string] } = {},
+): CircuitTable {
   const k = Math.max(...nets.map(switchCount), 1);
   const rows = o.rows ?? rowsFor(k);
   const heads = [...t.names.slice(0, k), ...(o.lampHeads ?? (nets.length === 1 ? ['Lamp'] : nets.map((_, j) => `Lamp ${j + 1}`)))];
+  const inputWords = o.inputWords ?? tableWords(nets);
   return {
     heads,
     inputs: k,
     cells: rows.map((r, i) => [...r, ...nets.map((n, j) => (o.blank?.(i, j) ? null : passes(n, r)))]),
     ...(o.rowWord ? { rowWord: o.rowWord } : {}),
     ...(o.marked ? { marked: o.marked, markLabel: o.markLabel } : {}),
+    ...(inputWords ? { inputWords } : {}),
   };
 }
 
@@ -521,7 +646,7 @@ export interface CircuitMade extends Made {
   /** The case asked about (lamp items and why items). */
   row?: Row;
   /** Which kind of question it is. */
-  kind: 'lamp' | 'column' | 'case' | 'match' | 'same' | 'why';
+  kind: 'lamp' | 'column' | 'case' | 'match' | 'same' | 'why' | 'compare' | 'pick';
 }
 
 export interface CircuitOptions {
@@ -541,14 +666,15 @@ export const ONE_CLOSED = { tag: 'one-closed', label: 'a line with a closed swit
 export const BOTH_CLOSED = { tag: 'both-closed', label: 'side by side with every switch closed' } as const;
 export const FLIP_CLOSED = { tag: 'flip-closed', label: 'a closed switch inside a flipper box' } as const;
 export const LOOKS_DIFFER = { tag: 'looks-differ', label: 'two circuits that look different but have the same table' } as const;
-export type Trap = 'one-closed' | 'both-closed' | 'flip-closed';
+export const BOTH_UP = { tag: 'both-up', label: 'a two-way pair with both switches up' } as const;
+export type Trap = 'one-closed' | 'both-closed' | 'flip-closed' | 'both-up';
 
 export const LAMP_CHOICES: Choice[] = [{ id: 'on', label: 'On' }, { id: 'off', label: 'Off' }];
 
 /** The flipped switches of a circuit: switches that sit alone inside a flipper box. */
 function flippedSwitches(n: Net): number[] {
   if (n.op === 'flip') return n.a.op === 'sw' ? [n.a.i] : flippedSwitches(n.a);
-  if (n.op === 'sw') return [];
+  if (n.op === 'sw' || n.op === 'twoway') return [];
   return n.parts.flatMap(flippedSwitches);
 }
 
@@ -562,16 +688,20 @@ export function isTrap(trap: Trap, n: Net, r: Row): boolean {
       return n.op === 'side' && r.every(Boolean);
     case 'flip-closed':
       return !on && flippedSwitches(n).some((i) => r[i]);
+    case 'both-up':
+      return n.op === 'twoway' && r[n.i] && r[n.j];
   }
 }
 
 /** The trap of each family's lesson. */
-export const FAM_TRAP: Partial<Record<Fam, Trap>> = { line: 'one-closed', side: 'both-closed', flip: 'flip-closed' };
-const TRAP_TAG: Record<Trap, string> = { 'one-closed': ONE_CLOSED.tag, 'both-closed': BOTH_CLOSED.tag, 'flip-closed': FLIP_CLOSED.tag };
+export const FAM_TRAP: Partial<Record<Fam, Trap>> = { line: 'one-closed', side: 'both-closed', flip: 'flip-closed', two: 'both-up' };
+const TRAP_TAG: Record<Trap, string> = { 'one-closed': ONE_CLOSED.tag, 'both-closed': BOTH_CLOSED.tag, 'flip-closed': FLIP_CLOSED.tag, 'both-up': BOTH_UP.tag };
+/** The stories a family's items pick from: Lesson 5 has its own (a long place with a switch at each end). */
+const topicsOf = (fam: Fam): readonly Topic[] => (fam === 'two' ? TWO_TOPICS : TOPICS);
 
 /** Is the lamp on or off in this case? `trap`: the lesson's trap case. `want`: the lamp. */
 export function lampItem(rng: Rng, o: CircuitOptions & { fam: Fam; net?: Net; trap?: boolean; want?: boolean }): CircuitMade {
-  const t = pickTopic(rng, o.skin, o.avoid);
+  const t = pickTopic(rng, o.skin, o.avoid, topicsOf(o.fam));
   const trap = o.trap ? FAM_TRAP[o.fam] : undefined;
   const famTrap = FAM_TRAP[o.fam];
   // A trap item asks the trap case; any other item asks a case that is not the lesson's trap, so a pack holds one trap.
@@ -590,7 +720,7 @@ export function lampItem(rng: Rng, o: CircuitOptions & { fam: Fam; net?: Net; tr
   const L = t.lamp;
   const item: ItemCore = {
     kind: 'choose',
-    prompt: `${t.setting} This circuit has ${words(n, t)}. ${rowSentences(r, t)} Is ${L} on or off?`,
+    prompt: `${t.setting} This circuit has ${words(n, t)}. ${rowSentences(r, t, n)} Is ${L} on or off?`,
     scene: circuitScene([frame(n, t, { row: r, lamp: null })]),
     choices: LAMP_CHOICES.map((c) => ({ ...c })),
     answer: lampWord(on),
@@ -599,11 +729,11 @@ export function lampItem(rng: Rng, o: CircuitOptions & { fam: Fam; net?: Net; tr
       [wrong]: {
         headline: `Your answer says ${wrong}, but ${decider(n, r, t)}.`,
         detail: explainRow(n, r, t),
-        example: rowCase(n, r, k, t, `This case: ${rowShort(r, t)}.`),
+        example: rowCase(n, r, k, t, `This case: ${rowShort(r, t, n)}.`),
       },
     },
     hint: 'Here is another case of this circuit, worked out. Follow the power the same way in your case.',
-    hintCase: rowCase(n, h, hk, t, `Another case: ${rowShort(h, t)}.`),
+    hintCase: rowCase(n, h, hk, t, `Another case: ${rowShort(h, t, n)}.`),
     teach: circuitTeach(n, t, r),
     ...(trap ? { conflict: true, tags: [TRAP_TAG[trap]] } : {}),
   };
@@ -617,6 +747,9 @@ const MISREAD_HEAD: Record<Misread, string> = {
   'side-one': 'Your column reads side by side as “one but not both.” When both paths let power through, the lamp is still on.',
   'drop-flip': 'Your column leaves out the flipper box. The box does the opposite of its inside.',
   'flip-all': 'Your column is the right one flipped: on and off are swapped in every row.',
+  'two-as-side': 'Your column treats the two-way pair like switches side by side. With both switches up, they match, so the lamp is off.',
+  'two-as-line': 'Your column treats the two-way pair like a line. The lamp is on when the switches differ, not when both are up.',
+  'two-match': 'Your column lights the lamp when the switches match. It is the other way round: the lamp is on when they differ.',
 };
 
 /** Up to three wrong columns: the misreadings first (each a different column), then others to fill. */
@@ -626,7 +759,7 @@ function wrongColumns(rng: Rng, n: Net): { col: boolean[]; m?: Misread }[] {
   const right = lampColumn(n, k);
   const out: { col: boolean[]; m?: Misread }[] = [];
   const seen = new Set([colId(right)]);
-  for (const m of rng.shuffle(MISREADS)) {
+  for (const m of rng.shuffle(has(n, 'twoway') ? TWO_MISREADS : MISREADS)) {
     const col = rows.map((r) => passesAs(n, r, m));
     if (seen.has(colId(col))) continue;
     seen.add(colId(col));
@@ -649,7 +782,7 @@ function columnFeedback(n: Net, t: Topic, w: { col: boolean[]; m?: Misread }, wh
   const r = rows[k];
   return {
     headline: w.m ? MISREAD_HEAD[w.m].replace('Your column', who) : `${who} does not match row ${k + 1}.`,
-    detail: [`Look at row ${k + 1}: ${rowShort(r, t)}.`, ...explainRow(n, r, t), `${who} says ${lampWord(w.col[k])} there.`],
+    detail: [`Look at row ${k + 1}: ${rowShort(r, t, n)}.`, ...explainRow(n, r, t), `${who} says ${lampWord(w.col[k])} there.`],
     example: rowCase(n, r, k, t),
   };
 }
@@ -675,7 +808,7 @@ export function lampScratch(nets: readonly Net[], t: Topic, id: string): DrillSt
     body: [nets.length === 1 ? 'Mark the lamp in each row.' : 'Mark each lamp in each row. Then compare them, row by row.', 'This board is only for thinking. Nothing on it is checked.'],
     rows: rowsFor(k).map((r, i) => ({
       id: `r${i + 1}`,
-      label: `Row ${i + 1}: ${rowShort(r, t)}`,
+      label: `Row ${i + 1}: ${rowShort(r, t, nets.length === 1 ? nets[0] : undefined)}`,
       marks: nets.map((n, j): DrillMark => {
         const on = passes(n, r);
         return { id: `r${i + 1}-l${j + 1}`, label: lamps[j], options: LAMP_CHOICES.map((c) => ({ ...c })), answer: lampWord(on), why: { [lampWord(!on)]: explainRow(n, r, t).join(' ') } };
@@ -688,7 +821,7 @@ export function lampScratch(nets: readonly Net[], t: Topic, id: string): DrillSt
 
 /** Which lamp column is right for this circuit, from row 1 down? (Two switches, or one.) */
 export function columnItem(rng: Rng, o: CircuitOptions & { fam: Fam; net?: Net }): CircuitMade {
-  const t = pickTopic(rng, o.skin, o.avoid);
+  const t = pickTopic(rng, o.skin, o.avoid, topicsOf(o.fam));
   const n = o.net ?? rng.pick(POOLS[o.fam].filter((x) => switchCount(x) <= 2));
   const k = switchCount(n);
   const rows = rowsFor(k);
@@ -894,12 +1027,157 @@ export function matchItem(rng: Rng, o: CircuitOptions): CircuitMade {
   }, [right, ...wrongs], t);
 }
 
+// ---------- Lesson 5: the two-way pair next to side by side, and which circuit has a table ----------
+
+/** The hall's twin from Lesson 2: plain switches with the same names, side by side. */
+export const SIDE_TWIN: Net = SIDE(A, B);
+/** "True" in a table that two-way and plain switches share. */
+export const T_TRUE: Term = { word: 'True in a table', meaning: 'up for a two-way switch, and closed for a plain switch. False is down or open.' };
+export const TRUE_CAPTION = 'True means up for a two-way switch, and closed for a plain switch.';
+
+export const COMPARE_CHOICES: Choice[] = [
+  { id: 'only-side', label: 'Only the side-by-side lamp' },
+  { id: 'only-two', label: 'Only the two-way lamp' },
+  { id: 'both', label: 'Both lamps' },
+  { id: 'neither', label: 'Neither lamp' },
+];
+/** A compare choice from the two lamps, and the two lamps a choice says. */
+const compareId = (two: boolean, side: boolean) => (two && side ? 'both' : side ? 'only-side' : two ? 'only-two' : 'neither');
+const compareSays = (id: string): [boolean, boolean] => [id === 'both' || id === 'only-two', id === 'both' || id === 'only-side'];
+
+/** One row on both circuits: each switch, and both lamps. */
+function compareCase(r: Row, k: number, t: Topic, label = `Row ${k + 1}. Two-way pair: ${rowShort(r, t, TWO)}. Side by side: ${rowShort(r, t, SIDE_TWIN)}.`): TeachCase {
+  const two = passes(TWO, r);
+  const side = passes(SIDE_TWIN, r);
+  return {
+    label,
+    truths: [{ who: 'The two-way lamp', value: two }, { who: 'The side-by-side lamp', value: side }],
+    note: two === side ? 'The lamps agree in this row.' : 'The lamps differ in this row.',
+    words: { ...LAMP_WORDS },
+  };
+}
+
+/**
+ * One row on two circuits: the two-way pair, and plain switches with the same names side by side. Which lamps are on?
+ * `trap`: row 1, both up next to both closed, where side by side is on and the two-way pair is off (the trap of
+ * Lesson 5). Otherwise another row (`row` picks it), where the two lamps agree.
+ */
+export function compareItem(rng: Rng, o: CircuitOptions & { trap?: boolean; row?: number }): CircuitMade {
+  const t = pickTopic(rng, o.skin, o.avoid, TWO_TOPICS);
+  const rows = rowsFor(2);
+  const k = o.row ?? (o.trap ? 0 : rng.pick([1, 2, 3]));
+  const r = rows[k];
+  const tTwo: Topic = { ...t, lamp: 'the two-way lamp' };
+  const tSide: Topic = { ...t, lamp: 'the side-by-side lamp' };
+  const two = passes(TWO, r);
+  const side = passes(SIDE_TWIN, r);
+  const answer = compareId(two, side);
+  const trap = isTrap('both-up', TWO, r);
+  const both = [`Two-way pair: ${explainRow(TWO, r, tTwo).join(' ')}`, `Side by side: ${explainRow(SIDE_TWIN, r, tSide).join(' ')}`];
+  const feedback: Record<string, ChoiceFeedback> = {};
+  for (const c of COMPARE_CHOICES) {
+    if (c.id === answer) continue;
+    const [sTwo, sSide] = compareSays(c.id);
+    feedback[c.id] = {
+      headline: sTwo !== two ? `Your answer has the two-way lamp ${lampWord(sTwo)}, but ${decider(TWO, r, t)}.` : `Your answer has the side-by-side lamp ${lampWord(sSide)}, but ${decider(SIDE_TWIN, r, t)}.`,
+      detail: both,
+      example: compareCase(r, k, t, `This row. Two-way pair: ${rowShort(r, t, TWO)}. Side by side: ${rowShort(r, t, SIDE_TWIN)}.`),
+    };
+  }
+  const h = rng.pick(rows.map((_, j) => j).filter((j) => j !== k));
+  return done('xor', 'compare', {
+    kind: 'choose',
+    prompt: `${t.setting} Beside it, a second lamp has plain switches with the same names, side by side. In the two-way pair, ${rowClause(r, t, TWO)}. Side by side, ${rowClause(r, t, SIDE_TWIN)}. Which lamps are on?`,
+    scene: circuitScene([frame(TWO, t, { name: 'Two-way pair', row: r, lamp: null }), frame(SIDE_TWIN, t, { name: 'Side by side', row: r, lamp: null })]),
+    choices: rng.shuffle(COMPARE_CHOICES).map((c) => ({ ...c })),
+    answer,
+    explain: `${both.join(' ')}${trap ? ' Side by side is OR, so both closed is on. A two-way pair is one but not both, so both up is off.' : ''}`,
+    feedback,
+    hint: 'Here is another row, worked out for both circuits. Work out each lamp in your row the same way.',
+    hintCase: compareCase(rows[h], h, t, `Another row. Two-way pair: ${rowShort(rows[h], t, TWO)}. Side by side: ${rowShort(rows[h], t, SIDE_TWIN)}.`),
+    teach: {
+      rule: `${TWO_RULE} ${SIDE_RULE}`,
+      terms: termsFor([TWO, SIDE_TWIN]),
+      meaning: 'Side by side is OR: one closed path or both lights the lamp. A two-way pair is one but not both: its lamp is on only when the switches differ.',
+      casesTitle: 'Both lamps in every row',
+      cases: rows.map((x, j) => compareCase(x, j, t)),
+      remember: ['Work out each lamp on its own.', 'Ask: “Do the two-way switches match or differ?”'],
+      simpler: [`In the two-way pair, ${rowClause(r, t, TWO)}.`, ...explainRow(TWO, r, tTwo), `Side by side: ${explainRow(SIDE_TWIN, r, tSide).join(' ')}`],
+    },
+    ...(trap ? { conflict: true, tags: [BOTH_UP.tag] } : {}),
+    seconds: SECONDS,
+  }, [TWO, SIDE_TWIN], t, r);
+}
+
+/**
+ * Which circuit has this table? The two-way pair, plain switches side by side, and plain switches in a line, all with
+ * the same switch names. The table is one of their three tables (the two-way pair's half the time), in True and False:
+ * up or closed is True. Exactly one circuit matches every row; the two-way pair and side by side differ only in row 1.
+ */
+export function pickItem(rng: Rng, o: CircuitOptions & { target?: Net }): CircuitMade {
+  const t = pickTopic(rng, o.skin, o.avoid, TWO_TOPICS);
+  const target = o.target ?? rng.pick([TWO, TWO, PICK_POOL[1], PICK_POOL[2]]);
+  const col = lampColumn(target, 2);
+  const shown = rng.shuffle([...PICK_POOL]);
+  const matching = shown.filter((x) => sameJob(x, target));
+  if (matching.length !== 1) throw new Error('pickItem: exactly one circuit must have the table');
+  const right = matching[0];
+  const wrongs = shown.filter((x) => x !== right);
+  const nameOf = (x: Net) => `Circuit ${shown.indexOf(x) + 1}`;
+  const rows = rowsFor(2);
+  const feedback: Record<string, ChoiceFeedback> = {};
+  for (const w of wrongs) {
+    const k = differRows(w, target)[0];
+    const r = rows[k];
+    feedback[netId(w)] = {
+      headline: `${nameOf(w)} does not match the table in row ${k + 1}.`,
+      detail: [`In row ${k + 1}, ${rowClause(r, t, w)}.`, ...explainRow(w, r, t), `The table says ${t.lamp} is ${lampWord(col[k])} there. One row that does not match rules a circuit out.`],
+      example: { label: `${nameOf(w)}, row ${k + 1}: ${rowShort(r, t, w)}.`, truths: [{ who: `${nameOf(w)}’s lamp`, value: passes(w, r) }, { who: 'The table', value: col[k] }], note: 'They differ in this row.', words: { ...LAMP_WORDS } },
+    };
+  }
+  // The hint: a wrong circuit in a row where it matches the table, so one row is shown not to be enough.
+  const hw = rng.pick(wrongs);
+  const hk = rng.pick(rows.map((_, j) => j).filter((j) => passes(hw, rows[j]) === col[j]));
+  const columnCase = (x: Net): TeachCase => ({
+    label: `${nameOf(x)}: ${words(x, t)}.`,
+    truths: rows.map((r, j): Truth => ({ who: `Row ${j + 1}`, value: passes(x, r) })),
+    note: sameJob(x, target) ? 'It matches the table in every row.' : `It does not match row ${differRows(x, target)[0] + 1}.`,
+    words: { ...LAMP_WORDS },
+  });
+  return done('xor', 'pick', {
+    kind: 'choose',
+    prompt: `${t.setting} Three circuits could work ${t.lamp}. Here is the table ${t.lamp} must have. Which circuit has this table?`,
+    scene: circuitScene(shown.map((x) => frame(x, t, { name: nameOf(x) })), { table: circuitTable([target], t, { inputWords: TRUE_FALSE }), caption: TRUE_CAPTION }),
+    choices: shown.map((x) => ({ id: netId(x), label: nameOf(x) })),
+    answer: netId(right),
+    explain: `${nameOf(right)} matches the table in every row. ${lampRule(right, t)}`,
+    feedback,
+    hint: 'Here is one circuit checked in one row. One row is not enough, so check every row.',
+    hintCase: {
+      label: `${nameOf(hw)}, row ${hk + 1}: ${rowShort(rows[hk], t, hw)}.`,
+      truths: [{ who: `${nameOf(hw)}’s lamp`, value: passes(hw, rows[hk]) }, { who: 'The table', value: col[hk] }],
+      note: 'They match in this row. Check the other rows too.',
+      words: { ...LAMP_WORDS },
+    },
+    teach: {
+      rule: `A circuit has a table when its lamp agrees with the table in every row. One row that does not match rules it out. ${TRUE_CAPTION}`,
+      terms: termsFor(shown, [T_TABLE, T_TRUE]),
+      meaning: `The table says: ${lampRule(target, t)}`,
+      casesTitle: 'Each circuit’s lamp in every row',
+      cases: shown.map(columnCase),
+      remember: ['Check every row. One row that differs rules a circuit out.', 'Ask: “Does this lamp match the table in every row?”'],
+      simpler: ['Start with row 1, where every switch is True: up for the two-way pair, and closed for the others.', 'Work out each lamp. Cross a circuit out as soon as one row does not match.'],
+    },
+    seconds: SECONDS,
+  }, [right, ...wrongs], t);
+}
+
 // ---------- the closing why items ----------
 
-export type WhyKind = 'line-off' | 'side-both' | 'flip-closed' | 'same' | 'differ';
-export const WHY_KINDS: readonly WhyKind[] = ['line-off', 'side-both', 'flip-closed', 'same', 'differ'];
-export const WHY_LESSON: Record<WhyKind, string> = { 'line-off': 's10.l1', 'side-both': 's10.l2', 'flip-closed': 's10.l3', same: 's10.l4', differ: 's10.l4' };
-const WHY_TAG: Record<WhyKind, string> = { 'line-off': 'series', 'side-both': 'parallel', 'flip-closed': 'not', same: 'match', differ: 'match' };
+export type WhyKind = 'line-off' | 'side-both' | 'flip-closed' | 'same' | 'differ' | 'two-match';
+export const WHY_KINDS: readonly WhyKind[] = ['line-off', 'side-both', 'flip-closed', 'same', 'differ', 'two-match'];
+export const WHY_LESSON: Record<WhyKind, string> = { 'line-off': 's10.l1', 'side-both': 's10.l2', 'flip-closed': 's10.l3', same: 's10.l4', differ: 's10.l4', 'two-match': 's10.l5' };
+const WHY_TAG: Record<WhyKind, string> = { 'line-off': 'series', 'side-both': 'parallel', 'flip-closed': 'not', same: 'match', differ: 'match', 'two-match': 'xor' };
 
 /** The lamp a why item's story states, worked out from the model: the story must match it. */
 function lampFor(n: Net, r: Row, story: boolean): boolean {
@@ -911,12 +1189,54 @@ function lampFor(n: Net, r: Row, story: boolean): boolean {
 /** Why is the lamp on or off, or why do two circuits do the same job (or not)? The choices are reasons; one is right. */
 export function whyItem(rng: Rng, o: { kind?: WhyKind; skin?: Skin } = {}): CircuitMade & { why: WhyKind } {
   const kind = o.kind ?? rng.pick(WHY_KINDS);
-  const t = pickTopic(rng, o.skin ?? rng.pick(SKINS));
+  const t = pickTopic(rng, o.skin ?? rng.pick(SKINS), undefined, kind === 'two-match' ? TWO_TOPICS : TOPICS);
   const rows = rowsFor(2);
   const make = (item: Omit<ItemCore, 'kind' | 'tags' | 'seconds'>, nets: Net[], row?: Row) => ({
     ...done(WHY_TAG[kind], 'why', { kind: 'choose', ...item, choices: rng.shuffle(item.choices), tags: ['why'], seconds: SECONDS }, nets, t, row),
     why: kind,
   });
+  if (kind === 'two-match') {
+    // Both up or both down: the switches match, so the lamp is off.
+    const n = TWO;
+    const r = rng.pick([rows[0], rows[3]]);
+    const up = r[0];
+    const differ = rng.pick([rows[1], rows[2]]);
+    const kd = rows.indexOf(differ);
+    const other = up ? rows[3] : rows[0];
+    const ko = rows.indexOf(other);
+    return make({
+      prompt: `${t.setting} This circuit has ${words(n, t)}. Both switches are ${pos(up)}, and ${t.lamp} is off. Why is it off?`,
+      scene: circuitScene([frame(n, t, { row: r, lamp: lampFor(n, r, false) })]),
+      choices: [
+        { id: 'match', label: 'The switches match, so their levers touch different wires. The lamp is on only when they differ.' },
+        { id: 'gap', label: `A two-way switch that is ${pos(up)} leaves a gap, like an open switch.` },
+        { id: 'turns', label: 'Only one switch of a two-way pair can work at a time.' },
+        { id: 'needs', label: `The lamp needs both switches ${pos(!up)} before it turns on.` },
+      ],
+      answer: 'match',
+      explain: `Both switches are ${pos(up)}, so they match. Their levers touch different wires, so power has no path, and ${t.lamp} is off.`,
+      feedback: {
+        gap: {
+          headline: 'Your reason gives a two-way switch a gap, but its lever always touches one of its two wires.',
+          detail: [`Up or down, a two-way switch sends power along one wire.`, `Here ${t.lamp} is off because the two levers touch different wires.`],
+          example: rowCase(n, differ, kd, t, `One up and one down: ${rowShort(differ, t, n)}.`),
+        },
+        turns: {
+          headline: 'Your reason makes up a rule: both switches of a two-way pair work at once.',
+          detail: [`Flip either switch, and ${t.lamp} changes.`, `Here it is off because both switches are ${pos(up)}, so they match.`],
+          example: rowCase(n, differ, kd, t, `One up and one down: ${rowShort(differ, t, n)}.`),
+        },
+        needs: {
+          headline: `Your reason says the lamp needs both switches ${pos(!up)}, but then they match too, and the lamp is off.`,
+          detail: [`Both up or both down, the switches match, so ${t.lamp} is off.`, 'The lamp is on only when one switch is up and the other is down.'],
+          example: rowCase(n, other, ko, t, `Both ${pos(!up)}: ${rowShort(other, t, n)}.`),
+        },
+      },
+      hint: 'Here is another case of this circuit, worked out. Compare it with your case.',
+      hintCase: rowCase(n, differ, kd, t, `Another case: ${rowShort(differ, t, n)}.`),
+      teach: circuitTeach(n, t, r),
+    }, [n], r);
+  }
   if (kind === 'line-off') {
     const n = LINE(A, B);
     const r = rng.pick(rows.filter((x) => x[0] !== x[1]));

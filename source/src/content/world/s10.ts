@@ -36,6 +36,14 @@ export const S10_WORLD: StopWorld = {
         { who: 'Toy testers', kind: 'work', text: 'A new toy uses a different circuit than the old one. Testers press every mix of buttons on both. The lights must match every time.' },
       ],
     },
+    's10.l5': {
+      why: 'A two-way pair lights the lamp when its switches differ. So a flip at either end changes the light, whatever the other switch shows.',
+      uses: [
+        { who: 'You, on the stairs', kind: 'life', text: 'Many homes have one stair light with a switch at the bottom and one at the top. Flip either switch, and the light changes. So you never climb in the dark.' },
+        { who: 'Electricians', kind: 'work', text: 'A big bedroom can have a switch by the door and one by the bed. Electricians wire them as a two-way pair, so either switch can turn the light on or off.' },
+        { who: 'Computer chip designers', kind: 'work', text: 'Chips add numbers with tiny one-but-not-both circuits. Adding 1 and 0 gives 1 in that place. Adding 1 and 1 gives 0 there, and a 1 moves to the next place.' },
+      ],
+    },
   },
   skills: {
     's10.series': [
@@ -53,6 +61,9 @@ export const S10_WORLD: StopWorld = {
     's10.match': [
       'Before swapping one circuit for another, engineers fill in both tables. If the lamps agree in every row, the swap is safe.',
       'Two light switch layouts can look different and still work the same. Testing every case is how you know.',
+    ],
+    's10.xor': [
+      'A garage with a front door and a side door can have a light switch by each. Flip either one, and the light changes, whatever the other one shows.',
     ],
   },
 };
