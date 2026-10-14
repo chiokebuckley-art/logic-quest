@@ -14,7 +14,7 @@
  * a guided board the learner marks by taps (LessonDef.drill), then quiz items of only the rule family those taught.
  */
 import { syncWhyWrong } from '../engine/teach';
-import type { Choice, ChoiceFeedback, ChooseItem, Distinction, DrillRow, DrillStep, IdeaCard, Item, LessonDef, Rng, Scene, StopDef, TeachCase, Thing, Truth } from '../engine/types';
+import type { Choice, ChoiceFeedback, ChooseItem, Distinction, DrillRow, DrillStep, IdeaCard, Item, KidBoard, KidItem, KidLesson, LessonDef, Rng, Scene, StopDef, TeachCase, Thing, Truth } from '../engine/types';
 import {
   FRAMES,
   NOT_COMPARE_KEYS,
@@ -22,6 +22,7 @@ import {
   NOT_TAGS,
   notDrillRow,
   notItem,
+  notKidDrill,
   rowItem,
   verdictDrillRow,
   whyRowItem,
@@ -29,6 +30,7 @@ import {
   type Frame,
   type ItemCore,
   type Made,
+  type NotDrillOptions,
   type NotKey,
   type RowTemplate,
   type Stmt,
@@ -44,6 +46,7 @@ import {
   signDistinctionDrill,
   signDrill,
   signItem,
+  signKidCase,
   signOwnerContrastCard,
   signOwnerDrill,
   signRuleContrastCard,
@@ -60,13 +63,14 @@ import {
 
 const STOP = 1;
 
-const finish = (m: Made, id: string, lesson: string): ChooseItem => ({
-  id,
-  stop: STOP,
-  lesson,
-  skill: `s${STOP}.${m.tag}`,
-  ...m.item,
-});
+const finish = (m: Made, id: string, lesson: string): ChooseItem => {
+  const skill = `s${STOP}.${m.tag}`;
+  const item: ChooseItem = { id, stop: STOP, lesson, skill, ...m.item };
+  // A kid-only alternate (KidItem.alt) is the same question in kid form: it carries the item's own id, lesson and skill.
+  const alt = item.kid?.alt;
+  if (alt) item.kid = { ...item.kid!, alt: { ...alt, id, stop: STOP, lesson, skill } };
+  return item;
+};
 
 /**
  * Makes the items of one set (a check or a lesson practice). No two items in a set share a prompt and
@@ -307,14 +311,118 @@ const CONTRAST: Record<SentenceKind, [SentenceKind, SentenceKind]> = {
   feeling: ['false', 'question'],
 };
 
+// ---------- lesson 1: the kid layer (Grades 1 to 3, docs/KID-JOURNEY.md) ----------
+//
+// Beside the classic text, never instead of it. Grade 1's budget: at most 12 words on a screen, buttons and the
+// header ("Round k of n", 4 words) included, so 8 words of content; 2 sentences, 8 words in a sentence. The one new
+// word is "statement", named on the first card.
+
+/**
+ * One line per kind of sentence: said after a miss (beside "Show me" and "Try again", so four words at most), and
+ * under "Yes!" after a right answer.
+ */
+const KID_LINE: Record<SentenceKind, string> = {
+  true: 'True ones are statements.',
+  false: 'False ones count too.',
+  unknown: 'Still true or false.',
+  question: 'A question asks something.',
+  command: 'That is an order.',
+  opinion: 'People like different things.',
+  feeling: 'That is a feeling.',
+};
+
+/**
+ * "Show me": a short sentence of the same kind, already sorted (six words at most with its note, beside "Try
+ * again"). None is in the bank, so "Show me" never answers a later question.
+ */
+export const KID_SHOW: Record<SentenceKind, TeachCase> = {
+  true: { label: '“Fish swim.”', note: 'A statement.' },
+  false: { label: '“Snow is purple.”', note: 'Still a statement.' },
+  unknown: { label: '“The elf has pets.”', note: 'A statement.' },
+  question: { label: '“Is it hot?”', note: 'Not a statement.' },
+  command: { label: '“Sit down.”', note: 'Not a statement.' },
+  opinion: { label: '“Red is best.”', note: 'Not a statement.' },
+  feeling: { label: '“Hooray!”', note: 'Not a statement.' },
+};
+
+/** The kid hint: the one question to ask (at most 8 words), never the answer. */
+const KID_ASK = 'Ask: can it be true or false?';
+const KID_ASK_EACH = 'Ask each one: true or false?';
+
+/**
+ * "Is this sentence a statement?" in kid words: the same answer, drawn as a check tile and a cross tile. The prompt
+ * is two words, or one beside a six-word sentence, so the sentence, the prompt and Check fit 8 words.
+ */
+const kidIsThis = (s: Sentence): KidItem => ({
+  prompt: s.text.split(/\s+/).length > 5 ? 'Statement?' : 'A statement?',
+  nope: KID_LINE[s.kind],
+  yes: KID_LINE[s.kind],
+  show: KID_SHOW[s.kind],
+  hint: KID_ASK,
+});
+
+/** "Which of these is (not) a statement?" in kid words. */
+const kidWhich = (target: Sentence, findStatement: boolean): KidItem => ({
+  prompt: findStatement ? 'Which is a statement?' : 'Which is not a statement?',
+  nope: 'Ask: true or false?',
+  yes: KID_LINE[target.kind],
+  show: KID_SHOW[target.kind],
+  hint: KID_ASK_EACH,
+});
+
+/** The round's kid layer: one line and a picture per card, the board's line and rows, and the star line. */
+export const L1_KID: KidLesson = {
+  cards: [
+    { line: 'Statement: it is true or false.', art: 'calendar' },
+    { line: 'Cats can fly. False still counts!', art: 'cat-wings' },
+    { line: 'Questions are not true or false.', art: 'question' },
+    { line: 'What you like does not count.', art: 'pizza' },
+    { line: 'Can’t check it? Still a statement.', art: 'hat' },
+    { line: 'Ask: true or false?', art: 'check' },
+  ],
+  board: [
+    {
+      line: 'A statement?',
+      // L1_DO in order, each as a shorter twin of the same kind, so the line, the sentence and Check fit 8 words.
+      rows: [{ label: '“The moon is cheese.”', art: 'moon' }, { label: '“Is the moon cheese?”', art: 'moon' }, { label: '“The moon is the prettiest.”', art: 'moon' }],
+    },
+  ],
+  star: 'You can spot statements.',
+};
+
 const L1_CASES_TITLE = 'Can each sentence be true or false?';
 /** The hint shows one sentence already sorted (its case card), then asks the question to ask of this one. */
 const L1_HINT = 'Here is one sentence, already sorted. Ask the same question about yours: could it be true or false?';
 
-/** "Is this sentence a statement?" */
+/**
+ * Grade 1's shorter twins of the bank's long sentences (over 6 words: with the header, the prompt and Check they run
+ * over 12 words). Each is the same kind as its sentence and in no bank, card, board or "Show me", so a kid asked about a
+ * long sentence is asked about its twin instead (KidItem.alt). Classic play never sees them.
+ */
+export const KID_TWIN: Readonly<Record<string, Sentence>> = {
+  'You can buy a real unicorn at the pet store.': { text: 'Pet stores sell unicorns.', kind: 'false', skin: 'fantasy' },
+  'The elf is older than the troll.': { text: 'The troll is ten years old.', kind: 'unknown', skin: 'fantasy' },
+  'How many sides does a square have?': { text: 'What shape has four sides?', kind: 'question', skin: 'abstract' },
+};
+
+/** An item made here as a kid-only alternate: the stop's finish() gives it the outer item's id, lesson and skill. */
+const asAlt = (m: Made): ChooseItem => ({ id: '', stop: STOP, lesson: '', skill: `s${STOP}.${m.tag}`, ...m.item });
+
+/**
+ * "Is this sentence a statement?" In kid mode a long sentence is asked as its shorter twin (KID_TWIN), the same
+ * question on a sentence of the same kind.
+ */
 function isThisItem(rng: Rng, skin: Skin, used: Used, kinds?: readonly SentenceKind[]): Made {
   const kind = rng.pick(kinds ?? [...STATEMENT_KINDS, ...NOT_STATEMENT_KINDS]);
   const s = draw(rng, skin, [kind], used);
+  const m = isThisOf(s);
+  const twin = KID_TWIN[s.text];
+  if (twin) m.item.kid = { ...m.item.kid!, alt: asAlt(isThisOf(twin)) };
+  return m;
+}
+
+/** "Is this sentence a statement?" about one sentence: its answer, teaching and kid words all come from its kind. */
+function isThisOf(s: Sentence): Made {
   const yes = isStatement(s.kind);
   const others = CONTRAST[s.kind];
   const item: ItemCore = {
@@ -335,6 +443,7 @@ function isThisItem(rng: Rng, skin: Skin, used: Used, kinds?: readonly SentenceK
     hintCase: sentenceCase(TEACH_SENTENCES[s.kind]),
     // The pass rule asks for a false sentence and a sentence that is not a statement.
     tags: [s.kind === 'false' ? 'false-statement' : yes ? 'statement' : 'not-statement'],
+    kid: kidIsThis(s),
     teach: {
       rule: L1_RULE,
       terms: l1Terms([s.kind, ...others], s.kind),
@@ -383,6 +492,9 @@ function whichItem(rng: Rng, skin: Skin, used: Used, findStatement: boolean): Ma
     // One of the other sentences, already sorted: never the answer.
     hintCase: sentenceCase(all.find((x) => x !== target)!),
     tags: ['which'],
+    // Grade 1 (kid mode only): its answers are whole sentences, so a kid is asked about the one sentence the question
+    // turns on, its answer (a statement, or not) yes or no: “A statement?” (a long one as its shorter twin).
+    kid: { ...kidWhich(target, findStatement), alt: asAlt(isThisOf(KID_TWIN[target.text] ?? target)) },
     teach: {
       rule: L1_RULE,
       terms: l1Terms(all.map((s) => s.kind)),
@@ -574,6 +686,30 @@ export const L2_DRILL: DrillStep[] = [
   },
 ];
 
+/** The three answers of a lesson 2 board in kid mode: a check, a cross and a question mark, with no words under them. */
+const VERDICT_TILES: NonNullable<KidBoard['options']> = { true: { art: 'verdict-true' }, false: { art: 'verdict-false' }, cant: { art: 'verdict-cant' } };
+
+/**
+ * The kid layer (Grade 1, docs/KID-JOURNEY.md): one line and a picture per card, one line per board. The pictures of
+ * rows of cards are drawn without numbers; a board row shows its cards as that picture, since a young reader marks one
+ * row at a time. The one new word is "face down", named on the second card. The items' kid words come from rowItem().
+ * The boards' three answers are a check, a cross and a question mark with no words (VERDICT_TILES), as the items' are.
+ */
+export const L2_KID: KidLesson = {
+  cards: [
+    { line: 'There is a blue card. True!', art: 'cards-look' },
+    { line: 'Face down: you can’t see it.', art: 'card-face-down' },
+    { line: 'A yellow card? Can’t tell yet.', art: 'cards-cant' },
+    { line: 'There is a red card. True!', art: 'cards-settled' },
+    { line: 'Both ways? Then you can’t tell.', art: 'question' },
+  ],
+  board: [
+    { line: 'True?', rows: [{}, { art: 'cards-cant' }, { art: 'cards-cant' }, { art: 'cards-cant' }], options: VERDICT_TILES },
+    { line: 'True?', rows: [{}, { art: 'cards-twin' }], options: VERDICT_TILES },
+  ],
+  star: 'Can’t tell is fine!',
+};
+
 /** The pass rule needs a right "Can't tell": tag each row item by its answer. */
 const tagRow = (m: Made): Made => {
   m.item.tags = [m.item.answer === 'cant' ? 'cant-tell' : 'settled'];
@@ -625,6 +761,16 @@ const L3_SCENES = {
 
 const RED: Desc = { color: 'red' };
 
+/** The learner's rows of the two NOT boards (the Do): “Every card is big.” on the every-trap cards, “At least three cards are red.” on the tie. */
+const L3_DO_BIG: NotDrillOptions = { id: 'big', s: every({ size: 'big' }), right: { t: 'someNot', d: { size: 'big' } }, wrongs: [{ t: 'none', d: { size: 'big' } }, every({ size: 'small' })], cards: L3_EXAMPLE };
+const L3_DO_THREE: NotDrillOptions = {
+  id: 'three',
+  s: { t: 'count', d: RED, op: 'ge', k: 3 },
+  right: { t: 'count', d: RED, op: 'lt', k: 3 },
+  wrongs: [{ t: 'count', d: RED, op: 'le', k: 3 }, { t: 'count', d: RED, op: 'ge', k: 3, not: true }],
+  cards: L3_TIE,
+};
+
 /**
  * Do: on the cards of “The every trap,” the red sentence is shown with its NOT; the learner does “Every card is big.”
  * Then on the tie cards, the “more” sentence is shown; the learner does the counting trap “At least three cards are
@@ -641,7 +787,7 @@ export const L3_DRILL: DrillStep[] = [
     scene: L3_SCENES.every,
     rows: [
       notDrillRow({ id: 'red', s: every(RED), right: { t: 'someNot', d: RED }, wrongs: [{ t: 'none', d: RED }, every({ color: 'blue' })], cards: L3_EXAMPLE, given: true }),
-      notDrillRow({ id: 'big', s: every({ size: 'big' }), right: { t: 'someNot', d: { size: 'big' } }, wrongs: [{ t: 'none', d: { size: 'big' } }, every({ size: 'small' })], cards: L3_EXAMPLE }),
+      notDrillRow(L3_DO_BIG),
     ],
     done: 'Right. Card 2 is small, so “Every card is big” is false here. Its NOT, “At least one card is not big,” is true here.',
   },
@@ -662,17 +808,39 @@ export const L3_DRILL: DrillStep[] = [
         cards: L3_TIE,
         given: true,
       }),
-      notDrillRow({
-        id: 'three',
-        s: { t: 'count', d: RED, op: 'ge', k: 3 },
-        right: { t: 'count', d: RED, op: 'lt', k: 3 },
-        wrongs: [{ t: 'count', d: RED, op: 'le', k: 3 }, { t: 'count', d: RED, op: 'ge', k: 3, not: true }],
-        cards: L3_TIE,
-      }),
+      notDrillRow(L3_DO_THREE),
     ],
     done: 'Right. There are exactly 3 red cards here. So “At least three” and “At most three” are true together. That is why “At most three” is not the NOT.',
   },
 ];
+
+/**
+ * The two NOT boards in kid mode (Grade 1): each board's learner row as one page per answer, “NOT all big:” over “one is
+ * not?”, a check tile and a cross tile, with the board's cards as the row's picture (KidBoard.alt, notKidDrill).
+ */
+const L3_KID_BIG = notKidDrill(L3_DRILL[0].id, L3_DO_BIG);
+const L3_KID_THREE = notKidDrill(L3_DRILL[1].id, L3_DO_THREE);
+
+/**
+ * The kid layer (Grade 1, docs/KID-JOURNEY.md): one line and a picture per card, and each board as its kid-only step
+ * (one answer per page, the board's cards as the picture). The one new word is "NOT", named on the first card. The
+ * items' kid words come from notItem(), and their kid form is its alternate (one answer, yes or no).
+ */
+export const L3_KID: KidLesson = {
+  cards: [
+    { line: 'NOT: it flips true and false.', art: 'not-flip' },
+    { line: 'A red card? NOT means none.', art: 'not-flip' },
+    { line: 'NOT all red: one is not.', art: 'cards-every' },
+    { line: 'Three and three is a tie.', art: 'cards-tie' },
+    { line: 'NOT more red: same or fewer.', art: 'cards-tie' },
+    { line: 'Check: they never agree.', art: 'check' },
+  ],
+  board: [
+    { line: L3_KID_BIG.line, rows: L3_KID_BIG.step.rows.map(() => ({ art: 'cards-every' as const })), alt: L3_KID_BIG.step },
+    { line: L3_KID_THREE.line, rows: L3_KID_THREE.step.rows.map(() => ({ art: 'cards-tie' as const })), alt: L3_KID_THREE.step },
+  ],
+  star: 'You can use NOT!',
+};
 
 /**
  * Quiz: five NOTs of the kinds the cards and the board taught, with "every" and "at least" in every set (the
@@ -764,6 +932,47 @@ export const L4_FIRST_QUIZ_WORK = signDrill(L4_FIRST_QUIZ, 'cave', {
   mark: [0, 1, 2],
   done: 'Every cave is checked. Now answer the question.',
 });
+
+/** The case board in kid mode (Grade 3): the Gold case, one sign per page in its own words, then the rule (KidBoard.alt). */
+const L4_KID_CASE = signKidCase(L4_EXAMPLE, 'chest', L4_DRILL.id, 0);
+
+/**
+ * The kid layer (Grade 3, docs/KID-JOURNEY.md): the rule "Exactly one sign is true" is unchanged. One line and a
+ * picture per card (the worked example walks the three chests in words), the two small boards one row at a time with
+ * a shorter label, and the case board as its kid-only step: the Gold case, one sign per page, then the rule. The one
+ * new word is "rule", named on the first card. The items' kid words come from signItem(), and in kid mode each item is
+ * its alternate: the same puzzle, the signs in kid words on one line under "Which chest?", the chests as picture tiles.
+ */
+export const L4_KID: KidLesson = {
+  cards: [
+    { line: 'One chest has the treasure. Rule: it is always right. Here, exactly one sign is true.', art: 'chest' },
+    { line: 'A chest can have the treasure and a false sign. Read what its sign says.', art: 'signpost' },
+    { line: 'Mark each sign true or false first. Then check the rule.', art: 'check' },
+    { line: 'Try Gold. Its sign and Silver’s sign are true. Two is too many, so cross Gold out.', art: 'chest' },
+    { line: 'Try Silver. Only Bronze’s sign is true. One true sign fits the rule!', art: 'chest' },
+    { line: 'Try Bronze. Silver’s and Bronze’s signs are true. Two is too many, so cross it out.', art: 'chest' },
+    { line: 'Only Silver fits the rule. So the treasure is in Silver.', art: 'chest' },
+  ],
+  board: [
+    {
+      line: 'The treasure is in Silver. Is the sign true?',
+      rows: [
+        { label: 'Silver’s sign: “The treasure is in this chest.”', art: 'signpost' },
+        { label: 'Silver’s sign: “The treasure is not in this chest.”', art: 'signpost' },
+      ],
+    },
+    {
+      line: 'Pretend it is in Gold, then mark each sign.',
+      rows: [
+        { label: 'Gold’s sign: “The treasure is in this chest.”', art: 'signpost' },
+        { label: 'Silver’s sign: “The treasure is not in this chest.”', art: 'signpost' },
+        { label: 'Two true signs, but the rule needs one. Keep Gold?', art: 'chest' },
+      ],
+    },
+    { line: L4_KID_CASE.line, rows: [{ art: 'signpost' }, { art: 'signpost' }, { art: 'signpost' }, { art: 'chest' }], alt: L4_KID_CASE.step },
+  ],
+  star: 'You found the treasure with the rule!',
+};
 
 /**
  * Quiz: four puzzles, every one with the rule the lesson taught ("Exactly one sign is true"). Try 1 is the chest
@@ -1069,6 +1278,7 @@ const lessons: LessonDef[] = [
         { tag: 'not-statement', label: 'a sentence that is not a statement' },
       ],
     },
+    kid: L1_KID,
   },
   {
     id: 's1.l2',
@@ -1116,6 +1326,7 @@ const lessons: LessonDef[] = [
     terms: [{ term: 'can’t tell', means: 'The face-down cards could make it true, and they could also make it false. You need more clues.' }],
     // Three right on the first try, one of them a right “Can’t tell.”
     pass: { firstTry: 3, include: [{ tag: 'cant-tell', label: 'a right “Can’t tell”' }] },
+    kid: L2_KID,
   },
   {
     id: 's1.l3',
@@ -1180,6 +1391,7 @@ const lessons: LessonDef[] = [
     terms: [{ term: 'NOT', means: 'NOT means the original statement is false. The NOT of a statement is true whenever the statement is false.' }],
     // Three right on the first try, one of them a counting trap.
     pass: { firstTry: 3, include: [{ tag: 'counting-trap', label: 'a counting trap (every, more, exactly or at least)' }] },
+    kid: L3_KID,
   },
   {
     id: 's1.l4',
@@ -1203,6 +1415,7 @@ const lessons: LessonDef[] = [
     drill: [L4_DISTINCTION_DRILL, L4_RULE_DRILL, L4_DRILL],
     distinctions: [TREASURE_VS_SIGN, RULE_VS_STAMP],
     practice: practiceOf('s1.l4', lesson4Practice),
+    kid: L4_KID,
   },
   L5,
   L6,

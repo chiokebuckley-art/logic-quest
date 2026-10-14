@@ -1,6 +1,6 @@
 /** "Who's playing?": pick a player (with PIN pad), make a new one, import a save, or link a synced player. */
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { COLORS, MAX_PLAYERS, checkPin, isPin, loadSave, type Player } from '../../engine/save/save';
+import { COLORS, MAX_PLAYERS, checkPin, loadSave, type Player } from '../../engine/save/save';
 import { CODE_LENGTH, CODE_PREFIX, normalizeCode } from '../../engine/save/sync';
 import { STOPS, isMainPath } from '../../content/stops';
 import { frontierStop } from '../progressStats';
@@ -11,12 +11,19 @@ import { initial } from '../components/Hud';
 type PlayersRoute = Extract<Route, { name: 'players' }>;
 type Mode = 'list' | 'new' | 'import' | 'link';
 
-const COLOR_NAMES: Record<string, string> = {
+/** What a screen reader hears for each color dot (the dots have no visible label). Every color in COLORS has one. */
+export const COLOR_NAMES: Record<string, string> = {
+  '#a78bfa': 'Purple',
+  '#2dd4bf': 'Teal',
+  '#ffb347': 'Orange',
+  '#22d3ee': 'Sky blue',
+  '#f472b6': 'Pink',
+  '#c9a227': 'Gold',
+  // Colors of older saves.
   '#9d6bff': 'Purple',
-  '#3cff9d': 'Teal',
+  '#3cff9d': 'Green',
   '#ff7a1a': 'Orange',
   '#22e6ff': 'Sky blue',
-  '#f472b6': 'Pink',
   '#ffc93c': 'Gold',
 };
 
@@ -169,44 +176,47 @@ function PinPad({ player, onOk, onCancel }: { player: Player; onOk(): void; onCa
 
 // ---------- New player ----------
 
+/**
+ * The new-player screen asks only a name and a color, in six visible words besides the name field ("Hi! What is your
+ * name?" and "Go"): the color dots carry their names for screen readers, with no visible label. "Import a save" and
+ * "Link a player" wait behind one small "Grown-ups" link on this screen. Then "Which grade are you in?". The PIN
+ * lives in Settings.
+ */
+export const NEW_PLAYER_COPY = { name: 'Hi! What is your name?', color: 'Pick a color', go: 'Go', grownups: 'Grown-ups' } as const;
+
 function NewPlayer({ first, onCancel, onImport, onLink }: { first: boolean; onCancel(): void; onImport(): void; onLink(): void }) {
   const { state, actions } = useStore();
   const used = new Set(state.registry.players.map((p) => p.color));
   const [name, setName] = useState('');
   const [color, setColor] = useState<string>(COLORS.find((c) => !used.has(c)) ?? COLORS[0]);
-  const [pin, setPin] = useState('');
   const [error, setError] = useState('');
+  const [grownUps, setGrownUps] = useState(false);
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) { setError('Type a name first.'); return; }
-    if (pin && !isPin(pin)) { setError('A PIN is exactly 4 numbers. Or leave it empty.'); return; }
-    const err = actions.createPlayer(name, color, pin || undefined);
+    if (!name.trim()) { setError('Type your name first.'); return; }
+    const err = actions.createPlayer(name, color);
     if (err) setError(err);
+    else actions.navigate({ name: 'grade' });
   };
 
   return (
-    <div className="page">
-      {first ? (
-        <div className="stack">
-          <div className="kicker">Welcome</div>
-          <h2 className="page-title" style={{ fontSize: 20 }}>LOGIC QUEST</h2>
-          <p className="soft-text">Logic is how you work out what must be true. Make your player to start.</p>
-        </div>
-      ) : (
-        <h2 className="page-title">NEW PLAYER</h2>
+    <div className="page kid-new">
+      {!first && (
+        <button type="button" className="btn ghost small kid-new-back" aria-label="Back to players" title="Back to players" onClick={onCancel}>
+          <Icon name="back" size={18} />
+        </button>
       )}
-      <form className="panel" onSubmit={submit} noValidate>
+      <form className="panel kid-new-form" onSubmit={submit} noValidate>
         <div className="row">
           <span className="avatar lg" style={{ background: color }} aria-hidden="true">{initial(name || '?')}</span>
-          <label className="field grow">
-            Your name
+          <label className="field grow kid-new-name">
+            <span className="kid-title">{NEW_PLAYER_COPY.name}</span>
             <input className="input" value={name} maxLength={24} autoComplete="off" onChange={(e) => { setName(e.target.value); setError(''); }} />
           </label>
         </div>
         <div className="field">
-          <span id="color-label">Pick a color</span>
-          <div className="swatches" role="radiogroup" aria-labelledby="color-label">
+          <div className="swatches" role="radiogroup" aria-label={NEW_PLAYER_COPY.color}>
             {COLORS.map((c) => (
               <button
                 key={c}
@@ -221,28 +231,22 @@ function NewPlayer({ first, onCancel, onImport, onLink }: { first: boolean; onCa
             ))}
           </div>
         </div>
-        <label className="field">
-          PIN (you can skip this)
-          <input
-            className="input pin"
-            value={pin}
-            inputMode="numeric"
-            autoComplete="off"
-            maxLength={4}
-            onChange={(e) => { setPin(e.target.value.replace(/\D/g, '').slice(0, 4)); setError(''); }}
-          />
-          <span className="small muted">A PIN is a secret 4-number code. It stops others from playing as you.</span>
-        </label>
         <p role="alert" className="error">{error}</p>
-        <button type="submit" className="btn primary block big">Start playing</button>
-        <div className="row wrap">
-          {!first && <button type="button" className="btn ghost" onClick={onCancel}>Back to players</button>}
-          <button type="button" className="btn ghost" onClick={onImport}>
-            <Icon name="upload" size={18} /> Import a save
-          </button>
-          <LinkButton onClick={onLink} />
-        </div>
+        <button type="submit" className="btn primary block big">{NEW_PLAYER_COPY.go}</button>
       </form>
+      <div className="kid-new-more">
+        <button type="button" className="btn ghost small kid-grownups" aria-expanded={grownUps} onClick={() => setGrownUps((o) => !o)}>
+          {NEW_PLAYER_COPY.grownups}
+        </button>
+        {grownUps && (
+          <div className="row wrap kid-grownups-panel">
+            <button type="button" className="btn ghost small" onClick={onImport}>
+              <Icon name="upload" size={16} /> Import a save
+            </button>
+            <LinkButton onClick={onLink} small />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -304,12 +308,12 @@ function ImportSave({ onCancel }: { onCancel(): void }) {
 // ---------- Link a synced player ----------
 
 /** Shown only when this copy of the game can sync. */
-function LinkButton({ onClick }: { onClick(): void }) {
+function LinkButton({ onClick, small = false }: { onClick(): void; small?: boolean }) {
   const { sync } = useStore();
   if (!sync.available) return null;
   return (
-    <button type="button" className="btn ghost" onClick={onClick}>
-      <Icon name="cloud" size={18} /> Link a player from another device
+    <button type="button" className={`btn ghost${small ? ' small' : ''}`} onClick={onClick}>
+      <Icon name="cloud" size={small ? 16 : 18} /> Link a player from another device
     </button>
   );
 }

@@ -4,7 +4,7 @@
  * puzzles where exactly one box fits the rule, and writes the explanation from that case check.
  */
 import { syncWhyWrong } from '../teach';
-import type { Because, CaseStep, CaseVerdict, ChoiceFeedback, ConfusedQuestion, ContrastPanel, Distinction, DrillMark, DrillRow, DrillStep, IdeaCard, Misconception, Rng, Scene, SignBox, Teach, TeachCase, Truth } from '../types';
+import type { Because, CaseStep, CaseVerdict, ChoiceFeedback, ChooseItem, ConfusedQuestion, ContrastPanel, Distinction, DrillMark, DrillRow, DrillStep, IdeaCard, KidItem, Misconception, Picto, Rng, Scene, SignBox, Teach, TeachCase, Truth } from '../types';
 import type { ItemCore, Made } from './statements';
 
 export type SignRule = 'one' | 'two' | 'none' | 'owner';
@@ -1088,6 +1088,125 @@ export function signTwins(p: SignPuzzle): SignPuzzle[] {
   return out;
 }
 
+/**
+ * A sign item in kid words (Grades 1 to 3, docs/KID-JOURNEY.md): the boxes and their signs stay the picture, and the
+ * question is "Which chest?" (in kid mode the item is drawn as its alternate, signKidAlt: the signs in kid words on one
+ * line, the boxes as picture tiles). After a miss: pretend it is there and check each sign. "Show me" is one box that
+ * does not fit (as the classic hint shows one), with its count against the rule; the hint is the method in seven words.
+ */
+export function signKid(p: SignPuzzle, skin: SignSkin): KidItem {
+  const w = signWords(skin);
+  const test = [0, 1, 2].find((b) => b !== p.answer)!;
+  return {
+    prompt: `Which ${w.noun}?`,
+    nope: `Pretend it is ${w.prep} that ${w.noun}. Then check each sign.`,
+    yes: `Only ${w.the(p.answer)} fits the rule.`,
+    show: { label: `Pretend the ${w.item} is ${w.prep} ${w.the(test)}.`, note: signCaseNote(p, skin, test) },
+    hint: p.rule === 'owner' ? `Try each ${w.noun}. Check its own sign.` : `Try each ${w.noun}. Count the true signs.`,
+  };
+}
+
+// ---------- the kid-only sign question and case board (Grade 3, docs/KID-JOURNEY.md, "Round 2 fields") ----------
+//
+// A Grade 3 screen holds 30 words and 3 sentences, and the classic picture of a sign puzzle (each box with its number,
+// name and sign, and the rule) is 7 sentences by itself. In kid mode the question is asked with the same puzzle, the
+// same rule and the same answer, the signs in a few kid words on one line (Gold: “Here,” Silver: “Not here,” Bronze:
+// “In Gold.”), and the boxes as picture tiles under their short names. A case board is marked one sign per page, with
+// each sign's own words. Every stamp, count and verdict comes from signHolds() and fitsRule(), never typed in.
+
+/** The picture of each kind of box on a kid answer tile. */
+const KID_BOX_ART: Record<SignSkin, Picto> = { chest: 'chest', door: 'door', cave: 'cave', box: 'box' };
+
+/** A sign in a few kid words: “Here”, “Not here”, “In Gold”, “Not behind Blue” (a box by its letter: “In C”). */
+function kidSign(w: ReturnType<typeof signWords>, s: Sign): string {
+  switch (s.t) {
+    case 'here': return 'Here';
+    case 'notHere': return 'Not here';
+    case 'in': return `${cap(w.prep)} ${w.short[s.x]}`;
+    case 'notIn': return `Not ${w.prep} ${w.short[s.x]}`;
+  }
+}
+
+/** The three signs in kid words, one line and one sentence (at most 12 words): Gold: “Here,” Silver: “Not here,” Bronze: “In Gold.” */
+export function kidSignLine(p: SignPuzzle, skin: SignSkin): string {
+  const w = signWords(skin);
+  return p.signs.map((s, i) => `${w.short[i]}: “${kidSign(w, s)}${i < p.signs.length - 1 ? ',' : '.'}”`).join(' ');
+}
+
+/**
+ * A sign item's kid-only alternate (KidItem.alt): the same puzzle, rule, answer and teaching, its signs in kid words on
+ * one line with the rule under it, and the boxes as picture tiles named by their short names (each tile is still read
+ * by its full name). No case board to mark first: the round's own board marks a case one sign per page.
+ */
+function signKidAlt(p: SignPuzzle, skin: SignSkin, classic: ItemCore, tag: string): ChooseItem {
+  const w = signWords(skin);
+  const boxes = signBoxes(p, skin);
+  const item: ItemCore = {
+    kind: 'choose',
+    prompt: classic.prompt,
+    scene: { kind: 'text', lines: [kidSignLine(p, skin), `Rule: ${w.ruleText(p.rule)}`] },
+    choices: boxes.map((b, i) => ({ id: b.id, label: b.name, art: KID_BOX_ART[skin], word: w.short[i] })),
+    answer: classic.answer,
+    explain: classic.explain,
+    ...(classic.feedback ? { feedback: { ...classic.feedback } } : {}),
+    ...(classic.hint ? { hint: classic.hint } : {}),
+    ...(classic.hintCase ? { hintCase: classic.hintCase } : {}),
+    ...(classic.teach ? { teach: classic.teach } : {}),
+    kid: signKid(p, skin),
+  };
+  syncWhyWrong(item);
+  if (classic.conflict) item.conflict = true;
+  return { id: '', stop: 1, lesson: '', skill: `s1.${tag}`, ...item };
+}
+
+/**
+ * A case board's kid-only replacement step (KidBoard.alt), for a count rule: one case (pretend the treasure is in box
+ * b), each sign stamped True or False from its own words, one sign per page, then the count against the rule and Keep
+ * or Reject (the board says the count, as the case board counts the stamps). The line is the test.
+ */
+export function signKidCase(p: SignPuzzle, skin: SignSkin, id: string, b: number): { line: string; step: DrillStep } {
+  if (p.rule === 'owner') throw new Error('signKidCase: a count rule only');
+  const w = signWords(skin);
+  const isBox = skin === 'box';
+  const whose = (i: number) => `${isBox ? w.name(i) : w.short[i]}’s sign`;
+  const n = trueSigns(p.signs, b).length;
+  const fit = fitsRule(p.signs, p.rule, b);
+  const need = needCount[p.rule];
+  const stamps: DrillRow[] = p.signs.map((s, i) => {
+    const value = signHolds(s, i, b);
+    return {
+      id: `kid${b}-sign${i}`,
+      label: `${whose(i)}: “${w.signText(s)}”`,
+      marks: [{ id: `kid${b}-sign${i}-stamp`, label: `${cap(w.signOf(i))}: true or false in this test?`, options: TF, answer: tv(value), why: { [tv(!value)]: signMarkWhy(p, skin, i, b) } }],
+    };
+  });
+  const count = n === 0 ? 'No true sign' : `${cap(NUM[n])} true sign${n === 1 ? '' : 's'}`;
+  const needs = need === 0 ? 'none' : NUM[need];
+  const decide: DrillRow = {
+    id: `kid${b}-rule`,
+    label: `${count}, ${fit ? 'and' : 'but'} the rule needs ${needs}. Keep ${isBox ? w.name(b) : w.short[b]}?`,
+    marks: [{
+      id: `kid${b}-decide`,
+      label: `Keep or reject ${w.the(b)}?`,
+      options: DECIDE,
+      answer: fit ? 'keep' : 'reject',
+      why: fit
+        ? { reject: `The rule needs ${signNeeds(p, skin, b)}. This case has that. So keep ${w.the(b)}.` }
+        : { keep: `The rule needs ${signNeeds(p, skin, b)}. This case has ${signCount(n)}. So reject ${w.the(b)}.` },
+    }],
+  };
+  return {
+    line: `Pretend the ${w.item} is ${w.prep} ${w.the(b)}.`,
+    step: {
+      id,
+      title: `Check ${w.the(b)}`,
+      body: [`Pretend the ${w.item} is ${w.prep} ${w.the(b)}. Stamp each sign from its words. Then check the rule.`],
+      rows: [...stamps, decide],
+      done: `Right. ${signDecision(p, skin, b)}`,
+    },
+  };
+}
+
 /** "Which chest has the treasure?" Choices are the three boxes, in order; a choice's id is its box's id. */
 export function signItem(rng: Rng, opts: SignItemOptions): SignMade {
   const p = opts.puzzle ?? makeSignPuzzle(rng, opts.rule);
@@ -1111,8 +1230,12 @@ export function signItem(rng: Rng, opts: SignItemOptions): SignMade {
     scratch: signScratch(p, opts.skin),
     confused: signConfused(opts.skin, p.rule),
     confusedClosing: SIGN_CLOSING,
+    kid: signKid(p, opts.skin),
   };
   syncWhyWrong(item);
   if (signDeniesAnswer(p)) item.conflict = true;
-  return { tag: p.rule === 'owner' ? 'signs-owner' : 'signs-count', item, puzzle: p, skin: opts.skin };
+  const tag = p.rule === 'owner' ? 'signs-owner' : 'signs-count';
+  // Kid mode only: the same puzzle with its signs in kid words (Grade 3 budget). Classic play never sees it.
+  item.kid = { ...item.kid!, alt: signKidAlt(p, opts.skin, item, tag) };
+  return { tag, item, puzzle: p, skin: opts.skin };
 }

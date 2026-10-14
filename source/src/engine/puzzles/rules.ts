@@ -11,7 +11,7 @@
  *   - a missed NOT, and brackets skipped (so a NOT lands on the wrong part).
  * It also builds card sets and "guess the rule" puzzles. All randomness comes from the Rng passed in.
  */
-import type { Color, DrillMark, DrillRow, Rng, Shape, Size, Thing } from '../types';
+import type { Color, DrillMark, DrillRow, Picto, Rng, Shape, Size, Thing } from '../types';
 
 // ---------- features and cards ----------
 
@@ -56,6 +56,9 @@ export const cardName = (c: Card): string => `${c.size} ${c.color} ${c.shape}`;
  * are shuffled, so its feedback, the answer key and the read-aloud always match.
  */
 export const cardId = (c: Card): string => `${c.size}-${c.color}-${c.shape}`;
+
+/** A card's picture for a young reader's answer tile (the Kid Journey): 'card-big-red-circle'. */
+export const cardPicto = (c: Card): Picto => `card-${c.size}-${c.color}-${c.shape}`;
 
 /** Read a card name ('big red circle', any case, optional 'the') back into a card. */
 export function parseCard(text: string): Card | null {

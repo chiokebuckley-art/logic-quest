@@ -1,6 +1,7 @@
 /**
  * Journey (1c): the stops on one rail. Main track, side track (the stops marked sideTrack), the Pattern Observatory
- * and a Pattern Lab chip. Every number shown is the stop's place on the Journey (stopNumber), never its id.
+ * and a Pattern Lab chip. Once a grade is chosen, "My grade" (the Kid Journey's grade map) is the first chip and the
+ * page it opens on. Every number shown is the stop's place on the Journey (stopNumber), never its id.
  * Tapping a stop opens its Stop page, which holds everything about that stop.
  */
 import { nextStep, viewAll, type StopView } from '../../engine/journey/mastery';
@@ -14,6 +15,7 @@ import { DAILY_GOAL_MINUTES, goalPercent, stopCounts } from '../progressStats';
 import { useStore, type Route } from '../store';
 import { Icon } from '../components/Icon';
 import { SearchButton } from '../components/kit';
+import { GradeMap } from './GradeMap';
 
 /** Where an open stop leads: its Stop page (the page's gold row is the current action). */
 export function stopRoute(stop: StopDef, _view?: StopView): Route {
@@ -73,7 +75,8 @@ function nodeOf(view: StopView, current: boolean): Node {
 export function JourneyScreen({ route }: { route?: Extract<Route, { name: 'journey' }> }) {
   const { save, today, actions } = useStore();
   if (!save) return null;
-  const track = route?.track ?? 'main';
+  const grade = save.kid.grade;
+  const track = route?.track ?? (grade ? 'grades' : 'main');
   const all = viewAll(STOPS, save.stops, today);
   const views = all.filter(({ stop }) => (track === 'side' ? !!stop.sideTrack : track === 'observatory' ? !!stop.observatory : !stop.observatory && !stop.sideTrack));
   const sideNumbers = STOPS.filter((s) => s.sideTrack).map(stopNumber).join(', ');
@@ -102,11 +105,14 @@ export function JourneyScreen({ route }: { route?: Extract<Route, { name: 'journ
         </div>
       </div>
       <div className="sl-chips" role="tablist" aria-label="Track">
-        <button type="button" role="tab" aria-selected={track === 'main'} className="sl-chip c-gold" onClick={() => actions.navigate({ name: 'journey' })}>Main track</button>
+        {grade && <button type="button" role="tab" aria-selected={track === 'grades'} className="sl-chip c-gold" onClick={() => actions.navigate({ name: 'journey', track: 'grades' })}>My grade</button>}
+        <button type="button" role="tab" aria-selected={track === 'main'} className="sl-chip c-gold" onClick={() => actions.navigate({ name: 'journey', track: 'main' })}>Main track</button>
         <button type="button" role="tab" aria-selected={track === 'side'} className="sl-chip c-gold" onClick={() => actions.navigate({ name: 'journey', track: 'side' })}>Side track · {sideNumbers}</button>
         <button type="button" role="tab" aria-selected={track === 'observatory'} className="sl-chip c-gold" onClick={() => actions.navigate({ name: 'journey', track: 'observatory' })}>Observatory</button>
         <button type="button" className="sl-chip c-violet" onClick={() => actions.navigate({ name: 'library', kind: 'lab' })}>Pattern Lab</button>
       </div>
+
+      {track === 'grades' && <GradeMap />}
 
       {track === 'observatory' && (
         <section className="sl-section" aria-labelledby="ob-title">
@@ -143,7 +149,7 @@ export function JourneyScreen({ route }: { route?: Extract<Route, { name: 'journ
         </section>
       )}
 
-      <ol className="sl-rail">
+      {track !== 'grades' && <ol className="sl-rail">
         {views.map(({ stop, view }, i) => {
           const current = next.stopId === stop.id && next.action !== 'done';
           const node = nodeOf(view, current);
@@ -179,7 +185,7 @@ export function JourneyScreen({ route }: { route?: Extract<Route, { name: 'journ
             </li>
           );
         })}
-      </ol>
+      </ol>}
       <SearchButton onOpen={() => actions.navigate({ name: 'search' })} placeholder="Find a stop or an idea" />
     </div>
   );

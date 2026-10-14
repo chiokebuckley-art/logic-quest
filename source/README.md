@@ -1,5 +1,26 @@
 # LOGIC QUEST
 
+**v0.13.0 — The Kid Journey: a map by grade, with Grades 1 to 3 built for young readers.** From the Logic Quest Kid
+Journey brief (October 13, 2026). Every lesson sits in one of nine bands (Grade 1 to Grade 8, then high school), each
+band a few worlds of rounds; a kid picks a grade (or takes a short untimed placement check, at most 16 questions, that
+stops after two misses in a row) and plays the rounds in order on a star sky.
+
+- **A new player needs only a name** (six words on the screen, a Grown-ups link for import and link; the PIN stays in
+  Settings), then "Which grade are you in?".
+- **Stars, stickers, buildings, badges.** A round earns a gold star when every try is clean, a silver star after a
+  repair, never from a Next tap. Three stars give Pip a sticker; a world check (every answer right, no timer) builds the
+  world's own building; the band's last world check earns the grade badge with a short ceremony and a printable
+  certificate. A missed world check locks until the missed rounds are played again. The flame is now "days this week".
+- **Grades 1 to 3 read like a picture book.** Every screen of those 23 rounds fits a word budget counted from the
+  rendered text (Grade 1: 12 words, 2 sentences; Grade 2: 20; Grade 3: 30): one line per card with a picture first,
+  boards marked one mark at a time, picture or yes/no tiles for answers, pictogram scenes in place of clue lists,
+  a one-line "Not yet" with "Show me" and "Try again", a hint of 8 words or a picture, a star screen, a "Ready? Go"
+  before every check, no timer, and read-aloud that starts by itself in Grades 1 and 2. Where a classic question's
+  answers are whole sentences, kid mode asks a kid-only twin of the same skill, computed by the same generator and
+  checked by tests; the classic lessons, ids, answers and pass rules are unchanged, and a grown-up with no grade sees
+  the Journey as before.
+- The spec and its decisions are `docs/KID-JOURNEY.md`; the kid-layer rules are in `docs/CONTENT_GUIDE.md`.
+
 **v0.12.0 — The logic the audit found missing:** from the Logic Quest Curriculum and Logic Audit (October 13,
 2026). Ten lessons across six stops, each with a trap item, real-life lines and glossary words:
 

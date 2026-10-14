@@ -6,6 +6,17 @@
  * timer that pauses while the page is hidden. Grading always goes through grade() from the engine.
  * Every record carries the player's last answer (not on a timeout), for "You said" on the check result.
  *
+ * Kid mode (Grades 1 to 3) with an item that has its kid layer (ItemBase.kid): the kid prompt, yes/no or picture
+ * tiles for the answers, no wait note and no confidence row, the hint as a bulb button that opens the kid hint (its
+ * line, or the show case as a picture only) in place of the question; after Check the question
+ * steps aside for one compact panel ("Yes!" and one line, or the "not yet" line with Show me, Tell me more and
+ * Try again). Number items keep the pad. A check (the world check) keeps its kicker and its Next button.
+ * Kid mode also draws the kid scene (ItemBase.kid.scene: pictograms, plain cards or nothing) in place of the item's
+ * scene, the picture tiles' kid words (Choice.word), cards with no position numbers on tap, multi and count items, and
+ * keeps the help lines (tap, line-up, number pad, grid) and the "k chosen" count for screen readers only. A review or
+ * transfer (independent) item draws no faded frame in kid mode; the faded example itself (a Do item) keeps it. An item's
+ * kid-only alternate (kid.alt) is swapped in by the host that builds the pack (kidItemOf), never here.
+ *
  * The bodies of assign items (logic grids, knights and knaves) live in AssignView and of multi items
  * (text cards) in MultiView. This file also exports the small shared pieces the runners use: the
  * read-aloud button, the play header and step dots, and the pure line-building helpers for order items
@@ -30,6 +41,10 @@ import { PlayIcon, ThingCard } from './ThingCard';
 import { NumberPad } from './NumberPad';
 import { skillWorld } from '../../content/world';
 import { ConfusedPanel } from './Distinction';
+import { useKidMode } from '../kidMode';
+import { autoSay, kidItemSpeech, kidThingsOf, pictureChoices, yesNoOf } from '../kidPlay';
+import { KidHint, KidPictos, KidRight, KidThings, Tiles, kidHintSpeech, pictureTiles, yesNoTiles } from './KidPlay';
+import { stopSpeaking } from '../speech';
 
 // ---------- pure helpers ----------
 
@@ -169,8 +184,8 @@ export function Dots({ states, label }: { states: readonly DotState[]; label: st
 }
 
 export interface PlayHeaderProps {
-  /** Small line above the title, e.g. "Stop 2 · Lesson 1 of 5". */
-  over: string;
+  /** Small line above the title, e.g. "Stop 2 · Lesson 1 of 5". None in kid mode (the title alone: "Round 2 of 4"). */
+  over?: string;
   title: string;
   onBack?: () => void;
   backLabel?: string;
@@ -202,8 +217,8 @@ export function PlayHeader({ over, title, onBack, backLabel = 'Back', dots, dots
         </button>
       )}
       <div className="play-head-text">
-        <div className="play-head-over">{over}</div>
-        <h1 className="play-head-title">{title}</h1>
+        {over && <div className="play-head-over">{over}</div>}
+        <h1 className={`play-head-title${/^Round \d+ of \d+$/.test(title) ? ' play-head-title--round' : ''}`}>{title}</h1>
       </div>
       {dots && dots.length > 0 && <Dots states={dots} label={dotsLabel} />}
     </header>
@@ -274,6 +289,16 @@ export function ItemView(props: ItemViewProps & ItemViewExtraProps) {
 
 function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, nextLabel = 'Next', autoFocus = true, stage = 'first', afterHelpLabel = nextLabel, canMoveOn = false, onMiss, priorMiss = false }: ItemViewProps & ItemViewExtraProps) {
   const learn = mode === 'learn';
+  const kidMode = useKidMode();
+  /** The item's kid layer, drawn in kid mode (Grades 1 to 3). */
+  const kid = kidMode && item.kid ? item.kid : null;
+  /**
+   * Kid mode: what the hint shows. The kid hint line (ItemBase.kid.hint), or else the kid layer's show case (or the
+   * classic hint's case) as a picture only; that one only when the item has a classic hint at all.
+   */
+  const kidHint = kid && !kid.hint ? kid.show ?? item.hintCase : undefined;
+  /** The Hint button shows: in kid mode for a kid hint line or a picture, in classic play for the item's hint. */
+  const hasHint = kid ? !!kid.hint || (!!item.hint && !!kidHint) : !!item.hint;
   /** "In real life": where this skill is used, shown with the reason after a right answer (like Engineering Quest's line). */
   const realLine = learn ? skillWorld(item.skill, item.id) : undefined;
   const uid = useId().replace(/[^A-Za-z0-9_-]/g, '');
@@ -412,6 +437,7 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
       solvedMs.current = Date.now() - startedAt;
       setPhase('right');
       setLive(rightTitle(stage, misses, help.current.hint, boardMissed.current));
+      if (kid) autoSay(kidMode, ['Yes!', ...(kid.yes ? [kid.yes] : [])]);
     } else {
       // Teach at once: no second wrong guess before the explanation.
       const m = explanationFor(item, answer);
@@ -420,7 +446,8 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
       if (misses === 0) onMiss?.();
       setMisses((n) => n + 1);
       setPhase('explained');
-      setLive(`Not yet. ${m.title}`);
+      setLive(`Not yet. ${kid ? kid.nope : m.title}`);
+      if (kid) autoSay(kidMode, [kid.nope]);
     }
   };
   /** Clear only the chosen answer, keep the explanation for review, and let the player answer again. */
@@ -429,7 +456,8 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
     if (item.kind === 'tapall' || item.kind === 'multi') setChosen([]);
     if (item.kind === 'number') setDigits('');
     setPhase('answer');
-    setLive('Try the question again. You can review the explanation.');
+    setLive(kid ? 'Try again.' : 'Try the question again. You can review the explanation.');
+    if (kid) autoSay(kidMode, kidItemSpeech(item));
   };
   const finish = (correct: boolean, extra?: { moveOn?: boolean }) => {
     if (finished.current) return;
@@ -475,7 +503,21 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
   const revealed = learn && (phase === 'right' || phase === 'explained');
 
   let controls: ReactElement;
-  if (item.kind === 'choose') {
+  const pair = kid && item.kind === 'choose' ? yesNoOf(item.choices) : null;
+  if (kid && item.kind === 'choose' && (pair || pictureChoices(item))) {
+    // Kid mode: a check tile and a cross tile, or one big picture tile per choice.
+    controls = (
+      <Tiles
+        options={pair ? yesNoTiles(item.choices, pair) : pictureTiles(item.choices)}
+        pick={pick}
+        onPick={(id) => { stopSpeaking(); setPick(id); }}
+        locked={locked}
+        labelledBy={promptId}
+        right={revealed ? item.answer : undefined}
+        miss={learn && phase === 'explained' && pick !== item.answer ? pick ?? undefined : undefined}
+      />
+    );
+  } else if (item.kind === 'choose') {
     const short = item.choices.every((c) => c.label.length <= 14);
     const focusIdx = Math.max(0, item.choices.findIndex((c) => c.id === pick));
     controls = (
@@ -519,7 +561,7 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
     const toggle = (id: string) => setChosen((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
     controls = (
       <div className="play-stack-sm">
-        <p className="play-help">
+        <p className={kid ? 'play-sr' : 'play-help'}>
           Tap every card that fits. Tap a card again to undo.
         </p>
         <ul className="play-things play-things--pick" aria-label="Cards to choose from">
@@ -535,9 +577,13 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
             </li>
           ))}
         </ul>
-        <p className="play-help play-help--count" aria-hidden="true">
-          {chosen.length} chosen
-        </p>
+        {kid ? (
+          <p className="play-sr">{chosen.length} chosen</p>
+        ) : (
+          <p className="play-help play-help--count" aria-hidden="true">
+            {chosen.length} chosen
+          </p>
+        )}
         {revealed && item.answer.length === 0 && <p className="play-help">No card fits this rule, so the right move is to choose none.</p>}
       </div>
     );
@@ -548,10 +594,10 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
       setFlagged(null);
     };
     const body = { item, marks, locked, onChange: change, flagged: learn ? flagged : null };
-    controls = item.layout === 'toggles' ? <AssignToggles {...body} /> : <AssignGrid {...body} />;
+    controls = item.layout === 'toggles' ? <AssignToggles {...body} /> : <AssignGrid {...body} quietHelp={!!kid} />;
   } else if (item.kind === 'multi') {
     const toggle = (id: string) => setChosen((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
-    controls = <MultiView item={item} chosen={chosen} locked={locked} revealed={revealed} onToggle={toggle} />;
+    controls = <MultiView item={item} chosen={chosen} locked={locked} revealed={revealed} onToggle={toggle} kid={!!kid} />;
   } else if (item.kind === 'number') {
     controls = (
       <div className="play-stack-sm">
@@ -560,7 +606,7 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
             {phase === 'right' ? `Right: ${item.answer}${item.unit ? ` ${item.unit}` : ''}.` : `The rule gives ${item.answer}${item.unit ? ` ${item.unit}` : ''}.`}
           </p>
         )}
-        <NumberPad value={digits} onChange={setDigits} onSubmit={() => { if (learn) check(); else if (!submitted) submitCheck(false); }} digits={item.digits ?? 3} locked={locked} unit={item.unit} labelledBy={promptId} />
+        <NumberPad value={digits} onChange={setDigits} onSubmit={() => { if (learn) check(); else if (!submitted) submitCheck(false); }} digits={item.digits ?? 3} locked={locked} unit={item.unit} labelledBy={promptId} quietHelp={!!kid} />
       </div>
     );
   } else {
@@ -579,7 +625,7 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
     };
     controls = (
       <div className="play-order">
-        <p className="play-help">Tap a name to put it in the next open spot. Tap it again to take it out.</p>
+        <p className={kid ? 'play-sr' : 'play-help'}>Tap a name to put it in the next open spot. Tap it again to take it out.</p>
         <div className="play-pool" role="group" aria-label="People to place">
           {item.names.map((nm) => {
             const at = slots.indexOf(nm.id);
@@ -602,7 +648,7 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
         <ol className="play-slots" aria-label={`The line, from ${item.firstLabel.toLowerCase()} to ${item.lastLabel.toLowerCase()}`}>
           {slots.map((id, i) => (
             <li key={i} className={`play-slot${id ? ' is-filled' : ''}`}>
-              <span className="play-slot-label">
+              <span className="play-slot-label" data-label="">
                 <span className="play-slot-n">{i + 1}</span>
                 {i === 0 && <span className="play-slot-end">{item.firstLabel}</span>}
                 {i === n - 1 && n > 1 && <span className="play-slot-end">{item.lastLabel}</span>}
@@ -617,6 +663,11 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
                 >
                   {nameOf(id)}
                 </button>
+              ) : kid ? (
+                // Kid mode: an empty spot is a dashed box, its word for screen readers only.
+                <span className="play-slot-empty kid-slot-empty">
+                  <span className="play-sr">Empty</span>
+                </span>
               ) : (
                 <span className="play-slot-empty">Empty</span>
               )}
@@ -642,15 +693,40 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
         : undefined;
   // A knights puzzle draws its speakers itself, each with a Knight / Knave choice under their words.
   const sceneInControls = item.kind === 'assign' && item.layout === 'toggles' && item.scene?.kind === 'speakers';
-  const waitNote = waitNoteFor(item, canSubmit);
+  /** Kid mode: the kid scene, drawn in place of the item's own scene (above it, for pictograms with `keep`). */
+  const kidScene = kid?.scene;
+  /** The item's own scene draws: not inside the controls or the case board, and not replaced by a kid scene. */
+  const sceneShown = !sceneInControls && !caseWork && !(learn && scratchOpen) && (!kidScene || (kidScene.kind === 'pictos' && !!kidScene.keep));
+  /** Kid mode: the cards of a tap, multi or count item draw plain (no position numbers). */
+  const plainCards = !!kid && (item.kind === 'tapall' || item.kind === 'multi' || item.kind === 'number');
+  // Kid mode never shows the wait note: Check stays dim until there is an answer.
+  const waitNote = kid ? '' : waitNoteFor(item, canSubmit);
+  /** Kid mode after Check: the question steps aside for the one compact panel. */
+  const kidFeedback = !!kid && learn && phase !== 'answer';
+  /** Kid mode, the hint open: the question steps aside for the hint's own small screen. */
+  const kidHintShown = !!kid && learn && phase === 'answer' && hintOpen && hasHint;
 
   return (
-    <section className="play-item" aria-labelledby={promptId}>
+    <section className={`play-item${kid ? ' kid-item' : ''}`} aria-labelledby={promptId}>
+      {kidHintShown && (
+        <KidHint
+          id={hintId}
+          hint={kid?.hint}
+          show={kidHint}
+          readAloud={readAloud}
+          onClose={() => {
+            setHintOpen(false);
+            requestAnimationFrame(() => promptRef.current?.focus());
+          }}
+        />
+      )}
+      {!kidFeedback && !kidHintShown && <>
       <div className="play-item-top">
-        <span className="play-kicker">{kicker ?? (learn ? 'Your turn' : 'Question')}</span>
+        {kid && learn ? <span /> : <span className="play-kicker">{kicker ?? (learn ? 'Your turn' : 'Question')}</span>}
         {readAloud && (
           <ReadAloudButton
             text={() => {
+              if (kid) return kidItemSpeech(item);
               // While the item's own board is up, its answer buttons are not on screen yet: read the question only.
               const lines = item.workFirst && !workDone ? itemSpeech({ ...item, kind: 'choose', choices: [] } as Item).filter((l) => l !== 'Your choices are:') : itemSpeech(item);
               return hintOpen && item.hint ? [...lines, `Hint: ${item.hint}`, ...(item.hintCase ? caseText(item.hintCase) : [])] : lines;
@@ -661,10 +737,10 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
 
       {timed && <TimerBar left={left} limit={timeLimit as number} />}
 
-      <p className="play-prompt" id={promptId} ref={promptRef} tabIndex={-1}>
-        {item.prompt}
+      <p className={`play-prompt${kid ? ' kid-prompt' : ''}`} id={promptId} ref={promptRef} tabIndex={-1}>
+        {kid ? kid.prompt : item.prompt}
       </p>
-      {item.frame && (
+      {item.frame && !(kid && (item.phase === 'review' || item.phase === 'transfer')) && (
         <p className="play-frame" aria-label={`Fill the blank: ${item.frame.replace(/_{2,}/g, 'blank')}`}>
           {item.frame.split(/(_{2,})/).map((part, k, parts) =>
             /^_{2,}$/.test(part) ? (
@@ -676,7 +752,9 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
         </p>
       )}
 
-      {item.scene && !sceneInControls && !caseWork && !(learn && scratchOpen) && <SceneView scene={item.scene} clueState={clueState} />}
+      {kidScene?.kind === 'pictos' && <KidPictos rows={kidScene.rows} />}
+      {kidScene?.kind === 'things' && <KidThings things={kidThingsOf(item)} />}
+      {item.scene && sceneShown && (plainCards && item.scene.kind === 'things' ? <KidThings things={item.scene.things} /> : <SceneView scene={item.scene} clueState={clueState} />)}
 
       {learn && item.workFirst && (!workDone || caseWork) && (
         <DrillBoard
@@ -705,7 +783,7 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
         />
       )}
 
-      {learn && item.scratch && !item.workFirst && (
+      {learn && item.scratch && !item.workFirst && !kid && (
         <div className="play-scratch">
           <button
             type="button"
@@ -727,8 +805,9 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
       )}
 
       {(!learn || !item.workFirst || workDone) && controls}
+      </>}
 
-      {learn && phase === 'answer' && workDone && item.phase && (
+      {learn && phase === 'answer' && workDone && item.phase && !kid && (
         <div className="play-conf" role="group" aria-label="How sure are you? This is optional and never counts against you.">
           <span>How sure?</span>
           {(['Unsure', 'Fairly sure', 'Very sure'] as const).map((label, k) => (
@@ -738,15 +817,15 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
           ))}
         </div>
       )}
-      {learn && phase === 'answer' && workDone && (
+      {learn && phase === 'answer' && workDone && !kidHintShown && (
         <>
-          {explained && (
+          {explained && !kid && (
             <button type="button" className="play-btn play-btn--ghost play-btn--small play-review-toggle" aria-expanded={reviewOpen} onClick={() => setReviewOpen((o) => !o)}>
               {reviewOpen ? 'Hide the explanation' : 'Review the explanation'}
             </button>
           )}
-          {explained && reviewOpen && <ExplanationPanel model={explained} readAloud={readAloud} autoFocus={false} tone="review" onSimpler={() => { help.current.simpler = true; }} />}
-          {hintOpen && item.hint && (
+          {explained && reviewOpen && !kid && <ExplanationPanel model={explained} readAloud={readAloud} autoFocus={false} tone="review" onSimpler={() => { help.current.simpler = true; }} />}
+          {hintOpen && item.hint && !kid && (
             <div id={hintId} className="play-hint">
               <PlayIcon name="bulb" size={18} />
               <div>
@@ -759,7 +838,7 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
               </div>
             </div>
           )}
-          {confusedOpen && item.confused && (
+          {confusedOpen && item.confused && !kid && (
             <ConfusedPanel
               questions={item.confused}
               closing={item.confusedClosing ?? item.workFirst?.words?.closing ?? item.scratch?.words?.closing}
@@ -771,21 +850,24 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
             />
           )}
           <div className="play-actions">
-            {item.hint && (
+            {hasHint && (
               <button
                 type="button"
-                className="play-btn play-btn--ghost"
+                className={`play-btn play-btn--ghost${kid ? ' kid-hint-btn' : ''}`}
                 aria-expanded={hintOpen}
                 aria-controls={hintId}
+                aria-label={kid ? 'Hint' : undefined}
                 onClick={() => {
                   if (!hintOpen) help.current.hint = true;
+                  // Kid mode: the hint opens as its own screen and, with read-aloud by itself, is read from this tap.
+                  if (kid && !hintOpen) autoSay(kidMode, kidHintSpeech(kid.hint, kidHint));
                   setHintOpen((o) => !o);
                 }}
               >
-                Hint
+                {kid ? <PlayIcon name="bulb" size={22} /> : 'Hint'}
               </button>
             )}
-            {item.confused && !confusedOpen && (
+            {item.confused && !confusedOpen && !kid && (
               <button
                 ref={confusedBtn}
                 type="button"
@@ -818,7 +900,11 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
         </>
       )}
 
-      {learn && phase === 'right' && (
+      {learn && phase === 'right' && kid && (
+        <KidRight line={kid.yes} buttonLabel="Next" readAloud={readAloud} buttonRef={panelBtnRef} onNext={next} />
+      )}
+
+      {learn && phase === 'right' && !kid && (
         <div className="play-feedback play-feedback--right">
           <div className="play-feedback-title">
             <PlayIcon name="check" size={20} />
@@ -851,6 +937,7 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
         <ExplanationPanel
           key={misses}
           model={explained}
+          kid={kid ?? undefined}
           readAloud={readAloud}
           simplerOpen={misses >= 2 || stage === 'fresh'}
           onSimpler={() => {
@@ -859,18 +946,23 @@ function ItemRun({ item, mode, onDone, readAloud, timeLimit = null, kicker, next
           actions={
             stage === 'first' ? (
               <button type="button" className="play-btn play-btn--retry play-btn--grow" onClick={tryAgain}>
-                Try this question again
+                {kid ? 'Try again' : 'Try this question again'}
               </button>
             ) : (
               <>
                 <button type="button" className="play-btn play-btn--retry play-btn--grow" onClick={() => finish(false)}>
-                  Try a new example
+                  {kid ? 'Try again' : 'Try a new example'}
                 </button>
-                {canMoveOn && (
+                {canMoveOn && (kid ? (
+                  // Kid mode: a small icon button, so the miss panel stays in Grade 1's word budget.
+                  <button type="button" className="play-btn play-btn--ghost kid-more-btn" aria-label="Move on" title="Move on" onClick={() => finish(false, { moveOn: true })}>
+                    <PlayIcon name="next" size={22} />
+                  </button>
+                ) : (
                   <button type="button" className="play-btn play-btn--ghost play-btn--grow" onClick={() => finish(false, { moveOn: true })}>
                     Move on for now
                   </button>
-                )}
+                ))}
               </>
             )
           }

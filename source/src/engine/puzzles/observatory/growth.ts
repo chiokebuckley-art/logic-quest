@@ -13,7 +13,7 @@
  */
 import { syncWhyWrong } from '../../teach';
 import type {
-  ChoiceFeedback, ChooseItem, DrillMark, DrillStep, ErrorTag, IdeaCard, ItemMeta, NumberItem, Phase, Rng, Scene, Teach, TeachCase,
+  ChoiceFeedback, ChooseItem, DrillMark, DrillStep, ErrorTag, IdeaCard, ItemMeta, KidItem, NumberItem, Phase, Picto, Rng, Scene, Teach, TeachCase,
 } from '../../types';
 import type { StairCell, StaircaseScene } from '../../scenes/staircase';
 
@@ -45,6 +45,8 @@ export interface ItemSpec {
   conflict?: boolean;
   rubric?: 0 | 1 | 2 | 3;
   meta: Omit<ItemMeta, 'tags' | 'phase' | 'answerType'>;
+  /** The kid layer (Grades 1 to 3, docs/KID-JOURNEY.md). Growing Staircase (s15.l1, Grade 3) sets it on every item. */
+  kid?: KidItem;
 }
 
 export interface WrongChoice {
@@ -52,6 +54,10 @@ export interface WrongChoice {
   label: string;
   fb: ChoiceFeedback;
   tag?: ErrorTag;
+  /** The picture on this choice's kid tile (Grades 1 to 3). */
+  art?: Picto;
+  /** The word (at most two) under this choice's kid tile, in place of its label (Choice.word). */
+  word?: string;
 }
 
 const uniq = <T,>(xs: T[]): T[] => [...new Set(xs)];
@@ -77,6 +83,7 @@ function base(spec: ItemSpec, answerType: ItemMeta['answerType'], tags: ErrorTag
     ...(spec.rubric !== undefined ? { rubric: spec.rubric } : {}),
     twin: spec.meta.twin,
     meta: { ...spec.meta, answerType, tags, phase: spec.phase },
+    ...(spec.kid ? { kid: spec.kid } : {}),
   };
 }
 
@@ -84,8 +91,8 @@ function base(spec: ItemSpec, answerType: ItemMeta['answerType'], tags: ErrorTag
  * A choose item: the right choice and the wrong ones, each wrong one with its feedback (headline names the violated
  * condition, detail shows the repair) and its error tag. Choice ids stay fixed; the order is shuffled by the rng.
  */
-export function chooseItem(spec: ItemSpec, right: { id: string; label: string }, wrong: WrongChoice[], rng?: Rng): ChooseItem {
-  const all = [right, ...wrong.map((w) => ({ id: w.id, label: w.label }))];
+export function chooseItem(spec: ItemSpec, right: { id: string; label: string; art?: Picto; word?: string }, wrong: WrongChoice[], rng?: Rng): ChooseItem {
+  const all = [right, ...wrong.map((w) => ({ id: w.id, label: w.label, ...(w.art ? { art: w.art } : {}), ...(w.word !== undefined ? { word: w.word } : {}) }))];
   const choices = rng ? rng.shuffle(all) : all;
   const errorTags: Record<string, ErrorTag> = {};
   for (const w of wrong) if (w.tag) errorTags[w.id] = w.tag;
@@ -249,6 +256,70 @@ export function sequenceScene(rule: string, first: number, jump: number, sign: 1
 }
 
 // ======================================================================================================
+// The kid layer of Growing Staircase (Grade 3, docs/KID-JOURNEY.md)
+// ======================================================================================================
+//
+// Beside the classic text, never instead of it. Grade 3's budget: at most 30 words on a screen (the header "Round k
+// of n" and the buttons count), 3 sentences, 12 words in a sentence. In kid mode the staircase is the picture: its
+// tiles, or its numbers in one row, with no words (RuleRiseScenes.tsx). So the kid prompt says the rule in a few
+// words and asks for the step, and the number pad stays. The one new word is "term", named on the round’s fourth
+// card. "Show me" is a worked twin at step 4 or term 4 (step 3 for the Explain item), never a step the quiz asks.
+
+/** What each step adds, in kid words. */
+const KID_ADDS: Record<Construction['id'], string> = {
+  pairs: 'Each step adds a pair.',
+  ends: 'Each step adds 3 tiles.',
+  post: 'Each step adds 4 tiles.',
+};
+
+/** The kept tiles, in kid words. */
+const KID_KEPT: Record<Construction['id'], string> = { pairs: 'the center tile', ends: 'the 2 end tiles', post: 'the gold tile' };
+
+/** "pairs" or "groups": what a far step counts first. */
+const kidGroups = (c: Construction) => (c.id === 'pairs' ? 'pairs' : 'groups');
+
+/** The one line after a miss on a far step: count the groups, then add the kept tiles. */
+const kidFarNope = (c: Construction) => `Count the ${kidGroups(c)}. Then add ${KID_KEPT[c.id]}.`;
+
+/** "Show me": step k of the same construction, worked. */
+const kidStep = (c: Construction, k: number): TeachCase => ({
+  label: `Step ${k}: ${KID_KEPT[c.id]} and ${count(k, c.group, c.groups)}.`,
+  note: `${c.fixed} plus ${k * c.per} is ${stairCount(c, k)} tiles.`,
+});
+
+/** A far step in kid words. The faded one keeps its classic frame; its kid prompt asks to fill the blank. */
+const farKid = (c: Construction, n: number, framed: boolean): KidItem => ({
+  prompt: framed ? `${KID_ADDS[c.id]} Fill in the blank.` : `${KID_ADDS[c.id]} How many tiles at step ${n}?`,
+  nope: kidFarNope(c),
+  yes: `${count(n, c.group, c.groups)} and ${KID_KEPT[c.id]}.`,
+  show: kidStep(c, 4),
+  hint: `How many ${kidGroups(c)} does step ${n} have?`,
+});
+
+/**
+ * The pictures of the Explain item’s four reasons, on its kid tiles: the center tile with the pairs, adding 2, the
+ * pairs with no center tile, and step 1 over and over.
+ */
+const WHY_ART: Record<'pairs' | 'adds' | 'nocenter' | 'times', Picto> = {
+  pairs: 'stair-pairs-center',
+  adds: 'stair-add-two',
+  nocenter: 'stair-pairs-only',
+  times: 'stair-times',
+};
+
+/**
+ * The words (at most two) under the Explain item’s four tiles in kid mode (Choice.word): each tile’s way of counting,
+ * so the two reasons that both give 2 times n tiles read apart. The picture shows the tiles, read-aloud says the whole
+ * classic reason, and the “Yes!” line gives the count.
+ */
+const WHY_WORD: Record<'pairs' | 'adds' | 'nocenter' | 'times', string> = {
+  pairs: 'Center, pairs',
+  adds: 'Adds 2',
+  nocenter: 'Pairs only',
+  times: 'Times 3',
+};
+
+// ======================================================================================================
 // The items
 // ======================================================================================================
 
@@ -327,7 +398,7 @@ function farWrongs(c: Construction, n: number, unit = 'tiles'): WrongNumber[] {
 export function farItem(c: Construction, n: number, o: { framed?: boolean; phase?: Phase; level?: Level } = {}): NumberItem {
   const ans = stairCount(c, n);
   const prompt = o.framed ? `${c.says} Fill in the blank to find the tiles at step ${n}.` : `${c.says} How many tiles at step ${n}?`;
-  return numberItem(
+  const item = numberItem(
     {
       lesson: L1,
       tag: 'stair-far',
@@ -341,6 +412,7 @@ export function farItem(c: Construction, n: number, o: { framed?: boolean; phase
       phase: o.phase ?? 'do',
       level: o.level ?? (n <= 12 ? 1 : 2),
       tags: o.framed ? undefined : ['far-step'],
+      kid: farKid(c, n, !!o.framed),
       meta: {
         skill: 'Track 2 · a far step from a construction',
         rule: `${c.says} Step n has ${c.fixed} plus ${c.per} times n tiles.`,
@@ -354,6 +426,25 @@ export function farItem(c: Construction, n: number, o: { framed?: boolean; phase
     'tiles',
     farWrongs(c, n),
   );
+  return o.framed ? { ...item, kid: { ...item.kid!, alt: farKidAlt(c, n, item) } } : item;
+}
+
+/**
+ * The faded far step in kid mode (KidItem.alt): its classic frame is a 13-word sentence, so the kid prompt says what
+ * the frame says (the groups of step n and the kept tiles) and asks for the tiles on the pad. The same step of the same
+ * construction, its answer and near misses from the same count (an unframed farItem), the outer item’s phase and meta.
+ */
+function farKidAlt(c: Construction, n: number, framed: NumberItem): NumberItem {
+  const open = farItem(c, n, { phase: framed.phase, level: framed.level as Level });
+  return {
+    ...open,
+    meta: framed.meta,
+    kid: {
+      ...open.kid!,
+      prompt: `Step ${n} has ${count(n, c.group, c.groups)} and ${KID_KEPT[c.id]}. How many tiles?`,
+      hint: `How many tiles are in ${count(n, c.group, c.groups)}?`,
+    },
+  };
 }
 
 /** Explain: why step n of the center-and-pairs staircase has 1 plus 2 times n tiles, not "it adds 2, so 2 times n". */
@@ -373,6 +464,13 @@ export function stairWhyItem(n: number, rng?: Rng): ChooseItem {
       phase: 'explain',
       level: 1,
       rubric: 2,
+      kid: {
+        prompt: `How do you count the tiles at step ${n}?`,
+        nope: kidFarNope(c),
+        yes: `${n} pairs and the center tile: ${ans}.`,
+        show: kidStep(c, 3),
+        hint: 'What stays? What does each step add?',
+      },
       meta: {
         skill: 'Track 2 · explain a far step',
         rule: `${c.says} Step n has 1 plus 2 times n tiles.`,
@@ -384,23 +482,29 @@ export function stairWhyItem(n: number, rng?: Rng): ChooseItem {
         twin: 'stair-why',
       },
     },
-    { id: 'pairs', label: `${ans}: 1 center tile and ${n} pairs, so 1 plus ${2 * n}.` },
+    { id: 'pairs', label: `${ans}: 1 center tile and ${n} pairs, so 1 plus ${2 * n}.`, art: WHY_ART.pairs, word: WHY_WORD.pairs },
     [
       {
         id: 'adds',
         label: `${2 * n}: it adds 2 each time, so it is ${n} times 2.`,
+        art: WHY_ART.adds,
+        word: WHY_WORD.adds,
         tag: 'local-only',
         fb: { headline: 'Adding 2 each time is true, but it only tells you the next step.', detail: [`${n} times 2 counts the pairs and leaves out the center tile. Step 1 already has 3 tiles, not 2.`, `Count from the construction: 1 center tile and ${n} pairs is ${ans}.`] },
       },
       {
         id: 'nocenter',
         label: `${2 * n}: ${n} pairs is ${2 * n} tiles.`,
+        art: WHY_ART.nocenter,
+        word: WHY_WORD.nocenter,
         tag: 'off-by-one',
         fb: { headline: `${n} pairs is ${2 * n} tiles, but the center tile stays too.`, detail: ['The construction keeps the center tile at every step.', `${2 * n} plus 1 is ${ans}.`] },
       },
       {
         id: 'times',
         label: `${3 * n}: step 1 has 3, so step ${n} has ${n} times 3.`,
+        art: WHY_ART.times,
+        word: WHY_WORD.times,
         tag: 'add-vs-multiply',
         fb: { headline: 'Step 1 has 3 tiles, but step 2 has 5, not 6.', detail: ['Only the pairs grow. The center tile is counted once, not at every step.', `So step ${n} is 1 center tile and ${n} pairs: ${ans}.`] },
       },
@@ -441,6 +545,13 @@ export function jumpItem(first: number, jump: number, n: number, o: { phase?: Ph
       phase: o.phase ?? 'do',
       level: o.level ?? 2,
       tags: ['far-step'],
+      kid: {
+        prompt: `Add ${jump} each time. What is term ${n}?`,
+        nope: 'Count the jumps, not the terms.',
+        yes: `Term ${n} is ${n - 1} jumps from term 1.`,
+        show: { label: 'Term 4 is 3 jumps from term 1.', note: `${first} plus 3 jumps of ${jump} is ${termAt(first, jump, 4)}.` },
+        hint: `How many jumps to reach term ${n}?`,
+      },
       meta: {
         skill: 'Track 2 · a far term under a constant-addition rule',
         rule: `constant-addition rule: start at ${first}, add ${jump} each time`,
@@ -490,6 +601,13 @@ export function shrinkItem(s: number, n: number, o: { phase?: Phase } = {}): Num
       phase: o.phase ?? 'do',
       level: 3,
       tags: ['far-step'],
+      kid: {
+        prompt: `Take away 2 each step. How many tiles at step ${n}?`,
+        nope: 'Step 1 has lost nothing yet.',
+        yes: `Step ${n} has lost ${n - 1} pairs.`,
+        show: { label: 'Step 4 has lost 3 pairs.', note: `${s} take away 6 is ${at(4)}.` },
+        hint: `How many pairs are gone by step ${n}?`,
+      },
       meta: {
         skill: 'Track 2 · a far step of a shrinking rule',
         rule: `constant take-away rule: start at ${s}, take away 2 each step`,
@@ -587,6 +705,22 @@ export function growTransferItem(ctx: GrowContext, n: number, o: { phase?: Phase
       hintCase: neck ? { label: 'A worked twin: 4 links.', note: '1 clasp and 8 beads is 9 pieces.' } : { label: 'A worked twin: 4 tables.', note: '4 plus 3 tables of 2 is 10 seats.' },
       phase: o.phase ?? 'transfer',
       level: o.level ?? 2,
+      // In kid words the clasp is "the hook".
+      kid: neck
+        ? {
+            prompt: `Each link adds 2 beads to the hook. How many pieces at ${n} links?`,
+            nope: 'Count the beads. Then add the hook.',
+            yes: `${2 * n} beads and 1 hook.`,
+            show: { label: '4 links: 8 beads and 1 hook.', note: 'That is 9 pieces.' },
+            hint: `How many beads do ${n} links bring?`,
+          }
+        : {
+            prompt: `Each new table adds 2 seats. How many seats at ${n} tables?`,
+            nope: 'The first table has 4. Each new one adds 2.',
+            yes: '4 seats, then 2 for each new table.',
+            show: { label: '4 tables: 4 seats, then 3 tables of 2.', note: '4 plus 6 is 10 seats.' },
+            hint: 'How many tables come after the first?',
+          },
       meta: {
         skill: 'Track 2 · the same growth rule in a new setting',
         rule: neck ? 'each link keeps the 1 clasp and adds 2 beads: 1 plus 2 times n' : 'one table seats 4, each table added brings 2: 4 plus 2 times (n take away 1)',
@@ -625,6 +759,13 @@ export function nextTermItem(first: number, jump: number): NumberItem {
       hintCase: { label: `A worked twin: ${terms[1]} plus ${jump} is ${terms[2]}.`, note: 'That is the jump.' },
       phase: 'do',
       level: 1,
+      kid: {
+        prompt: `Add ${jump} each time. What comes next?`,
+        nope: `Add ${jump} to the last number.`,
+        yes: 'You added the jump!',
+        show: { label: `${terms[1]} plus ${jump} is ${terms[2]}.`, note: 'That is the jump.' },
+        hint: 'What is added each time?',
+      },
       meta: { skill: 'Track 2 · the next term', rule: `constant-addition rule: start at ${first}, add ${jump} each time`, task: 'find the next term', representation: 'a list of numbers', difficulty: 1, twin: 'next-term' },
     },
     ans,

@@ -31,7 +31,10 @@ import type {
   Distinction,
   DrillRow,
   DrillStep,
+  Item,
+  KidItem,
   Misconception,
+  Picto,
   Rng,
   Scene,
   Shape,
@@ -502,6 +505,182 @@ export const SOME_ALL = { tag: 'some-all', label: 'a “some” sentence where e
 export const NOT_ALL_NONE = { tag: 'not-all-none', label: 'the opposite of an “all” sentence' } as const;
 export const EMPTY_ALL = { tag: 'empty-all', label: 'an “all” sentence about an empty ring' } as const;
 
+// ---------- the kid layer of lessons 1 and 2 (Grades 2 and 3, docs/KID-JOURNEY.md) ----------
+//
+// Beside the classic text, never instead of it: the same picture, the same answer, shorter words. A kid prompt names
+// plain cards (the picture is the same whatever the story calls them). A "Show me" case is a twin drawn on other rings
+// (the same features, other values: Circles and Red become Squares and Blue), so it never answers the question on
+// screen. Grade 2 (lesson 1): at most 20 words a screen with the header, 2 sentences, 10 words a sentence; Grade 3
+// (lesson 2): 30 words, 3 sentences, 12 words a sentence.
+
+/** The twin rings: each group's feature with its next value. */
+function twinPair(x: Group, y: Group): [Group, Group] {
+  const other = (g: Group) => grp(g.f, VALUES[g.f].find((v) => v !== g.v)!);
+  return [other(x), other(y)];
+}
+
+/** One card of a twin case, in a part of the twin rings. */
+const kidThing = (part: Part, x: Group, y: Group, id = 'kid-c1'): Thing => ({ id, ...cardIn(part, x, y) });
+
+/** “Big blue square.”: a twin card's name, as the label over its picture. */
+const kidName = (t: Card) => `${cap(cardName(t))}.`;
+
+/** The four parts of two rings as answer tiles (the place item, in kid mode): the part each answer names, lit. */
+export const PART_ART: Readonly<Record<Part, Picto>> = { a: 'ring-part-a', both: 'ring-part-both', b: 'ring-part-b', out: 'ring-part-out' };
+
+/** Lesson 1, tap every card in one ring: the overlap's cards belong too. */
+export function ringTapKid(g: Group, x: Group, y: Group): KidItem {
+  const [x2, y2] = twinPair(x, y);
+  const t = kidThing('both', x2, y2);
+  return {
+    prompt: `Tap each card in the ${ringName(g)} ring.`,
+    nope: `The overlap is inside the ${ringName(g)} ring too.`,
+    yes: 'The overlap counts for each ring.',
+    show: { label: kidName(t), things: [t], note: `It goes in the ${ringName(x2)} ring and the ${ringName(y2)} ring.` },
+    hint: `Is it ${pred(g, false)}? Then tap it.`,
+  };
+}
+
+/** Lesson 1, where does one card go: the line after a miss names its two features. */
+export function placeKid(card: Card, x: Group, y: Group): KidItem {
+  const right = partOf(card, x, y);
+  const px = pred(x, false), py = pred(y, false);
+  const why: Record<Part, string> = {
+    a: `It is ${px}, but it is not ${py}.`,
+    both: `It is ${px}, and it is ${py}.`,
+    b: `It is ${py}, but it is not ${px}.`,
+    out: `It is not ${px}, and it is not ${py}.`,
+  };
+  const yes: Record<Part, string> = {
+    a: `It goes only in the ${ringName(x)} ring.`,
+    both: 'It fits both rings, so it sits in the overlap.',
+    b: `It goes only in the ${ringName(y)} ring.`,
+    out: 'It fits no ring, so it stays outside.',
+  };
+  const [x2, y2] = twinPair(x, y);
+  const t = kidThing(right, x2, y2);
+  // The twin's rings are named in its note: they are not the rings on screen.
+  const [X2, Y2] = [ringName(x2), ringName(y2)];
+  const where: Record<Part, string> = {
+    a: `It goes in the ${X2} ring, not the ${Y2} ring.`,
+    both: `It goes in the ${X2} ring and the ${Y2} ring.`,
+    b: `It goes in the ${Y2} ring, not the ${X2} ring.`,
+    out: `It stays out of the ${X2} and ${Y2} rings.`,
+  };
+  return {
+    prompt: 'Where does this card go?',
+    nope: why[right],
+    yes: yes[right],
+    show: { label: kidName(t), things: [t], note: where[right] },
+    hint: `Is it ${px}? Is it ${py}?`,
+  };
+}
+
+/** Lesson 1, how many cards are in one ring: the overlap counts. */
+export function countKid(g: Group, x: Group, y: Group): KidItem {
+  const [x2, y2] = twinPair(x, y);
+  const g2 = g === x ? x2 : y2;
+  const things = [kidThing(g === x ? 'a' : 'b', x2, y2, 'kid-c1'), kidThing('both', x2, y2, 'kid-c2')];
+  return {
+    prompt: `How many in the ${ringName(g)} ring?`,
+    nope: 'Count the cards in the overlap too.',
+    yes: 'You counted the overlap too.',
+    show: { label: `The ${ringName(g2)} ring holds 2 cards.`, things, note: 'The one in the overlap counts too.' },
+    hint: `Count every card inside the ${ringName(g)} ring.`,
+  };
+}
+
+/** Lesson 1, tap every card in both rings: it has both features. */
+export function bothTapKid(x: Group, y: Group): KidItem {
+  const [x2, y2] = twinPair(x, y);
+  const t = kidThing('both', x2, y2);
+  return {
+    prompt: 'Tap each card in both rings.',
+    nope: `It must be ${pred(x, false)} and ${pred(y, false)}.`,
+    yes: 'Those cards fit both rings.',
+    show: { label: kidName(t), things: [t], note: `It is ${pred(x2, false)} and ${pred(y2, false)}, so both rings.` },
+    hint: `Is it ${pred(x, false)} and ${pred(y, false)}?`,
+  };
+}
+
+/** How the cards of the group a sentence talks about look: every one fits, some do, none does, or there is none. */
+function shapeOf(s: Sentence, cards: readonly Thing[]): Shape4 {
+  const P = partsOf(cards, s.x, s.y);
+  if (!P.a.length && !P.both.length) return 'empty';
+  if (!P.a.length) return 'every';
+  return P.both.length ? 'mixed' : 'nofit';
+}
+
+/** The truth of each kind of sentence on each shape (the same as truth(); kid lines are checked against it). */
+const SHAPE_TRUTH: Record<Q, Record<Shape4, boolean>> = {
+  all: { every: true, mixed: false, nofit: false, empty: true },
+  some: { every: true, mixed: true, nofit: false, empty: false },
+  none: { every: false, mixed: false, nofit: true, empty: true },
+  someNot: { every: false, mixed: true, nofit: true, empty: false },
+  notAll: { every: false, mixed: true, nofit: true, empty: false },
+};
+
+/** Why a sentence is true or false on these cards, in kid words: one or two short sentences. */
+export function kidReason(s: Sentence, cards: readonly Thing[]): string {
+  const k = shapeOf(s, cards);
+  if (SHAPE_TRUTH[s.q][k] !== truth(s, cards)) throw new Error(`kidReason: ${say(s)} on ${k}`);
+  const one = subj(s.x, CARD, false), p1 = pred(s.y, false);
+  const noOne = `There is no ${one} at all.`;
+  switch (s.q) {
+    case 'all':
+      return k === 'every' ? `Every ${one} here is ${p1}.` : k === 'empty' ? `There is no ${one}, so nothing breaks it.` : `One ${one} is not ${p1}. That breaks “all.”`;
+    case 'some':
+      return k === 'every' ? `Every ${one} here is ${p1}, so at least one is.` : k === 'mixed' ? `One ${one} is ${p1}. That is enough for “some.”` : k === 'empty' ? noOne : `Not even one ${one} is ${p1}.`;
+    case 'none':
+      return k === 'every' || k === 'mixed' ? `One ${one} is ${p1}. That breaks “no.”` : k === 'empty' ? noOne : `Not even one ${one} is ${p1}.`;
+    case 'someNot':
+    case 'notAll':
+      return k === 'every' ? `Every ${one} here is ${p1}.` : k === 'empty' ? noOne : `One ${one} is not ${p1}. That is enough.`;
+  }
+}
+
+/** The “Show me” twin of a sentence: the same kind of sentence on the twin rings, with cards of the same shape. */
+function kidTwinCase(s: Sentence, k: Shape4): TeachCase {
+  const [x2, y2] = twinPair(s.x, s.y);
+  const s2 = sen(s.q, x2, y2);
+  const things = shapeCards(s2, k).map((c, i) => ({ id: `kid-c${i + 1}`, ...c }));
+  const value = truth(s2, things);
+  if (value !== SHAPE_TRUTH[s.q][k]) throw new Error(`kidTwinCase: ${say(s2)} on ${k}`);
+  const one = subj(x2, CARD, false), p1 = pred(y2, false);
+  const so = `so it is ${tv(value)}.`;
+  const notes: Record<Q, Record<Shape4, string>> = {
+    all: { every: `Every ${one} is ${p1}, ${so}`, mixed: `One ${one} is not ${p1}, ${so}`, nofit: `No ${one} is ${p1}, ${so}`, empty: `No ${one} is there to break it, ${so}` },
+    some: { every: `Every ${one} is ${p1}. That is at least one, ${so}`, mixed: `One ${one} is ${p1}, ${so}`, nofit: `Not even one is ${p1}, ${so}`, empty: `No ${one} is there, ${so}` },
+    none: { every: `One ${one} is ${p1}, ${so}`, mixed: `One ${one} is ${p1}, ${so}`, nofit: `Not even one is ${p1}, ${so}`, empty: `No ${one} is there, ${so}` },
+    someNot: { every: `Every ${one} is ${p1}, ${so}`, mixed: `One ${one} is not ${p1}, ${so}`, nofit: `No ${one} is ${p1}, ${so}`, empty: `No ${one} is there, ${so}` },
+    notAll: { every: `Every ${one} is ${p1}, ${so}`, mixed: `One ${one} is not ${p1}, ${so}`, nofit: `No ${one} is ${p1}, ${so}`, empty: `No ${one} is there, ${so}` },
+  };
+  return { label: quoteEnd(s2), ...(things.length ? { things } : {}), note: notes[s.q][k] };
+}
+
+/** Is the sentence true or false for the cards in the rings? (lesson 2, and every item made by tfItem) */
+export function truthKid(s: Sentence, w: RingWorld): KidItem {
+  const line = kidReason(s, w.things);
+  return {
+    prompt: `${quoteEnd(s)} True or false?`,
+    nope: line,
+    yes: line,
+    show: kidTwinCase(s, shapeOf(s, w.things)),
+    hint: `Look only in the ${ringName(s.x)} ring.`,
+  };
+}
+
+/** Which sentence is true (or false)? (lesson 2) The answers stay the three sentences. */
+export function whichKid(form: 'true' | 'false', right: Sentence, w: RingWorld): KidItem {
+  return {
+    prompt: `Which one is ${form}?`,
+    nope: `Look in the ${ringName(right.x)} ring. Then check each one.`,
+    yes: kidReason(right, w.things),
+    show: kidTwinCase(right, shapeOf(right, w.things)),
+    hint: 'Try each sentence on the picture.',
+  };
+}
+
 // ---------- lesson 1: in the ring or not ----------
 
 function memberTeach(w: RingWorld, n: Noun, meaning: string, ask: Group, focus: Thing): Teach {
@@ -568,6 +747,7 @@ export function ringTapItem(rng: Rng, o: { skin: S8Skin; ring?: 'x' | 'y' }): S8
     hintCase: cardCase(skip, w.x, w.y, `It is not ${pred(g, false)}, so it does not go in ${theRing(g)}.`),
     teach: memberTeach(w, fr.noun, `${cap(theRing(g))} holds every ${fr.noun.one} that is ${pred(g, false)}. It does not matter what else it is.`, g, both[0]),
     tags: [IN_BOTH.tag],
+    kid: ringTapKid(g, w.x, w.y),
   } as unknown as ItemCore;
   return done('member', 'ring-tap', item, { world: w, frame: fr, ring: g });
 }
@@ -583,10 +763,11 @@ export function placeItem(rng: Rng, o: { skin: S8Skin; part?: Part }): S8Made {
   const c = cardIn(part, x, y, rng);
   const card: Thing = { id: 'p1', ...c };
   const choices: Choice[] = [
-    { id: 'a', label: `Only in ${theRing(x)}` },
-    { id: 'both', label: 'In both rings' },
-    { id: 'b', label: `Only in ${theRing(y)}` },
-    { id: 'out', label: 'Outside both rings' },
+    // Kid mode: the four part pictures alone (word ''); each tile is still announced by its label.
+    { id: 'a', label: `Only in ${theRing(x)}`, art: PART_ART.a, word: '' },
+    { id: 'both', label: 'In both rings', art: PART_ART.both, word: '' },
+    { id: 'b', label: `Only in ${theRing(y)}`, art: PART_ART.b, word: '' },
+    { id: 'out', label: 'Outside both rings', art: PART_ART.out, word: '' },
   ];
   const right = partOf(card, x, y);
   const inX = (p: Part) => p === 'a' || p === 'both';
@@ -615,6 +796,7 @@ export function placeItem(rng: Rng, o: { skin: S8Skin; part?: Part }): S8Made {
     hintCase: cardCase(other, x, y),
     teach: memberTeach(w, fr.noun, `${cap(withA(fr.noun.one))} goes in ${theRing(x)} if it is ${pred(x, false)}. It goes in ${theRing(y)} if it is ${pred(y, false)}.`, x, card),
     ...(right === 'both' ? { tags: [IN_BOTH.tag] } : {}),
+    kid: placeKid(card, x, y),
   };
   return done('member', 'place', item, { world: w, frame: fr, card });
 }
@@ -685,6 +867,7 @@ export function countItem(rng: Rng, o: { skin: S8Skin; ring?: 'x' | 'y' }): S8Ma
       simpler: [`Count the ${fr.noun.many} only in ${theRing(g)}: ${gOnly}.`, `Count the ${fr.noun.many} in the overlap: ${both}.`, `Put them together: ${right}.`],
     },
     tags: [IN_BOTH.tag],
+    kid: countKid(g, x, y),
   };
   return done('member', 'count', item, { world: w, frame: fr, ring: g });
 }
@@ -713,6 +896,7 @@ export function bothTapItem(rng: Rng, o: { skin: S8Skin }): S8Made {
     hintCase: cardCase(P.a[0], x, y),
     teach: memberTeach(w, fr.noun, `In both rings means the overlap. ${cap(withA(fr.noun.one))} there is ${pred(x, false)}, and it is ${pred(y, false)}.`, y, P.both[0]),
     tags: [IN_BOTH.tag],
+    kid: bothTapKid(x, y),
   } as unknown as ItemCore;
   return done('member', 'both-tap', item, { world: w, frame: fr });
 }
@@ -771,6 +955,7 @@ function tfItem(fr: Frame, w: RingWorld, s: Sentence, o: TfOptions): S8Made {
     },
     ...(o.tags?.length ? { tags: o.tags } : {}),
     ...(o.conflict ? { conflict: true } : {}),
+    kid: truthKid(s, w),
   };
   return done(o.tag, o.kind, item, { world: w, sentence: s, frame: fr });
 }
@@ -793,6 +978,16 @@ export function truthItem(rng: Rng, o: { skin: S8Skin; q: 'all' | 'some' | 'none
   const want = o.want ?? rng.chance(0.5);
   const w = makeWorld(rng, x, y, { ...countsFor(rng, o.q, want, trap), ...restCounts(rng) });
   return tfItem(fr, w, sen(o.q, x, y), { tag: 'quantify', kind: 'truth', ...(trap ? { tags: [SOME_ALL.tag], conflict: true } : {}) });
+}
+
+/**
+ * The kid-only alternate of “Which sentence is true (or false)?” (KidItem.alt): one of its three sentences on the same
+ * rings, true or false, with its answer worked out by tfItem (the trap form asks its “some” sentence, true when every
+ * one fits; else the first sentence the item lists). No rng is drawn, so the classic item and the pack stay the same.
+ * The caller (the lesson's finish) gives it the outer item's id, lesson and skill.
+ */
+function whichAlt(fr: Frame, w: RingWorld, q: 'all' | 'some' | 'none'): Item {
+  return tfItem(fr, w, sen(q, w.x, w.y), { tag: 'quantify', kind: 'truth' }).item as unknown as Item;
 }
 
 /** Which sentence is true (or false)? Exactly one of all, some and no is. The false form has every one fitting. */
@@ -844,6 +1039,7 @@ export function whichItem(rng: Rng, o: { skin: S8Skin; form?: 'true' | 'false' }
       simpler: [`Look in ${theRing(x)}.`, 'Check the sentences one at a time.', `Only ${quoteMid(sen(right, x, y), n)} is ${form}.`],
     },
     ...(form === 'false' && allFit ? { tags: [SOME_ALL.tag], conflict: true } : {}),
+    kid: { ...whichKid(form, sen(right, x, y), w), alt: whichAlt(fr, w, form === 'false' && allFit ? 'some' : shown[0]) },
   };
   return done('quantify', 'which', item, { world: w, frame: fr });
 }

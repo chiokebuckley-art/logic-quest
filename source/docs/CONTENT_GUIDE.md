@@ -283,6 +283,16 @@ is first taught), that every case board carries its misconceptions and questions
 game's level. The audit that found the gaps, lesson by lesson, is `docs/audit/hidden-distinctions.md`; its "How to
 apply" section maps every P0 and P1 finding to these pieces.
 
+## The kid layer (Grades 1 to 3)
+
+Every round placed in Grade 1, 2 or 3 of the Kid Journey carries a kid layer beside its classic text (`LessonDef.kid`,
+`ItemBase.kid`, `Choice.art` and `Choice.word`, `KidBoard`, kid-only `alt` items and boards). It never replaces a
+classic string, id, answer or pass rule; classic play and every older band ignore it. The rules, with the budgets, the
+fields and the test that enforces them, are in `docs/KID-JOURNEY.md` ("How to add a kid layer"). In short: a picture
+first on every card, one line per card, one new word per round on a word card, boards one mark at a time, picture or
+yes/no tiles, a kid-only twin for any item whose answers are sentences, and every screen within its band's word budget
+as `kid-budget.test.ts` counts it from the rendered text.
+
 ## Reading level
 
 The first players read at a 6th-grade level. Every lesson's cards, prompts and explanations must score a

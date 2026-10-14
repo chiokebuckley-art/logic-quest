@@ -8,6 +8,8 @@ import { useStore, type Route } from '../store';
 import { CheckRunner } from '../components/CheckRunner';
 import { CheckResult } from '../components/CheckResult';
 import type { AnswerRecord } from '../components/contracts';
+import { KidModeContext, checkSeconds, kidModeOf } from '../kidMode';
+import { kidItemsOf } from '../kidPlay';
 
 type CheckRoute = Extract<Route, { name: 'check' }>;
 
@@ -27,7 +29,8 @@ export function CheckScreen({ route }: { route: CheckRoute }) {
   const [items] = useState<Item[] | null>(() => {
     if (!open || !stop?.check || !player || !save) return null;
     const attempts = save.stops[stop.id]?.attempts ?? 0;
-    return stop.check(createRng(seedFor(player.id, stop.id, route.kind, attempts, Date.now())));
+    // In kid mode an item with a kid-only alternate is asked as that alternate, and the result shows the same item.
+    return kidItemsOf(stop.check(createRng(seedFor(player.id, stop.id, route.kind, attempts, Date.now()))), kidModeOf(save));
   });
 
   // Each answer counts (answer stats and the notebook) as soon as it is given, so a check closed partway still
@@ -66,13 +69,15 @@ export function CheckScreen({ route }: { route: CheckRoute }) {
   if (!items || items.length === 0) return <NotOpen onBack={toJourney} />;
 
   return (
+    <KidModeContext.Provider value={kidModeOf(save)}>
     <div className="page-play">
       <CheckRunner
         stop={stop}
         kind={route.kind}
         items={items}
-        timeLimit={save.settings.timer ? CHECK_SECONDS : null}
+        timeLimit={checkSeconds(save, CHECK_SECONDS)}
         readAloud={save.settings.readAloud}
+        ready={!!kidModeOf(save)}
         onFinish={(records) => {
           recordNew(records);
           actions.finishCheck(stop.id, route.kind, items, records);
@@ -89,6 +94,7 @@ export function CheckScreen({ route }: { route: CheckRoute }) {
         }}
       />
     </div>
+    </KidModeContext.Provider>
   );
 }
 

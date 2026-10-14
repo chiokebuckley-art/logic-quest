@@ -18,11 +18,13 @@ export interface NumberPadProps {
   unit?: string;
   /** Id of the element that labels the pad (the question). */
   labelledBy?: string;
+  /** Kid mode: the help line under the keys is for screen readers only. */
+  quietHelp?: boolean;
 }
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'del', '0', 'ok'] as const;
 
-export function NumberPad({ value, onChange, onSubmit, digits = 3, locked = false, unit, labelledBy }: NumberPadProps) {
+export function NumberPad({ value, onChange, onSubmit, digits = 3, locked = false, unit, labelledBy, quietHelp = false }: NumberPadProps) {
   const latest = useRef({ value, onChange, onSubmit, digits, locked });
   latest.current = { value, onChange, onSubmit, digits, locked };
   const press = (d: string) => {
@@ -82,7 +84,7 @@ export function NumberPad({ value, onChange, onSubmit, digits = 3, locked = fals
           );
         })}
       </div>
-      <p className="play-help play-pad-help">Tap the keys, or type on a keyboard. Then tap OK or Check.</p>
+      <p className={quietHelp ? 'play-sr' : 'play-help play-pad-help'}>Tap the keys, or type on a keyboard. Then tap OK or Check.</p>
     </div>
   );
 }

@@ -50,7 +50,7 @@ import {
   type SkinId,
 } from '../engine/puzzles/grid';
 import { chainPuzzle, SKIN_IDS as LINE_SKINS } from '../engine/puzzles/lineup';
-import type { Choice, DrillStep, GridClue, IdeaCard, Item, LessonDef, Rng, Scene, StopDef } from '../engine/types';
+import type { Choice, DrillStep, GridClue, IdeaCard, Item, KidBoard, KidLesson, KidMark, LessonDef, Rng, Scene, StopDef } from '../engine/types';
 
 /** Skins for a practice set: everyday, fantasy, abstract, then any, in a shuffled order. */
 function practiceSkins(rng: Rng, count: number): SkinId[] {
@@ -634,6 +634,149 @@ export const L5_ENOUGH: DrillStep = cardBoard(PET_CAST, {
   done: 'Right. One kid left: you can tell. Two or more: you can’t tell yet. A clue you were told not to use does not count.',
 });
 
+// ---------- the kid layer (Grades 1 to 3, docs/KID-JOURNEY.md) ----------
+//
+// Beside the classic text, never instead of it. Lesson 1 is a Grade 1 round (a screen holds 12 words with the header
+// “Round k of n” and its buttons, 2 sentences, 8 words a sentence), lesson 2 a Grade 2 round (20, 2, 10), lessons 3 and 4
+// Grade 3 rounds (30, 3, 12). Every card is a picture and one line: a small grid drawn as a pictogram, since a card's own
+// grid names its rows and columns in words, more than the band holds. One new word a round, on its word card: “grid”
+// (lesson 1), “empty” (lesson 2), “spread” (lesson 3) and “link” (lesson 4). A kid board of rows does not draw the card's
+// grid, so a row's kid label says the marks that grid shows, and it is marked one box at a time. A box's answers are
+// three picture tiles with no words (BOX_TILES): a check, a cross and the question mark of “Can’t tell yet”. The items'
+// kid words come from the generators (engine/puzzles/grid.ts).
+
+/** A box's three answers on a kid board: Yes (a check), No (a cross) and Can’t tell yet (the question mark), no words. */
+const BOX_TILES: NonNullable<KidBoard['options']> = { yes: { art: 'check' }, no: { art: 'cross' }, [CANT]: { art: 'verdict-cant' } };
+
+/** The pet grid's three boxes of one kid's row, each drawn as its pet (the row's label names the kid). */
+const PET_MARKS: KidMark[] = [{ art: 'cat' }, { art: 'dog' }, { art: 'fish' }];
+
+/** Lesson 1's grid board in kid mode: the same board without its caption (“Snacks”), so its line fits Grade 1. */
+const { caption: _caption, ...L1_GRID_KID } = L1_GRID;
+
+/** Lesson 1 (Grade 1): what the marks mean, one box a clue, one check a row, and the box an “or” clue leaves out. */
+export const L1_KID: KidLesson = {
+  cards: [
+    { line: 'Grid: rows and columns of boxes.', art: 'grid' },
+    { line: 'Check means yes. Cross means no.', art: 'grid-marks' },
+    { line: 'A clue marks one box.', art: 'grid-clue' },
+    { line: 'Each row gets one check.', art: 'grid-one-each' },
+    { line: 'Or leaves one out. Cross it.', art: 'grid-or' },
+  ],
+  board: [
+    // L1_GRID: Mia's row is shown; Leo's row is the kid's (clue 2 crosses out his apple). The grid's names are the task
+    // (apple, bread, Mia, Leo), so the line is the clue in three words and the kid board drops the caption (KidBoard.alt).
+    { line: 'Leo: no apple.', alt: L1_GRID_KID },
+    // L1_OR: one clue a row, alone (Ava's “or” clue is the shown row), marked one box a page: the line, the row's clue,
+    // the box drawn as its pet, and the three answer tiles (the header, the line, the clue and Check: 12 words).
+    {
+      line: 'Only this clue.',
+      options: BOX_TILES,
+      rows: [{}, { label: 'Leo has the cat.', marks: PET_MARKS }, { label: 'Leo has no dog.', marks: PET_MARKS }, { label: 'Mia: cat or fish.', marks: PET_MARKS }],
+    },
+  ],
+  star: 'You can mark grids.',
+};
+
+/** Lesson 2 (Grade 2): the last box in a row or a column, “Can’t tell yet”, and a cross is about one box. */
+export const L2_KID: KidLesson = {
+  cards: [
+    { line: 'Two crosses in a row? The last box gets the check.', art: 'grid-row-left' },
+    { line: 'It works the same way in a column.', art: 'grid-col-left' },
+    { line: 'Two empty boxes? Then you can’t tell yet.', art: 'grid-two-left' },
+    { line: 'A cross means no for one box only.', art: 'grid-cross-one' },
+    { line: 'Who eats grapes? Only crosses in the grapes column count.', art: 'grid-col-look' },
+    { line: 'Empty: no mark yet. Count the empty boxes first.', art: 'grid-count' },
+  ],
+  board: [
+    // L2_CROSS_DO: the contrast card's two grids, told in words (one sentence a row, so the line and the label make 2).
+    // Each mark is drawn as that row's grid (Mia, Leo and Ava top to bottom; apples, popcorn and grapes left to right)
+    // with its crosses and the grapes column to count, or the box to mark, ringed (GRID_ASK).
+    {
+      line: 'Who must eat grapes?',
+      options: BOX_TILES,
+      rows: [
+        { label: 'Leo eats no grapes, Mia no apples.', marks: [{ art: 'grid-ask-apart-count' }, { art: 'grid-ask-apart-top' }, { art: 'grid-ask-apart-bottom' }] },
+        { label: 'Leo and Mia eat no grapes.', marks: [{ art: 'grid-ask-down-count' }, { art: 'grid-ask-down-top' }, { art: 'grid-ask-down-bottom' }] },
+      ],
+    },
+    // L2_COUNT: the “Not so fast” grid (Leo has no cat), one change a row; each mark drawn as the row's grid (Mia, Leo
+    // and Ava; the cat, the dog and the fish) with the line to count or the box to mark ringed.
+    {
+      line: 'Count empty boxes.',
+      options: BOX_TILES,
+      rows: [
+        {},
+        { label: 'Leo has no cat and no fish.', marks: [{ art: 'grid-ask-row-box' }, { art: 'grid-ask-row-count' }, { art: 'grid-ask-row-last' }] },
+        { label: 'Leo has no cat: count the cat column.', marks: [{ art: 'grid-ask-col-count' }, { art: 'grid-ask-col-top' }, { art: 'grid-ask-col-bottom' }] },
+        { label: 'Leo and Ava have no cat.', marks: [{ art: 'grid-ask-col-crossed' }, { art: 'grid-ask-col-count-one' }, { art: 'grid-ask-col-last' }] },
+        { label: 'Leo has no cat, Mia no dog.', marks: [{ art: 'grid-ask-off-count' }, { art: 'grid-ask-off-top' }] },
+        { label: 'Only Leo has a cross: count Mia’s boxes.', marks: [{ art: 'grid-ask-top-row' }] },
+      ],
+    },
+  ],
+  star: 'You can find the last box.',
+};
+
+/** Lesson 3 (Grade 3): spread a check along its row and its column, then look again. */
+export const L3_KID: KidLesson = {
+  cards: [
+    { line: 'Mia has the cat. So the rest of her row gets a cross.', art: 'grid-spread-row' },
+    { line: 'Spread: a check crosses out the rest of its row and column.', art: 'grid-spread' },
+    { line: 'Do the row. Then do the column too.', art: 'grid-col-spread' },
+    { line: 'After you spread, look again. A row may have one empty box left.', art: 'grid-spread-again' },
+    { line: 'Mark the clues. Spread each check. Find the last boxes.', art: 'grid-solved' },
+  ],
+  board: [
+    // L3_SPREAD: two boxes a row, each named over its three answer tiles; the row's label says which part of the grid.
+    {
+      line: 'Mia has the cat, so mark each box.',
+      options: BOX_TILES,
+      rows: [{}, { label: 'Now the cat column.', art: 'grid-col-spread' }, { label: 'Now two boxes outside her row and column.', art: 'grid-outside' }],
+    },
+    // L3_FINISH: clue 2's cross and Mia's spread check are shown.
+    { line: 'Leo has no dog. Finish the grid.' },
+  ],
+  star: 'You can spread a check.',
+};
+
+/** Lesson 4 (Grade 3): a linking clue joins two things, a “not” link, both ways, and back and forth. */
+export const L4_KID: KidLesson = {
+  cards: [
+    { line: 'Some grids have two parts, like pets and snacks.', art: 'grid-two-part' },
+    { line: 'Link: a clue that says two things go to the same kid.', art: 'grid-link' },
+    { line: 'Leo has the dog, so Leo eats the popcorn too.', art: 'grid-carry' },
+    { line: 'A “not” link crosses out one kid for one snack.', art: 'grid-link-not' },
+    { line: 'Ava eats popcorn, so Ava is the kid with the dog.', art: 'grid-carry-back' },
+    { line: 'A link works both ways. Start from either end.', art: 'grid-both-ways' },
+    { line: 'Stuck? Read the links again. A link carries crosses too.', art: 'grid-loop' },
+  ],
+  board: [
+    // L4_LINK: the pets are known; clue 1's marks are shown in the popcorn column.
+    { line: 'The kid with the fish eats apples. Fill in the snacks.' },
+    // L4_NOT: the pets are known (the line says them: the kid board does not draw that grid).
+    {
+      line: 'Leo has the dog, Mia the cat, and Ava the fish.',
+      options: BOX_TILES,
+      rows: [{}, { label: 'The kids with the dog and the cat eat no popcorn.', art: 'grid-link-not' }, { label: 'New clue: the kid with the fish eats no grapes.', art: 'grid-link-not' }],
+    },
+    // L4_BACK: the snacks are known; Ava's row is shown.
+    { line: 'The kid who eats grapes has the cat. Fill in the pets.' },
+    // L4_BACK_FORTH: rows 1 and 2 are shown; the kid adds clue 3, then carries Ava's check back across clue 2.
+    {
+      line: 'Carry the marks.',
+      options: BOX_TILES,
+      rows: [
+        {},
+        {},
+        { label: 'Leo does not eat popcorn, and Mia can’t either.', art: 'grid-cross-one' },
+        { label: 'Ava eats popcorn, and so does the kid with the fish. Does Ava have the fish?', art: 'grid-carry-back' },
+      ],
+    },
+  ],
+  star: 'You can follow a link.',
+};
+
 const L1 = 's4.l1';
 const L2 = 's4.l2';
 const L3 = 's4.l3';
@@ -694,6 +837,7 @@ const lessons: LessonDef[] = [
       },
     ],
     drill: [L1_GRID, L1_OR],
+    kid: L1_KID,
     // Try 1 is always a “has” clue (a ✓): the handoff keeps “isn’t” and “or” out of the opening ask.
     practice: (rng) => {
       const skins = practiceSkins(rng, 4);
@@ -760,6 +904,7 @@ const lessons: LessonDef[] = [
     ],
     // The Do for box-vs-kid sits right after its contrast card; the count board comes after the last card.
     drill: [L2_CROSS_DO, L2_COUNT],
+    kid: L2_KID,
     distinctions: [BOX_VS_KID],
     // Three right on the first try, one of them a “Can’t tell yet” grid with a cross off the line (the trap).
     pass: { firstTry: 3, include: [{ tag: 'cant-tell', label: 'a “Can’t tell yet” grid' }] },
@@ -820,6 +965,7 @@ const lessons: LessonDef[] = [
       },
     ],
     drill: [L3_SPREAD, L3_FINISH],
+    kid: L3_KID,
     practice: (rng) => {
       const skins = practiceSkins(rng, 4);
       return distinct([
@@ -901,6 +1047,7 @@ const lessons: LessonDef[] = [
       },
     ],
     drill: [L4_LINK, L4_NOT, L4_BACK, L4_BACK_FORTH],
+    kid: L4_KID,
     terms: [{ term: 'symmetric', also: 'works both ways', means: 'A link that works both ways. If Ava goes with the dog, then the dog goes with Ava.' }],
     // “Who must eat popcorn?” counts the crosses in the popcorn column only (box-vs-kid, taught in lesson 2).
     distinctions: [{ ...BOX_VS_KID, taughtIn: L2 }],

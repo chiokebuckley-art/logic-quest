@@ -10,12 +10,17 @@
  *
  * The host gets one record for the item: right on the first try, or right on a new set without help.
  * Anything else is a miss for the notebook. `help` keeps the first try, the retry and the new examples apart.
+ *
+ * In kid mode the item and each new example are drawn as their kid-only alternate when they have one (kidItemOf); the
+ * new examples are still made from the classic item, so the stop's generators see what they made.
  */
 import { useMemo, useRef, useState } from 'react';
 import { freshCheckSet } from '../../engine/fresh';
 import type { Item, StopDef } from '../../engine/types';
 import type { AnswerRecord, ItemMode } from './contracts';
 import { ItemView } from './ItemView';
+import { useKidMode } from '../kidMode';
+import { autoSay, kidItemOf, kidItemSpeech } from '../kidPlay';
 
 export interface LearnItemProps {
   stop: StopDef;
@@ -44,6 +49,15 @@ const MODE: ItemMode = 'learn';
 
 export function LearnItem({ stop, item, seed, readAloud, kicker, nextLabel = 'Next', autoFocus = true, onDone, onMiss, priorMiss = false, freshFor }: LearnItemProps) {
   const [step, setStep] = useState<Step>({ at: 'first' });
+  const kidMode = useKidMode();
+  /** Open a new example; in kid mode it starts reading by itself (this runs inside the tap that opened it). */
+  const openFresh = (next: Extract<Step, { at: 'fresh' }>) => {
+    setStep(next);
+    const it = next.set[next.i];
+    if (it) autoSay(kidMode, kidItemSpeech(kidItemOf(it, kidMode)));
+  };
+  /** What the first try draws: the item, or its kid-only alternate in kid mode (the same object every render). */
+  const firstItem = kidItemOf(item, kidMode);
   const first = useRef<AnswerRecord | null>(null);
   const shown = useRef<Item[]>([]);
   const tally = useRef({ fresh: 0, misses: 0, hint: false, simpler: false });
@@ -86,7 +100,7 @@ export function LearnItem({ stop, item, seed, readAloud, kicker, nextLabel = 'Ne
     if (r.firstTry || (boardOnly(r) && r.correct)) return finish(false);
     const set = newSet(1);
     if (!set.length) return finish(false);
-    setStep({ at: 'fresh', round: 1, set, i: 0 });
+    openFresh({ at: 'fresh', round: 1, set, i: 0 });
   };
 
   const afterFresh = (s: Extract<Step, { at: 'fresh' }>, r: AnswerRecord) => {
@@ -95,7 +109,7 @@ export function LearnItem({ stop, item, seed, readAloud, kicker, nextLabel = 'Ne
     t.hint ||= !!r.help?.hint;
     t.simpler ||= !!r.help?.simpler;
     if (r.correct) {
-      if (s.i + 1 < s.set.length) return setStep({ ...s, i: s.i + 1 });
+      if (s.i + 1 < s.set.length) return openFresh({ ...s, i: s.i + 1 });
       // The whole set is right. It counts only without a hint in this round.
       return finish(!roundHint.current);
     }
@@ -104,13 +118,13 @@ export function LearnItem({ stop, item, seed, readAloud, kicker, nextLabel = 'Ne
     const set = newSet(s.round + 1);
     if (!set.length) return finish(false);
     roundHint.current = false;
-    setStep({ at: 'fresh', round: s.round + 1, set, i: 0 });
+    openFresh({ at: 'fresh', round: s.round + 1, set, i: 0 });
   };
 
   const firstView = useMemo(
     () => (
       <ItemView
-        item={item}
+        item={firstItem}
         mode={MODE}
         readAloud={readAloud}
         kicker={kicker}
@@ -124,17 +138,19 @@ export function LearnItem({ stop, item, seed, readAloud, kicker, nextLabel = 'Ne
     ),
     // The first view lives until the new examples start.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [item],
+    [firstItem],
   );
 
   if (step.at === 'first') return firstView;
 
   const s = step;
-  const current = s.set[s.i];
+  const current = kidItemOf(s.set[s.i], kidMode);
   const many = s.set.length > 1;
+  /** Kid mode draws a new example with its own kid layer: no note and no kicker above it. */
+  const kidHere = !!kidMode && !!current.kid;
   return (
     <div className="play-stack-sm">
-      {s.i === 0 && (
+      {s.i === 0 && !kidHere && (
         <p className="play-fresh-note" role="status">
           {s.round === 1
             ? many

@@ -14,7 +14,7 @@
 import { syncWhyWrong } from '../../teach';
 import type { ChainFrame, ChainScene } from '../../scenes/chain';
 import type { ChainToken } from '../../scenes/common';
-import type { Choice, ChoiceFeedback, ChooseItem, ErrorTag, Item, ItemMeta, NumberItem, Phase, Rng, Teach, TeachCase } from '../../types';
+import type { Choice, ChoiceFeedback, ChooseItem, Color, ErrorTag, Item, ItemMeta, KidItem, KidScene, NumberItem, Phase, Picto, Rng, Shape, Teach, TeachCase, Thing } from '../../types';
 
 export const STOP = 14;
 export const L1 = 's14.l1';
@@ -210,6 +210,119 @@ export const madeLine = (s: Skin) => `${s.chain} is made by repeating a block.`;
 export const meantLine = (m: ChainModel) => `${m.skin.chain} is meant to repeat the block ${unitText(m)}.`;
 export const seenLine = (s: Skin) => `Nobody says how ${chainL(s)} was made.`;
 
+// ---------- the kid layer (Grades 1 to 3, docs/KID-JOURNEY.md) ----------
+//
+// Beside the classic text, never instead of it: a short prompt, one line after a miss, one under "Yes!", a hint of at
+// most 8 words and a small solved twin for "Show me". Star Chain (s14.l1) and Repair Bench (s14.l2) are Grade 1 rounds:
+// at most 12 words a screen with the header ("Round k of n", 4 words) and the buttons, so a prompt of at most 4 words
+// beside three answer tiles and Check, a miss line of at most 4, a "Show me" twin of at most 6 and a "Yes!" line of at
+// most 6. Echo Bells (s14.l3) is Grade 2 (20 words). A kid chain is a picture (the chain scene draws no words in kid
+// mode, see ChainScene.tsx): shape and color pieces as their cards, a sound, a bell, a move, a class or a kid of a
+// rota as its pictogram, and a letter as its letter tile (tokenArt). The kid words say "part" for a block, "spot" for a
+// position, "unit" (named in Star Chain), "rule" (named in Repair Bench) and "pattern" for a structure (named in Echo
+// Bells).
+//
+// Kid rendering round 3 (every screen in budget, docs/KID-JOURNEY.md "Round 2 fields"): answer tiles print no words
+// (Choice.word '', read aloud by their labels); a block length or a spot is a ten frame of dots; Repair Bench draws
+// its rule as pictures above the chain (KidItem.scene, keep); and an item whose classic answers are sentences, or
+// whose faded frame is a sentence, has a kid-only alternate (KidItem.alt) on the same chain with its answer computed
+// here: Star Chain's Explain asks yes or no about the block, the unit's length is tiles, not the pad (the pad alone is
+// 11 words, over Grade 1's 8), Repair Bench's Explain asks yes or no about the rule, Echo Bells' Explain asks yes or no
+// about one reason, and its letter chains become the block in letters.
+
+/**
+ * The pictogram of a sound, a bell, a move, a class or a kid of a rota, by its caption (shape and color pieces are
+ * cards).
+ */
+const TOKEN_ART: Readonly<Record<string, Picto>> = {
+  clap: 'sound-clap', tap: 'sound-tap', stomp: 'sound-stomp', 'high bell': 'bell-high', 'low bell': 'bell-low',
+  jump: 'move-jump', spin: 'move-spin', hop: 'move-hop', Art: 'class-art', Gym: 'class-gym', Music: 'class-music',
+  Ava: 'kid-ava', Ben: 'kid-ben', Cal: 'kid-cal', Dee: 'kid-dee', Kai: 'kid-kai', Lia: 'kid-lia', Max: 'kid-max', Mia: 'kid-mia', Sam: 'kid-sam', Zoe: 'kid-zoe',
+  // a letter is its tile (each letter alone would be a word on the screen)
+  K: 'chain-letter-k', M: 'chain-letter-m', P: 'chain-letter-p', S: 'chain-letter-s', T: 'chain-letter-t', R: 'chain-letter-r',
+  D: 'chain-letter-d', G: 'chain-letter-g', N: 'chain-letter-n', F: 'chain-letter-f', H: 'chain-letter-h', L: 'chain-letter-l',
+  A: 'guess-tile-a', B: 'guess-tile-b', C: 'guess-tile-c',
+};
+
+/** The picture a kid chain draws for a piece that is a word (a sound, a bell, a move, a class, a name) or a letter, or none. */
+export const tokenArt = (t: ChainToken): Picto | undefined => (t.shape && t.color ? undefined : TOKEN_ART[t.label]);
+
+/** A piece's picture on a kid answer tile: its shape card, or its pictogram (a letter is its tile). */
+export function pieceArt(s: Skin, i: number): Picto | undefined {
+  const t = s.pieces[i].token;
+  if (t.shape && t.color) return `card-big-${t.color}-${t.shape}`;
+  return TOKEN_ART[t.label];
+}
+
+/** A spot in kid words: "spot" for a position, else the skin's own word ("beat", "day", "note", "step"). */
+const kidPos = (s: Skin) => (s.pos === 'position' ? 'spot' : s.pos);
+
+/** A count (a block length, a spot) as a kid tile's picture: a ten frame with that many dots. */
+const dots = (n: number): Picto => `ten-frame-${n}` as Picto;
+
+/** Repair Bench's rule in kid mode: a sign that says "Rule", then the rule's pieces, drawn above the chain. */
+const kidRule = (m: ChainModel): KidScene => ({ kind: 'pictos', rows: [[{ art: 'signpost', word: 'Rule' }, ...m.unit.map((i) => ({ art: pieceArt(m.skin, i)! }))]], keep: true });
+
+/**
+ * A kid-only alternate (KidItem.alt) of a classic item: the same item (id, chain, skill, explain, teach, meta) asked
+ * as a choose item with the given choices, answer and feedback, without the classic frame, with its own kid block.
+ */
+function kidAlt(base: Item, choices: Choice[], answer: string, feedback: Record<string, ChoiceFeedback>, kid: KidItem, errorTags: Record<string, ErrorTag> = {}): ChooseItem {
+  const { kind: _kind, frame: _frame, kid: _kid, ...rest } = base as Item & Record<string, unknown>;
+  for (const k of ['answer', 'choices', 'feedback', 'whyWrong', 'digits', 'unit']) delete (rest as Record<string, unknown>)[k];
+  return syncWhyWrong({ ...(rest as Omit<ChooseItem, 'kind' | 'choices' | 'answer'>), kind: 'choose', choices, answer, feedback, errorTags, kid });
+}
+
+/** A classic item with its kid-only alternate. */
+const withAlt = <T extends Item>(item: T, alt: Item): T => ({ ...item, kid: { ...item.kid!, alt } });
+
+/**
+ * The twins "Show me" draws: shape cards in a row (a red circle and a yellow square, a pair no quiz chain uses, so a
+ * twin never shows the quiz's own chain). 'r' red circle, 'y' yellow square, 'h' a face-down card for a gap.
+ */
+const twinCard = (k: number, c: string): Thing => {
+  const [color, shape]: [Color, Shape] = c === 'y' ? ['yellow', 'square'] : ['red', 'circle'];
+  return c === 'h' ? { id: `kt${k}`, shape: 'circle', color: 'red', size: 'big', hidden: true } : { id: `kt${k}`, shape, color, size: 'big' };
+};
+const twinRow = (cards: string): Thing[] => [...cards].map((c, k) => twinCard(k, c));
+
+/** Star Chain and Repair Bench's twins: a label and a note of six words at most together. */
+const KID_SHOW = {
+  why: { label: 'Red alone?', things: twinRow('ryry'), note: 'Breaks at spot 2.' },
+  blank: { label: 'The gap?', things: twinRow('ryrhr'), note: 'Yellow: red, yellow repeats.' },
+  next: { label: 'What comes next?', things: twinRow('ryryr'), note: 'Yellow comes next.' },
+  far: { label: 'Spot 6?', things: twinRow('ryry'), note: 'Count on: yellow.' },
+  unit: { label: 'Unit: red, yellow.', things: twinRow('ryryry'), note: 'The shortest part.' },
+  length: { label: 'Red, yellow repeats.', things: twinRow('ryryry'), note: 'Unit of 2.' },
+  repair: { label: 'Spot 6 breaks.', things: twinRow('ryryrr'), note: 'Yellow goes there.' },
+  never: { label: 'Repeats?', things: twinRow('ryyrr'), note: 'No, every part breaks.' },
+  always: { label: 'Repeats?', things: twinRow('ryryry'), note: 'Yes, red, yellow fits all.' },
+} as const satisfies Record<string, TeachCase>;
+
+/** The hint for a break: check every part. */
+const KID_CHECK_ALL = 'Check each part, all the way.';
+
+/** Which spots of a block match, in kid words: "Spots 2 and 3 match." (Echo Bells, Grade 2). */
+function kidMatches(st: string): string {
+  const pairs: string[] = [];
+  [...st].forEach((c, i) => {
+    const first = st.indexOf(c);
+    if (first < i) pairs.push(`${first + 1} and ${i + 1}`);
+  });
+  if (!pairs.length) return 'No spots match.';
+  return pairs.length === 1 ? `Spots ${pairs[0]} match.` : `Spots ${pairs.join(', and ')} match.`;
+}
+
+/**
+ * Echo Bells' twin for "Show me": a block in other pieces (never the item's own skins) with another structure, read in
+ * letters: "Red, blue, red is A, B, A." and which spots match.
+ */
+function kidEchoShow(avoid: readonly SkinId[], st: string): TeachCase {
+  const tw = makeSkin((['colors', 'sounds', 'shapes'] as const).find((x) => !avoid.includes(x))!);
+  const other = st === 'ABA' ? 'ABB' : 'ABA';
+  return { label: `${cap(blockIn(tw, other))} is ${lettersOf(other)}.`, note: kidMatches(other) };
+}
+
 // ---------- item plumbing ----------
 
 interface Spec {
@@ -229,6 +342,8 @@ interface Spec {
 interface Parts {
   prompt: string;
   scene: ChainScene;
+  /** The kid layer (Grades 1 to 3). */
+  kid?: KidItem;
   explain: string;
   teach: Teach;
   hints: string[];
@@ -275,6 +390,7 @@ function common(spec: Spec, p: Parts, answerType: ItemMeta['answerType']) {
     ...(p.frame ? { frame: p.frame } : {}),
     ...(p.tags?.length ? { tags: p.tags } : {}),
     ...(spec.rubric ? { rubric: spec.rubric.level } : {}),
+    ...(p.kid ? { kid: p.kid } : {}),
   };
 }
 
@@ -289,10 +405,17 @@ function chooseOrdered(spec: Spec, p: Parts, choices: Choice[], answer: string, 
   return syncWhyWrong(item);
 }
 
-const pieceChoices = (s: Skin, idx: readonly number[]): Choice[] => uniq(idx).sort((a, b) => a - b).map((i) => ({ id: `pc${i}`, label: lbl(s, i) }));
+/** One choice per kind of piece, in order; each with its picture (Choice.art) when every kind has one, for kid tiles. */
+function pieceChoices(s: Skin, idx: readonly number[]): Choice[] {
+  const kinds = uniq(idx).sort((a, b) => a - b);
+  const arts = kinds.map((i) => pieceArt(s, i));
+  return kinds.map((i, k) => ({ id: `pc${i}`, label: lbl(s, i), ...(arts.every(Boolean) ? { art: arts[k], word: '' } : {}) }));
+}
 const pieceOf = (id: string) => Number(id.slice(2));
 
 const FIT_WORDS = { truth: 'fits', untruth: 'breaks' } as const;
+/** A kid alternate's yes and no (drawn as a check tile and a cross tile). */
+const YES_NO_CHOICES: Choice[] = [{ id: 'yes', label: 'Yes' }, { id: 'no', label: 'No' }];
 const YES_WORDS = { truth: 'yes', untruth: 'no' } as const;
 
 /** A worked case: repeat the first `len` pieces and see where the block breaks. */
@@ -427,7 +550,7 @@ export function unitWhyItem(rng: Rng, o: StarOpts = {}): ChooseItem {
       example: breakCase(m, L),
     },
   };
-  return chooseItem(
+  const item = chooseItem(
     rng,
     {
       lesson: o.lesson ?? L1, skill: 's14.unit-why', phase, level: levelOf(pattern), twin: 's14.l1.unit-why', metaSkill: 'Track 1 · why a block is not the unit',
@@ -442,6 +565,7 @@ export function unitWhyItem(rng: Rng, o: StarOpts = {}): ChooseItem {
       hints: ['Repeat the block under the chain, one piece at a time.', `Does the block fit ${pos(s, p)}?`, twin.line],
       hintCase: twin.kase,
       errorTags: { longest: 'oversized-unit', ends: 'copy-last' },
+      kid: { prompt: `Why is “${block}” not the unit?`, nope: `Check every ${kidPos(s)}.`, yes: `It breaks at one ${kidPos(s)}.`, show: KID_SHOW.why, hint: `Repeat it. Does every ${kidPos(s)} fit?` },
     },
     [
       { id: 'fits', label: `Repeating that block would put ${an(s, exp)} ${at(s, p)}, but ${pos(s, p)} is ${an(s, act)}.` },
@@ -451,11 +575,34 @@ export function unitWhyItem(rng: Rng, o: StarOpts = {}): ChooseItem {
     'fits',
     feedback,
   );
+  // Kid mode: yes or no, does the block fit every spot? (It breaks at position p, so no.)
+  const fits = blockFits(m.seq, L);
+  const alt = kidAlt(
+    item,
+    YES_NO_CHOICES,
+    fits ? 'yes' : 'no',
+    {
+      [fits ? 'no' : 'yes']: {
+        headline: `“${block}” does not fit every ${s.piece}. It breaks ${at(s, p)}.`,
+        detail: [`Repeating it puts ${an(s, exp)} ${at(s, p)}, but ${pos(s, p)} is ${an(s, act)}.`, `The unit is ${unitText(m)}.`],
+        example: breakCase(m, L),
+      },
+    },
+    { prompt: `Does “${block}” fit every ${kidPos(s)}?`, nope: `Check every ${kidPos(s)}.`, yes: `It breaks at one ${kidPos(s)}.`, show: KID_SHOW.why, hint: `Repeat it. Does every ${kidPos(s)} fit?` },
+  );
+  return withAlt(item, alt);
 }
 
 export interface PositionOpts extends StarOpts {
   /** 'blank': the faded item (the unit boxed, one spot blank, a sentence frame); 'next': the next piece; 'far': a spot past the end. */
   ask: 'blank' | 'next' | 'far';
+}
+
+/** A position item in kid words (Grade 1: a prompt of four words at most beside up to three tiles). */
+function positionKid(ask: PositionOpts['ask'], s: Skin, p: number): KidItem {
+  if (ask === 'blank') return { prompt: 'What goes in the gap?', nope: 'Look at the box.', yes: 'The unit fills the gap.', show: KID_SHOW.blank, hint: 'The box shows the unit.' };
+  if (ask === 'next') return { prompt: 'What comes next?', nope: 'The unit starts again.', yes: 'The unit keeps going.', show: KID_SHOW.next, hint: 'Say the unit. Then say it again.' };
+  return { prompt: `Which is ${kidPos(s)} ${p}?`, nope: 'Count on by units.', yes: 'You counted on!', show: KID_SHOW.far, hint: 'Count on past the end, one by one.' };
 }
 
 /** Do: which piece goes at a position. Computed as piece ((p − 1) mod k) + 1 of the unit. */
@@ -503,7 +650,7 @@ export function positionItem(rng: Rng, o: PositionOpts): ChooseItem {
   const ask =
     o.ask === 'blank' ? `The box shows its unit. Which ${s.piece} goes ${at(s, p)}?` : o.ask === 'next' ? `Which ${s.piece} comes next, ${at(s, p)}?` : `Which ${s.piece} goes ${at(s, p)}?`;
   const scene: ChainScene = { kind: 'chain', tokens: tokensOf(m), stated: madeLine(s), ...(o.ask === 'blank' ? { unit: { start: 0, len: k }, blanks: [b] } : {}) };
-  return chooseOrdered(
+  const item = chooseOrdered(
     {
       lesson: o.lesson ?? L1, skill: 's14.extend', phase, level: levelOf(pattern), twin: 's14.l1.extend',
       metaSkill: o.ask === 'far' ? 'Track 1 · predict a far position' : 'Track 1 · extend a chain',
@@ -526,11 +673,14 @@ export function positionItem(rng: Rng, o: PositionOpts): ChooseItem {
       hintCase: twin.kase,
       errorTags,
       ...(o.ask === 'blank' ? { frame: `The unit is ${unitText(m)}, so ${pos(s, p)} is ___.` } : {}),
+      kid: positionKid(o.ask, s, p),
     },
     choices,
     `pc${ans}`,
     feedback,
   );
+  // Kid mode: the faded item without its frame (a sentence of ten words); the box and the gap say the same.
+  return o.ask === 'blank' ? withAlt(item, kidAlt(item, item.choices, item.answer, item.feedback ?? {}, item.kid!, item.errorTags)) : item;
 }
 
 /** The tag every Star Chain pack's trap item carries (LessonDef.pass include). */
@@ -602,8 +752,9 @@ export function unitItem(rng: Rng, o: UnitOpts = {}): ChooseItem {
       hintCase: twin.kase,
       errorTags,
       tags: trap ? [LONGER_BLOCK.tag] : [],
+      kid: { prompt: 'Which part is the unit?', nope: 'Shortest part that fits.', yes: 'The shortest part that repeats.', show: KID_SHOW.unit, hint: 'Try the shortest part first.' },
     },
-    lengths.map((L) => ({ id: `len${L}`, label: label(L) })),
+    lengths.map((L) => ({ id: `len${L}`, label: label(L), art: dots(L), word: '' })),
     `len${k}`,
     feedback,
   );
@@ -654,6 +805,7 @@ export function unitLengthItem(rng: Rng, o: StarOpts = {}): NumberItem {
         hints: [`Compare the first two ${s.pieces_} with the next two.`, `Try a block of ${k - 1}. Does it fit every ${s.piece}?`, twin.line],
         hintCase: twin.kase,
         errorTags,
+        kid: { prompt: `How many ${s.pieces_} in the unit?`, nope: 'Find the shortest part.', yes: 'The shortest part that repeats.', show: KID_SHOW.length, hint: 'Try a short part. Does it fit?' },
       },
       'number',
     ),
@@ -662,7 +814,18 @@ export function unitLengthItem(rng: Rng, o: StarOpts = {}): NumberItem {
     unit: s.pieces_,
     feedback,
   };
-  return syncWhyWrong(item);
+  syncWhyWrong(item);
+  // Kid mode: the length as dot tiles (a block that breaks, the unit, twice the unit), since the pad alone is 11 words.
+  const lens = uniq([k > 1 ? k - 1 : k + 1, k, 2 * k]).sort((a, b) => a - b);
+  const alt = kidAlt(
+    item,
+    lens.map((L) => ({ id: String(L), label: `${L} ${L === 1 ? s.piece : s.pieces_}`, art: dots(L), word: '' })),
+    String(k),
+    Object.fromEntries(lens.filter((L) => L !== k).map((L) => [String(L), feedback[String(L)]])),
+    item.kid!,
+    Object.fromEntries(lens.filter((L) => errorTags[String(L)]).map((L) => [String(L), errorTags[String(L)]])),
+  );
+  return withAlt(item, alt);
 }
 
 // ---------- Repair Bench (s14.l2) ----------
@@ -776,7 +939,7 @@ export function repairWhyItem(rng: Rng, o: RepairOpts = {}): ChooseItem {
   const e = range(1, m.b - 1).filter((i) => m.seq[i] !== m.seq[i - 1] && i !== m.b);
   const ei = e.find((i) => i >= k) ?? e[0];
   const twin = repairTwin(rng, s.id);
-  return chooseItem(
+  const item = chooseItem(
     rng,
     {
       lesson: L2, skill: 's14.repair-why', phase, level: 2, twin: 's14.l2.repair-why', metaSkill: 'Track 1 · explain a break',
@@ -791,6 +954,7 @@ export function repairWhyItem(rng: Rng, o: RepairOpts = {}): ChooseItem {
       hints: [`Check one block at a time: ${s.pos}s 1 to ${k}, then ${k + 1} to ${2 * k}.`, 'Did you check the last block too?', twin.line],
       hintCase: twin.kase,
       errorTags: { start: 'error-near-end', neighbor: 'local-only' },
+      kid: { prompt: 'Right all the way? Why?', nope: 'Check to the end.', yes: `One ${kidPos(s)} breaks the rule.`, show: KID_SHOW.repair, hint: KID_CHECK_ALL },
     },
     [
       { id: 'unit', label: `No. The unit puts ${an(s, exp)} ${at(s, m.b + 1)}, but it is ${an(s, act)}.` },
@@ -811,6 +975,23 @@ export function repairWhyItem(rng: Rng, o: RepairOpts = {}): ChooseItem {
       },
     },
   );
+  // Kid mode: yes or no, does every part keep the rule (drawn above the chain)? A piece breaks it, so no.
+  const keeps = breakAgainst(m.seq, m.unit) < 0;
+  const alt = kidAlt(
+    item,
+    YES_NO_CHOICES,
+    keeps ? 'yes' : 'no',
+    {
+      [keeps ? 'no' : 'yes']: {
+        headline: `One ${s.piece} breaks the rule, in block ${blk}.`,
+        detail: [`Check every block, all the way to the end.`, `In block ${blk}, ${pos(s, m.b + 1)} should be ${an(s, exp)}, but it is ${an(s, act)}.`],
+        example: repairCase(m),
+      },
+    },
+    { prompt: 'Does every part keep the rule?', nope: 'Check to the end.', yes: `One ${kidPos(s)} breaks the rule.`, show: KID_SHOW.repair, hint: KID_CHECK_ALL, scene: kidRule(m) },
+    keeps ? {} : { yes: 'error-near-end' },
+  );
+  return withAlt(item, alt);
 }
 
 /** Do (the trap when nearEnd): which spot breaks the stated rule. "None" is a choice; missing a late break is tagged. */
@@ -827,7 +1008,8 @@ export function findItem(rng: Rng, o: RepairOpts = {}): ChooseItem {
   const looks = range(1, m.b - 2).filter((i) => m.seq[i] !== m.seq[i - 1]);
   const local = looks.length ? rng.pick(looks) : -1;
   const spots = uniq([m.b + 1, before, ...(local >= 0 ? [local + 1] : [])]).sort((a, b) => a - b);
-  const choices: Choice[] = [...spots.map((p) => ({ id: `pos${p}`, label: Pos(s, p) })), { id: 'none', label: 'None: it repeats all the way' }];
+  // Kid tiles: a spot is a ten frame of its number of dots; "none" is a check (it all fits).
+  const choices: Choice[] = [...spots.map((p) => ({ id: `pos${p}`, label: Pos(s, p), art: dots(p), word: '' })), { id: 'none', label: 'None: it repeats all the way', art: 'check', word: '' }];
   const errorTags: Record<string, ErrorTag> = { [`pos${before}`]: 'off-by-one', ...(local >= 0 ? { [`pos${local + 1}`]: 'local-only' as const } : {}), ...(nearEnd ? { none: 'error-near-end' as const } : {}) };
   const feedback: Record<string, ChoiceFeedback> = {
     none: {
@@ -862,6 +1044,7 @@ export function findItem(rng: Rng, o: RepairOpts = {}): ChooseItem {
       hintCase: twin.kase,
       errorTags,
       tags: nearEnd ? [NEAR_END.tag] : [],
+      kid: { prompt: `Which ${kidPos(s)} breaks the rule?`, nope: 'Check to the end.', yes: 'You checked to the end!', show: KID_SHOW.repair, hint: KID_CHECK_ALL, scene: kidRule(m) },
     },
     choices,
     `pos${m.b + 1}`,
@@ -893,7 +1076,7 @@ export function fixItem(rng: Rng, o: RepairOpts & { framed?: boolean } = {}): Ch
   const prompt = o.framed
     ? `${meantLine(m)} ${Pos(s, m.b + 1)} breaks the rule. Which ${s.piece} belongs there?`
     : `${meantLine(m)} One ${s.piece} breaks the rule. Which ${s.piece} belongs in its place?`;
-  return chooseOrdered(
+  const item = chooseOrdered(
     {
       lesson: L2, skill: 's14.repair-fix', phase, level: 2, twin: 's14.l2.repair-fix', metaSkill: 'Track 1 · fix a break',
       rule: repairRule(m), task: o.framed ? 'fix a break (faded)' : 'fix a break', rep: s.rep, difficulty: o.framed ? 1 : 2,
@@ -906,11 +1089,21 @@ export function fixItem(rng: Rng, o: RepairOpts & { framed?: boolean } = {}): Ch
       hints: [o.framed ? `Which piece of its block is ${pos(s, m.b + 1)}?` : `Find the break first. Check one block at a time.`, `Take one away from ${m.b + 1}. Then count whole blocks of ${k}.`, twin.line],
       hintCase: twin.kase,
       ...(o.framed ? { frame: `The unit puts ___ ${at(s, m.b + 1)}.` } : {}),
+      kid: {
+        prompt: o.framed ? 'Which one goes there?' : 'Which fixes it?',
+        nope: 'What should go there?',
+        yes: 'Now it repeats again.',
+        show: KID_SHOW.repair,
+        hint: o.framed ? `Say the unit up to that ${kidPos(s)}.` : 'Find the one that breaks first.',
+        scene: kidRule(m),
+      },
     },
     choices,
     `pc${exp}`,
     feedback,
   );
+  // Kid mode: the faded fix without its frame (the flag on the chain marks the spot).
+  return o.framed ? withAlt(item, kidAlt(item, item.choices, item.answer, item.feedback ?? {}, item.kid!, item.errorTags)) : item;
 }
 
 /** A chain that starts like a repeat and then no block of up to half its length fits (it is not made by repeating). */
@@ -998,6 +1191,10 @@ export function repeatOrNotItem(rng: Rng, o: { skin?: SkinId; phase?: Phase; ans
         note: 'No block fits, so this chain does not repeat.',
       },
       errorTags: answer === 'no' ? { yes: 'not-repeating' } : {},
+      kid:
+        answer === 'no'
+          ? { prompt: 'Does it repeat all the way?', nope: 'Every part breaks somewhere.', yes: 'Nothing repeats all the way.', show: KID_SHOW.never, hint: 'Try one, then two, then three.' }
+          : { prompt: 'Does it repeat all the way?', nope: 'One part fits all.', yes: 'One part repeats all the way.', show: KID_SHOW.always, hint: 'Try one, then two, then three.' },
     },
     [
       { id: 'yes', label: 'Yes. A block repeats all the way.' },
@@ -1086,7 +1283,7 @@ export function echoWhyItem(rng: Rng, o: { phase?: Phase; skin?: SkinId } = {}):
   const k = st.length;
   const block = blockIn(s, st);
   const twin = echoTwin(rng, s.id);
-  return chooseItem(
+  const item = chooseItem(
     rng,
     {
       lesson: L3, skill: 's14.echo-why', phase, level: 2, twin: 's14.l3.echo-why', metaSkill: 'Track 1 · explain a match',
@@ -1101,6 +1298,7 @@ export function echoWhyItem(rng: Rng, o: { phase?: Phase; skin?: SkinId } = {}):
       hints: ['Name each new kind of piece with the next letter: A, then B.', 'Which positions match each other?', twin.line],
       hintCase: twin.kase,
       errorTags: { count: 'appearance-match', first: 'local-only' },
+      kid: { prompt: `Why does it match “${lettersOf(st)}”?`, nope: 'Look at which spots match.', yes: 'The same spots match in both.', show: kidEchoShow([s.id], st), hint: 'Which spots match? Check both.' },
     },
     [
       { id: 'same', label: `In both, ${describeLower(st)}.` },
@@ -1121,6 +1319,28 @@ export function echoWhyItem(rng: Rng, o: { phase?: Phase; skin?: SkinId } = {}):
       },
     },
   );
+  // Kid mode: yes or no about one reason (the first of the shuffled reasons): is it why the block matches? Only "the
+  // same spots match" is.
+  const reason = item.choices[0].id;
+  const KID_REASON: Record<string, string> = { same: 'the same spots match', count: `both have ${NUM[k]} pieces`, first: 'both start with a new piece' };
+  const right = reason === 'same';
+  const alt = kidAlt(
+    item,
+    YES_NO_CHOICES,
+    right ? 'yes' : 'no',
+    right
+      ? { no: { headline: 'That is the reason: the same positions match.', detail: [`In both blocks, ${describeLower(st)}.`, 'That is what makes two blocks the same structure.'] } }
+      : { yes: item.feedback![reason] },
+    {
+      prompt: `Why “${lettersOf(st)}”? Because ${KID_REASON[reason]}?`,
+      nope: 'Look at which spots match.',
+      yes: right ? 'The same spots match in both.' : 'The reason is which spots match.',
+      show: kidEchoShow([s.id], st),
+      hint: 'Which spots match? Check both.',
+    },
+    !right && item.errorTags?.[reason] ? { yes: item.errorTags[reason] } : {},
+  );
+  return withAlt(item, alt);
 }
 
 /** Do: rebuild a chain in letters. Framed (faded): fill one letter of the block; unframed: pick the letter chain. */
@@ -1165,6 +1385,7 @@ export function rebuildItem(rng: Rng, o: { framed?: boolean; skin?: SkinId; phas
         hintCase: twin.kase,
         errorTags,
         frame: `${cap(blockIn(s, st))} becomes ${[...st.slice(0, blank)].join(', ')}, ___.`,
+        kid: { prompt: 'Which letter fits?', nope: 'Same kind, same letter. New kind, new letter.', yes: 'Same kind, same letter.', show: kidEchoShow([s.id], st), hint: 'First kind A, next new kind B.' },
       },
       ['A', 'B', 'C'].map((L) => ({ id: L, label: L })),
       right,
@@ -1184,7 +1405,7 @@ export function rebuildItem(rng: Rng, o: { framed?: boolean; skin?: SkinId; phas
       example: { label: `${cap(blockIn(s, st))} is ${lettersOf(st)}.`, truths: [{ who: `Same structure as ${lettersOf(f)}`, value: false }], words: YES_WORDS },
     };
   }
-  return chooseOrdered(
+  const item = chooseOrdered(
     { ...base, task: 'rebuild a chain in letters', difficulty: 2 },
     {
       prompt: `${prompt} Which letter chain has the same structure?`,
@@ -1194,11 +1415,22 @@ export function rebuildItem(rng: Rng, o: { framed?: boolean; skin?: SkinId; phas
       hints: ['Name each new kind of piece with the next letter: A, then B.', 'Which positions in the block match each other?', twin.line],
       hintCase: twin.kase,
       errorTags,
+      kid: { prompt: 'Which letters match the chain?', nope: 'Name each new kind with the next letter.', yes: 'Same kind, same letter.', show: kidEchoShow([s.id], st), hint: 'First kind A, next new kind B.' },
     },
     fam.map((f) => ({ id: f, label: chainOf(f) })),
     st,
     feedback,
   );
+  // Kid mode: the block in letters (the chain is the block twice), so each answer is three or four letters.
+  const alt = kidAlt(
+    item,
+    fam.map((f) => ({ id: f, label: lettersOf(f) })),
+    st,
+    feedback,
+    { prompt: 'Which letters match?', nope: 'Name each new kind with the next letter.', yes: 'Same kind, same letter.', show: kidEchoShow([s.id], st), hint: 'First kind A, next new kind B.' },
+    errorTags,
+  );
+  return withAlt(item, alt);
 }
 
 /**
@@ -1230,7 +1462,7 @@ export function matchItem(rng: Rng, o: { from: SkinId; to: SkinId; trap?: boolea
   const ask = from.id === 'abc'
     ? `Which ${noun} block has the same structure as “${fromBlock}”?`
     : `${from.chain} repeats the block ${fromBlock}. Which ${noun} block has the same structure?`;
-  return chooseItem(
+  const item = chooseItem(
     rng,
     {
       lesson: L3, skill: 's14.translate', phase, level: 2, twin: 's14.l3.translate', metaSkill: 'Track 1 · same structure, new pieces',
@@ -1245,11 +1477,24 @@ export function matchItem(rng: Rng, o: { from: SkinId; to: SkinId; trap?: boolea
       hintCase: twin.kase,
       errorTags,
       tags: o.trap ? [SAME_PIECES.tag] : [],
+      kid: {
+        prompt: from.id === 'abc' ? `Which is also ${lettersOf(st)}?` : 'Which one matches?',
+        nope: 'Look at which spots match.',
+        yes: 'Same pattern, new pieces!',
+        show: kidEchoShow([from.id, to.id], st),
+        hint: 'Which spots match in the chain?',
+      },
     },
     fam.map((f) => ({ id: f, label: blockIn(to, f) })),
     st,
     feedback,
   );
+  // Kid mode: each answer block drawn as a row of pictures behind its badge (one, two or three dots), above the chain;
+  // the tiles are the badges (read aloud by the blocks' words).
+  const badge = (i: number): Picto => `line-spot-${i + 1}` as Picto;
+  item.kid = { ...item.kid!, scene: { kind: 'pictos', keep: true, rows: item.choices.map((c, i) => [{ art: badge(i) }, ...unitOf(c.id).map((x) => ({ art: pieceArt(to, x)! }))]) } };
+  item.choices = item.choices.map((c, i) => ({ ...c, art: badge(i), word: '' }));
+  return item;
 }
 
 // ---------- worked examples for the cards and boards (fixed pieces, computed answers) ----------

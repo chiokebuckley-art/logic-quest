@@ -249,7 +249,199 @@ export interface CaseStep {
 export interface Choice {
   id: string;
   label: string;
+  /** The Kid Journey (Grades 1 to 3): the picture drawn on this choice's big tile. */
+  art?: Picto;
+  /**
+   * Kid mode only: the word (at most two) printed under this choice's picture tile; '' prints nothing. Without it the
+   * tile prints the label. The tile is always announced and read aloud by its label, never by this word.
+   */
+  word?: string;
 }
+
+// ---------- the Kid Journey (docs/KID-JOURNEY.md) ----------
+
+/** The nine grade bands of the Kid Journey: Grade 1 to Grade 8, then high school. */
+export type GradeId = 'g1' | 'g2' | 'g3' | 'g4' | 'g5' | 'g6' | 'g7' | 'g8' | 'hs';
+export const GRADE_IDS: readonly GradeId[] = ['g1', 'g2', 'g3', 'g4', 'g5', 'g6', 'g7', 'g8', 'hs'];
+
+/**
+ * The names of the small pictogram set a young reader sees (cards, tiles, buildings). Every name has a drawing in
+ * the pictogram component; builders may add names, and each new name needs its drawing.
+ */
+export type Picto =
+  | 'calendar' | 'cat' | 'cat-wings' | 'cloud-rain' | 'pizza' | 'sun' | 'moon' | 'star' | 'apple' | 'dog' | 'fish'
+  | 'bird' | 'tree' | 'house' | 'car' | 'ball' | 'cup' | 'book' | 'hat' | 'lamp' | 'telescope' | 'key' | 'flower'
+  | 'umbrella' | 'check' | 'cross' | 'question' | 'chest'
+  // stop 1 (True or False?): its cards' rows, a face-down card, the NOT flip, the answer tiles, a sign, and the doors,
+  // caves and boxes of the sign puzzles (a picture answer tile, like the chest)
+  | 'cards-look' | 'cards-cant' | 'cards-settled' | 'cards-twin' | 'card-face-down' | 'cards-every' | 'cards-tie'
+  | 'not-flip' | 'verdict-true' | 'verdict-false' | 'verdict-cant' | 'signpost' | 'door' | 'cave' | 'box'
+  // stop 2 (NOT, AND, OR): one shape card by size, color and shape (a picture answer tile), the rule pictures, and a
+  // count answer tile (a ten frame with one to ten dots)
+  | `card-${Size}-${Color}-${Shape}`
+  | 'rule-features' | 'rule-red-in' | 'rule-not-red' | 'rule-not-circle' | 'rule-and-join' | 'rule-and-only'
+  | 'rule-and-smaller' | 'rule-two-checks' | 'rule-or-join' | 'rule-or-both' | 'rule-or-bigger' | 'rule-brackets'
+  | 'rule-inside' | 'rule-not-inside' | 'rule-not-red-not-big' | 'rule-switch'
+  | `ten-frame-${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10}`
+  // stop 3 (Line Up): people by height and in a line, chains, spots and blocks, the must / might / can’t answer tiles
+  // and the spot answer tiles (a badge with one to four dots)
+  | 'line-compare' | 'line-chain' | 'line-proof' | 'line-cross-out' | 'line-fork' | 'line-look' | 'line-split'
+  | 'line-gap' | 'line-pair' | 'line-orders' | 'line-must' | 'line-might' | 'line-cant' | 'line-all-some-none'
+  | 'line-front' | 'line-middle' | 'line-pin' | 'line-next' | 'line-swap' | `line-spot-${1 | 2 | 3 | 4}`
+  | 'line-slots' | 'line-sure' | 'line-flag' | 'line-checks' | 'line-block' | 'line-turn'
+  // and its kid clue scenes: who a name is (a kid, a wizard, a dragon, a robot, a letter tile), then the relation a
+  // clue puts between its names (taller, longer wings, before, left of, right before, just left of, next to, not next
+  // to, between, first, last, not first, not last; a place is its spot badge)
+  | 'line-who-kid' | 'line-who-wizard' | 'line-who-dragon' | 'line-who-robot' | 'line-who-letter'
+  | 'line-rel-taller' | 'line-rel-longer' | 'line-rel-before' | 'line-rel-left' | 'line-rel-right-before'
+  | 'line-rel-just-left' | 'line-rel-next' | 'line-rel-not-next' | 'line-rel-between' | 'line-rel-first'
+  | 'line-rel-last' | 'line-rel-not-first' | 'line-rel-not-last'
+  // stop 4 (Grid Detective): small grids with their marks, and the answer tiles (a box of a 3 by 3 grid, or a row or a
+  // column of a 3 or 4 wide grid, lit)
+  | 'grid' | 'grid-marks' | 'grid-clue' | 'grid-one-each' | 'grid-or' | 'grid-row-left' | 'grid-col-left'
+  | 'grid-two-left' | 'grid-cross-one' | 'grid-col-look' | 'grid-count' | 'grid-spread-row' | 'grid-spread'
+  | 'grid-col-spread' | 'grid-spread-again' | 'grid-solved' | 'grid-outside' | 'grid-two-part' | 'grid-link'
+  | 'grid-link-not' | 'grid-carry' | 'grid-carry-back' | 'grid-both-ways' | 'grid-loop'
+  | 'grid-or-named' | 'grid-cross-apart' | 'grid-cross-down' | 'grid-cross-mid'
+  | `grid-box-${1 | 2 | 3}-${1 | 2 | 3}` | `grid-row-3-${1 | 2 | 3}` | `grid-row-4-${1 | 2 | 3 | 4}`
+  | `grid-col-3-${1 | 2 | 3}` | `grid-col-4-${1 | 2 | 3 | 4}`
+  // stop 4, kid forms: lesson 2's board marks (the row's grid with its crosses, and the line to count or the box to
+  // mark ringed: GRID_ASK in the pictogram component), and lesson 3's answer tiles for a spread (a row and a column
+  // lit together, or every box outside them)
+  | `grid-ask-${'apart' | 'down'}-${'count' | 'top' | 'bottom'}`
+  | `grid-ask-row-${'box' | 'count' | 'last'}` | 'grid-ask-top-row'
+  | `grid-ask-col-${'count' | 'top' | 'bottom' | 'crossed' | 'count-one' | 'last'}` | `grid-ask-off-${'count' | 'top'}`
+  | `grid-plus-3-${1 | 2 | 3}-${1 | 2 | 3}` | `grid-plus-4-${1 | 2 | 3 | 4}-${1 | 2 | 3 | 4}`
+  | `grid-out-3-${1 | 2 | 3}-${1 | 2 | 3}` | `grid-out-4-${1 | 2 | 3 | 4}-${1 | 2 | 3 | 4}`
+  // stop 7 (Pattern guesses): the four word tiles (a bag of five dots, the filled ones fit), the cards' draws and bags,
+  // and the boards' two bags; then the quiz items' kid scenes: a bag you can see into and one you cannot, and one thing
+  // of each kind (a dot of its color, a spell card, a letter tile; a shape is its card)
+  | 'guess-must' | 'guess-likely' | 'guess-unlikely' | 'guess-cant' | 'guess-reds' | 'guess-bag-six-one' | 'guess-break'
+  | 'guess-goes-back' | 'guess-bag-example' | 'guess-bag-twin'
+  | 'guess-bag-see' | 'guess-bag-hidden' | `guess-dot-${'red' | 'blue' | 'yellow' | 'pink' | 'gold'}`
+  | 'guess-fire' | 'guess-ice' | 'guess-star' | `guess-tile-${'a' | 'b' | 'c'}`
+  // stop 8 (All, Some, None): a card where two rings overlap, the four parts of two rings (the place answer tiles),
+  // three red circles (“some” can be all), and two rings with every triangle blue; the whole right ring lit (board 1's
+  // “in the Red ring?” mark, beside ring-part-b for “only in it?”)
+  | 'rings-overlap-card' | 'ring-part-a' | 'ring-part-both' | 'ring-part-b' | 'ring-part-out' | 'quant-some-all'
+  | 'rings-triangles-blue' | 'ring-in-b'
+  // stop 14 (First Lights): the cards' and boards' chains (a unit boxed, a part tried, a break, the rule over a part,
+  // a pattern in colors and bells, a dance), and the pieces a kid chain draws as pictures (sounds, bells, moves,
+  // classes, and the kids of a rota by name)
+  | 'chain-unit' | 'chain-try' | 'chain-far' | 'chain-seen' | 'chain-break' | 'chain-end' | 'chain-mess' | 'chain-star'
+  | 'chain-twin' | 'repair-part-ok' | 'repair-part-break' | 'echo-same' | 'echo-match' | 'echo-other' | 'echo-colors'
+  | 'echo-dance' | 'sound-clap' | 'sound-tap' | 'sound-stomp' | 'bell-high' | 'bell-low' | 'move-jump' | 'move-spin'
+  | 'move-hop' | 'class-art' | 'class-gym' | 'class-music'
+  | `kid-${'ava' | 'ben' | 'cal' | 'dee' | 'kai' | 'lia' | 'max' | 'mia' | 'sam' | 'zoe'}`
+  // and, for kid rendering round 3, a letter piece as its tile (A, B and C are stop 7's guess-tile pictures), and
+  // Repair Bench's letter board parts (the rule K, M, M drawn over a part that matches it, or over K, M, K)
+  | `chain-letter-${'k' | 'm' | 'p' | 's' | 't' | 'r' | 'd' | 'g' | 'n' | 'f' | 'h' | 'l'}`
+  | 'repair-kmm-ok' | 'repair-kmm-break'
+  // stop 15 (Rule Rise, Growing Staircase): the cards' staircases and lists, and the Explain item's four reasons
+  | 'stair-grow' | 'stair-far' | 'stair-next' | 'jump-list' | 'stair-told' | 'stair-pairs-center' | 'stair-add-two'
+  | 'stair-pairs-only' | 'stair-times'
+  // the shape cards ThingCard already draws
+  | 'circle' | 'square' | 'triangle'
+  // world buildings
+  | 'tower' | 'bridge' | 'castle' | 'lighthouse' | 'tent' | 'mill';
+
+/** One idea card in kid words: one short line, with a picture first. */
+export interface KidCard {
+  line: string;
+  /** A pictogram, or 'scene' to draw the card's own scene. */
+  art?: Picto | 'scene';
+}
+
+/** One guided board in kid words. */
+export interface KidBoard {
+  line: string;
+  /**
+   * The board's rows in kid words, one per row in the same order (given rows too, as {}). A young reader marks one
+   * row at a time; a row without a kid label shows its own label. A row with several marks to tap is marked one mark
+   * per page (row by row, mark by mark).
+   */
+  rows?: KidRow[];
+  /**
+   * Picture tiles for word options, keyed by option id ("must", "might", "keep"): a picture and at most one word
+   * under it. A yes-like / no-like pair keeps its check and cross tiles; an option without an entry prints its own
+   * label. Each tile is still announced by its option's classic label.
+   */
+  options?: Record<string, { art: Picto; word?: string }>;
+  /**
+   * A kid-only replacement step (same id) for a board whose classic step cannot fit (a case board with long signs, a
+   * grid with long names). In kid mode it is drawn and checked in place of the step; `rows` and `options` then
+   * describe its rows and options. Classic play never sees it.
+   */
+  alt?: DrillStep;
+  /** 'scene': draw the step's own scene (the rings, a grid) once, above the row to mark, so the row can be answered. */
+  scene?: 'scene';
+}
+
+/** One row of a guided board in kid words: a shorter label and a picture. A label of '' draws no label. */
+export interface KidRow {
+  label?: string;
+  art?: Picto;
+  /**
+   * The row's marks in kid words, one per mark in the row's order (given marks too, as {}): a label of at most 8
+   * words, or a picture. A mark without one shows its classic label (none when it is the row's only mark to tap).
+   */
+  marks?: KidMark[];
+}
+
+/** One mark of a guided board row in kid words: a short label, or a picture, or both. */
+export interface KidMark {
+  label?: string;
+  art?: Picto;
+}
+
+/** A lesson's kid layer, for players in Grades 1 to 3. It sits beside the classic text and never replaces it. */
+export interface KidLesson {
+  /** One per idea card, in the same order. */
+  cards: KidCard[];
+  /** One per drill step. */
+  board?: KidBoard[];
+  /** The one-line "you did it". */
+  star?: string;
+}
+
+/** An item's kid layer: the short prompt, one line after a miss, and the "Show me" picture. */
+export interface KidItem {
+  prompt: string;
+  nope: string;
+  show?: TeachCase;
+  /** The one line under "Yes!" after a right answer. */
+  yes?: string;
+  /**
+   * What the Hint button shows in kid mode: one line of at most 8 words. Without it, the hint is the `show` case
+   * drawn as a picture only (no note). The hint opens in place of the question, as its own small screen.
+   */
+  hint?: string;
+  // ---- kid rendering, round 2 (items) ----
+  /** What kid mode draws in place of the item's scene. Without it the item's own scene draws, as in classic play. */
+  scene?: KidScene;
+  /**
+   * A replacement item for kid mode only (kidItemOf in src/game/kidPlay.ts): same id, tags and skill, its answer
+   * computed from the same case by the generator, with its own kid block. For an item whose classic answers are
+   * whole sentences no rendering can fit. Classic play never sees it.
+   */
+  alt?: Item;
+}
+
+/** One pictogram of a kid scene, with at most one short word (a name) under it. */
+export interface KidPicto {
+  art: Picto;
+  word?: string;
+}
+
+/**
+ * A kid scene (KidItem.scene): rows of pictograms with a short word under each ('pictos'; `keep` draws them above the
+ * item's own scene instead of replacing it); the item's cards as plain card faces with no numbers and no names
+ * ('things'); or nothing ('none', the kid prompt and the answers carry the whole question).
+ */
+export type KidScene =
+  | { kind: 'pictos'; rows: KidPicto[][]; keep?: true }
+  | { kind: 'things' }
+  | { kind: 'none' };
 
 // ---------- line-up clues (stop 3) ----------
 
@@ -437,6 +629,8 @@ interface ItemBase {
   hints?: string[];
   /** The twin family: items that share it are matched twins (same structure, new numbers or materials). */
   twin?: string;
+  /** The kid layer (Grades 1 to 3). Generators of those rounds set it; the engine never invents kid text. */
+  kid?: KidItem;
 }
 
 /** The five phases of an Observatory lesson (See is the key-idea cards; the rest are items). */
@@ -860,6 +1054,8 @@ export interface LessonDef {
    * symbol bans in the tests skip this lesson's strings; the reading level still applies to its words.
    */
   symbols?: true;
+  /** The kid layer for players in Grades 1 to 3 (docs/KID-JOURNEY.md). */
+  kid?: KidLesson;
 }
 
 /**

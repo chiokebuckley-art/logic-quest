@@ -2,21 +2,29 @@
  * Ring 2 (Rule Rise): the staircase, the machine and the clock. Still frames only: a stepped scene shows what its
  * `reveal` (staircase) or `at` fields (machine) allow for the steps showing, and nothing depends on animation. Every
  * label is short and wraps, so the pictures fit a 320 px screen.
+ *
+ * Kid mode (Grades 1 to 3, docs/KID-JOURNEY.md): the staircase is a picture with no words. Its steps are rows of
+ * tiles (or beads, or seats), then "…" and a dashed "?" for the step asked about; a list with no tiles is its numbers
+ * in one row, then "?". The stated rule, the step names, the counts and the table go to screen readers only, and the
+ * kid prompt says the rule in a few words.
  */
 import type { ReactElement } from 'react';
 import type { StaircaseScene } from '../../../engine/scenes/staircase';
+import { useKidMode } from '../../kidMode';
 import type { MachineScene } from '../../../engine/scenes/machine';
 import type { ClockFace, ClockScene } from '../../../engine/scenes/clock';
 
 const plural = (n: number, [one, many]: [string, string]) => `${n} ${n === 1 ? one : many}`;
 
 export function StaircaseView({ scene, shown }: { scene: StaircaseScene; shown: number }) {
+  const kid = !!useKidMode();
   const at = scene.reveal ? scene.reveal[Math.max(0, Math.min(shown, scene.reveal.length - 1))] : undefined;
   const rows = at ? scene.rows.slice(0, at.rows) : scene.rows;
   const table = scene.table ? (at ? scene.table.slice(0, at.table) : scene.table) : [];
   const [hs, hc] = scene.head ?? ['Step', 'Tiles'];
   const rowLabel = (n: number) => (scene.rowName ? plural(n, scene.rowName) : `Step ${n}`);
   const skin = scene.skin ?? 'tiles';
+  if (kid) return <KidStairs scene={scene} rows={rows} table={table} head={[hs, hc]} rowLabel={rowLabel} skin={skin} />;
   return (
     <div className={`play-ob-stairs is-${skin}`}>
       <p className="play-ob-stated"><span className="play-drill-tag">{scene.tag ?? 'Construction'}</span> {scene.construction}</p>
@@ -53,6 +61,58 @@ export function StaircaseView({ scene, shown }: { scene: StaircaseScene; shown: 
             })}
           </ul>
         </div>
+      )}
+    </div>
+  );
+}
+
+/** The staircase in kid mode: a picture with no words (see the file note). */
+function KidStairs({ scene, rows, table, head: [hs, hc], rowLabel, skin }: {
+  scene: StaircaseScene;
+  rows: StaircaseScene['rows'];
+  table: NonNullable<StaircaseScene['table']>;
+  head: [string, string];
+  rowLabel(n: number): string;
+  skin: string;
+}) {
+  const ask = table.find((t) => t.count === null);
+  const lastRow = rows.length ? rows[rows.length - 1].step : 0;
+  /** What a screen reader hears: the rule, then the table in words. */
+  const said = [
+    `${scene.tag ?? 'Construction'}: ${scene.construction}`,
+    ...(scene.jump ? [`Each jump: ${scene.jump}.`] : []),
+    ...table.map((t) => `${hs} ${t.step}: ${t.count === null ? 'a blank to find' : `${t.count} ${hc.toLowerCase()}`}.`),
+  ].join(' ');
+  return (
+    <div className={`play-ob-stairs is-${skin} is-kid`}>
+      <p className="play-sr">{said}</p>
+      {rows.length > 0 ? (
+        <ol className="play-ob-stair-rows" aria-label="The steps">
+          {rows.map((r) => (
+            <li key={r.step} className="play-ob-stair-row">
+              <span className="play-ob-tiles" role="img" aria-label={`${rowLabel(r.step)}: ${r.cells.length} ${hc.toLowerCase()}`}>
+                {r.cells.map((c, k) => <span key={k} className={`play-ob-tile is-${c}`} />)}
+              </span>
+            </li>
+          ))}
+          {ask && ask.step > lastRow && (
+            <li className="play-ob-stair-row is-ask" aria-hidden="true">
+              {ask.step > lastRow + 1 && <span className="play-ob-kid-gap">…</span>}
+              <span className="play-ob-kid-num is-ask">?</span>
+            </li>
+          )}
+        </ol>
+      ) : (
+        table.length > 0 && (
+          <p className="play-ob-kid-seq" aria-hidden="true">
+            {table.flatMap((t, i) => {
+              const gap = i > 0 && t.step - table[i - 1].step > 1;
+              const cell = <span key={t.step} className={`play-ob-kid-num${t.count === null ? ' is-ask' : ''}`}>{t.count === null ? '?' : t.count}</span>;
+              const hop = i > 0 && !gap ? [<span key={`h${t.step}`} className="play-ob-kid-hop" />] : [];
+              return gap ? [<span key={`g${t.step}`} className="play-ob-kid-gap">…</span>, cell] : [...hop, cell];
+            })}
+          </p>
+        )
       )}
     </div>
   );

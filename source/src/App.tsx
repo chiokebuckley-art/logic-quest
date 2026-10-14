@@ -21,15 +21,25 @@ import { ArcadeScreen } from './game/screens/ArcadeScreen';
 import { GrownUpsScreen, ProgressScreen } from './game/screens/ProgressScreen';
 import { NotebookScreen } from './game/screens/NotebookScreen';
 import { SettingsScreen } from './game/screens/SettingsScreen';
+import { GradeScreen } from './game/screens/GradeScreen';
+import { WorldCheckScreen } from './game/screens/WorldCheckScreen';
+import { PlacementScreen } from './game/screens/PlacementScreen';
+import { BadgeScreen } from './game/screens/BadgeScreen';
 
-/** Lesson, check, practice and notebook-fixing screens hide the tab bar. The Players screen has none either. */
-function hidesNav(route: Route): boolean {
-  return route.name === 'players' || playing(route);
+/**
+ * Lesson, check, practice and notebook-fixing screens hide the tab bar. The Players screen has none either, nor do
+ * "Which grade are you in?" and the grade badge ceremony.
+ */
+export function hidesNav(route: Route): boolean {
+  return route.name === 'players' || route.name === 'grade' || route.name === 'badge' || playing(route);
 }
 
-/** Lessons, checks, practice and notebook fixes draw their own back header, so the game's top bar steps aside. */
-function playing(route: Route): boolean {
-  return route.name === 'lesson' || route.name === 'check' || route.name === 'evidence' || route.name === 'diagnostic' || (route.name === 'arcade' && !!route.practice) || (route.name === 'notebook' && !!route.fix);
+/**
+ * Lessons, checks (stop, world and placement), practice and notebook fixes draw their own back header, so the game's
+ * top bar steps aside and the device's Back acts like that header's back arrow.
+ */
+export function playing(route: Route): boolean {
+  return route.name === 'lesson' || route.name === 'check' || route.name === 'worldcheck' || route.name === 'placement' || route.name === 'evidence' || route.name === 'diagnostic' || (route.name === 'arcade' && !!route.practice) || (route.name === 'notebook' && !!route.fix);
 }
 
 /**
@@ -85,6 +95,10 @@ function Screen({ route }: { route: Route }) {
     case 'settings': return <SettingsScreen />;
     case 'evidence': return <EvidenceScreen route={route} />;
     case 'diagnostic': return <DiagnosticScreen />;
+    case 'grade': return <GradeScreen />;
+    case 'worldcheck': return <WorldCheckScreen route={route} />;
+    case 'placement': return <PlacementScreen />;
+    case 'badge': return <BadgeScreen grade={route.grade} />;
   }
 }
 

@@ -16,7 +16,7 @@
  */
 import { createRng } from '../rng';
 import { syncWhyWrong } from '../teach';
-import type { Choice, ChoiceFeedback, ChooseItem, Color, DrillMark, DrillOption, DrillRow, Rng, Shape, Size, Teach, TeachCase, Thing, Truth } from '../types';
+import type { Choice, ChoiceFeedback, ChooseItem, Color, DrillMark, DrillOption, DrillRow, DrillStep, KidItem, Picto, Rng, Shape, Size, Teach, TeachCase, Thing, Truth } from '../types';
 
 export const COLORS: readonly Color[] = ['red', 'blue', 'yellow'];
 export const SHAPES: readonly Shape[] = ['circle', 'square', 'triangle'];
@@ -962,6 +962,47 @@ export interface RowItemOptions {
   templates?: readonly RowTemplate[];
 }
 
+// ---------- the kid layer of a row item (Grades 1 to 3, docs/KID-JOURNEY.md) ----------
+//
+// Beside the classic text, never instead of it: the sentence alone as the prompt, the three answers as picture tiles
+// (a check, a cross and a question mark), one short line after a miss (four words at most, beside "Show me" and
+// "Try again") and a tiny sorted twin for "Show me" (a two-card row, six words at most).
+
+/** The pictures of the three answers, in kid mode. */
+const VERDICT_ART: Record<string, Picto> = { true: 'verdict-true', false: 'verdict-false', cant: 'verdict-cant' };
+
+const twinCard = (id: string, color: Color, shape: Shape, size: Size, hidden = false): Thing =>
+  hidden ? { id, shape, color, size, hidden: true } : { id, shape, color, size };
+/** The twin row of "Show me": a red circle and a face-down card. */
+const KID_TWIN_ROW: Thing[] = [twinCard('k1', 'red', 'circle', 'big'), twinCard('k2', 'red', 'circle', 'small', true)];
+
+const ROW_KID: Record<Verdict, { nope: string; yes: string; show: TeachCase }> = {
+  true: { nope: 'You can tell: true.', yes: 'The cards you see decide.', show: { label: '“There is a red card.”', things: KID_TWIN_ROW, note: 'True.' } },
+  false: { nope: 'You can tell: false.', yes: 'The cards you see decide.', show: { label: '“Every card is blue.”', things: KID_TWIN_ROW, note: 'False.' } },
+  cant: { nope: 'Both ways can happen.', yes: 'A face-down card could flip it.', show: { label: '“Every card is red.”', things: KID_TWIN_ROW, note: 'Can’t tell.' } },
+};
+
+/**
+ * "Show me" when the item asks the twin's own sentence: another sentence with the same answer on the same twin row
+ * (a circle shows, a square could be face down), so "Show me" never repeats the question.
+ */
+const ROW_KID_OTHER: Record<Verdict, TeachCase> = {
+  true: { label: '“There is a circle.”', things: KID_TWIN_ROW, note: 'True.' },
+  false: { label: '“Every card is yellow.”', things: KID_TWIN_ROW, note: 'False.' },
+  cant: { label: '“There is a square.”', things: KID_TWIN_ROW, note: 'Can’t tell.' },
+};
+
+/** A row item in kid words: the sentence, and the lines and twin for its answer. */
+export const rowKid = (text: string, verdict: Verdict): KidItem => {
+  const { show, ...lines } = ROW_KID[verdict];
+  return {
+    prompt: `“${text}”`,
+    ...lines,
+    show: show.label === `“${text}”` ? ROW_KID_OTHER[verdict] : show,
+    hint: 'Could a face-down card change it?',
+  };
+};
+
 /** The hint for a row item: one way to fill the face-down cards, already checked (its case card shows it). */
 export const ROW_HINT = 'Here is one way the face-down cards could be, already checked. Could another way change the answer?';
 
@@ -1004,13 +1045,16 @@ export function rowItem(rng: Rng, opts: RowItemOptions): Made {
       kind: 'choose',
       prompt,
       scene: { kind: 'things', things: row },
-      choices: VERDICT_CHOICES.map((c) => ({ ...c })),
+      // Kid mode: the three answers are a check, a cross and a question mark with no words under them (word ''), and
+      // the cards draw plain, with no position numbers (kid scene 'things'). Classic play reads neither.
+      choices: VERDICT_CHOICES.map((c) => ({ ...c, art: VERDICT_ART[c.id], word: '' })),
       answer: verdict,
       explain,
       feedback,
       hint: ROW_HINT,
       hintCase,
       teach,
+      kid: { ...rowKid(text, verdict), scene: { kind: 'things' } },
     };
     syncWhyWrong(item);
     if (conflict) item.conflict = true;
@@ -1778,6 +1822,215 @@ const PAIRS: readonly [string, string][] = [
   ['troll', 'elf'], ['wizard', 'knight'], ['dragon', 'fairy'], ['giant', 'wizard'], ['elf', 'dragon'],
 ];
 
+// ---------- the kid layer of a NOT item (Grades 1 to 3, docs/KID-JOURNEY.md) ----------
+
+/**
+ * "Show me" for a NOT item: the same kind of NOT on another color, or with another number, in six words at most. The
+ * color is one the statement does not use, and the number one it does not count to, so the twin never repeats the
+ * question.
+ */
+function kidNotShow(tag: string, s: Stmt): TeachCase {
+  const used = new Set(descsOf(s).map((d) => d.color));
+  const c = COLORS.find((x) => !used.has(x)) ?? 'red';
+  const k = s.t === 'count' ? s.k : 0;
+  switch (tag) {
+    case 'not-every': return { label: `NOT all ${c}: one is not.` };
+    case 'not-some': return { label: `NOT some ${c}: none are ${c}.` };
+    case 'not-none': return { label: `NOT no ${c}: one is ${c}.` };
+    case 'not-more': return { label: `NOT more ${c}: same or fewer.` };
+    case 'not-at-least': {
+      const n = k === 3 ? 'two' : 'three';
+      return { label: `NOT ${n} or more: under ${n}.` };
+    }
+    case 'not-exactly': return { label: `NOT exactly ${k === 2 ? 'three' : 'two'}: more, or fewer.` };
+    case 'not-first': return { label: `NOT first ${c}: first is not.` };
+    default: return { label: 'They never agree.' };
+  }
+}
+
+/** A NOT item in kid words. */
+export const notKid = (tag: string, s: Stmt): KidItem => ({
+  prompt: 'Find the NOT.',
+  nope: 'They can never agree.',
+  yes: 'They never agree.',
+  show: kidNotShow(tag, s),
+  hint: 'One is true, the other is false.',
+});
+
+// ---------- the kid-only NOT question (Grade 1, docs/KID-JOURNEY.md, "Round 2 fields for items") ----------
+//
+// A Grade 1 screen holds 8 words under its header, so a NOT item, whose answers are whole sentences, is asked in kid
+// mode as one yes/no question about one of its own answers, in the words the round's cards teach (“NOT all red: one is
+// not.”): “NOT all red: none are red?” The guided boards do the same, one answer per page. Whether the answer is the
+// NOT is computed (isExactOpposite), never typed. A statement or answer the kid words cannot say in a few words gets
+// no kid question (the item keeps its classic form).
+
+const KID_NUM = ['none', 'one', 'two', 'three', 'four', 'five', 'six'];
+const sameDesc = (a: Desc, b: Desc) => a.color === b.color && a.shape === b.shape && a.size === b.size;
+/** A one-feature desc as a kid noun: "red", "big", "circles" (or "circle"). Null for a desc of more than one feature. */
+function kidNoun(d: Desc, many: boolean): string | null {
+  const feats = (['color', 'size', 'shape'] as const).filter((f) => d[f]);
+  if (feats.length !== 1) return null;
+  return d.shape ? `${d.shape}${many ? 's' : ''}` : (d.color ?? d.size)!;
+}
+/** A one-feature desc after "is": "red", "big", "a circle". */
+const kidIs = (d: Desc): string | null => (d.shape ? (kidNoun(d, false) && withA(d.shape)) : kidNoun(d, false));
+
+/** The statement in kid words, after "NOT": "all red", "some yellow", "more blue", "three or more", "exactly two blue". */
+function kidHead(s: Stmt): string | null {
+  const and = (head: string, x: string | null) => (x ? `${head} ${x}` : null);
+  switch (s.t) {
+    case 'every': return and('all', kidNoun(s.d, true));
+    case 'some': return and('some', kidNoun(s.d, true));
+    case 'more': return and('more', kidNoun(s.a, true));
+    case 'count':
+      if (s.not) return null;
+      if (s.op === 'ge') return `${KID_NUM[s.k]} or more`;
+      if (s.op === 'eq') return and(`exactly ${KID_NUM[s.k]}`, kidNoun(s.d, s.k !== 1));
+      return null;
+    default: return null;
+  }
+}
+
+/** An answer in kid words, as said after the statement: "one is not", "none are red", "same or fewer", "under three". */
+function kidTail(s: Stmt, x: Stmt): string | null {
+  const and = (head: string, w: string | null) => (w ? `${head} ${w}` : null);
+  switch (x.t) {
+    case 'someNot': return s.t === 'every' && sameDesc(s.d, x.d) ? 'one is not' : and('one is not', kidIs(x.d));
+    case 'none': return and('none are', kidNoun(x.d, true));
+    case 'some': return and('one is', kidIs(x.d));
+    case 'every': return and('all', kidNoun(x.d, true));
+    case 'more': return and('more', kidNoun(x.a, true));
+    case 'asMany':
+      // "At least as many b as a", said of the statement's own group: the same number or fewer, or the same or more.
+      if (s.t !== 'more') return null;
+      if (sameDesc(x.a, s.b) && sameDesc(x.b, s.a)) return 'same or fewer';
+      if (sameDesc(x.a, s.a) && sameDesc(x.b, s.b)) return 'same or more';
+      return null;
+    case 'count': {
+      const n = KID_NUM[x.k];
+      if (x.not) return x.op === 'eq' ? and(`${n} not`, kidNoun(x.d, x.k !== 1)) : null;
+      switch (x.op) {
+        case 'lt': return `under ${n}`;
+        case 'le': return `${n} or fewer`;
+        case 'gt': return `more than ${n}`;
+        case 'ne': return 'more, or fewer';
+        case 'ge': return `${n} or more`;
+        case 'eq': return `exactly ${n}`;
+      }
+      return null;
+    }
+    default: return null;
+  }
+}
+
+/** Grade 1: the words of a kid NOT question (with "NOT", the colon and the question mark) fit 7 of its 8 words. */
+const KID_NOT_WORDS = 7;
+const wordCount = (x: string) => x.split(/\s+/).filter((w) => /[A-Za-z0-9]/.test(w)).length;
+/** "NOT all red" and "none are red": a kid NOT question about answer x of statement s, or null when it does not fit. */
+export function kidNotLine(s: Stmt, x: Stmt): { head: string; tail: string } | null {
+  const head = kidHead(s);
+  const tail = kidTail(s, x);
+  if (!head || !tail) return null;
+  const out = { head: `NOT ${head}`, tail };
+  return wordCount(`${out.head}: ${out.tail}?`) <= KID_NOT_WORDS ? out : null;
+}
+
+const YES_NO: DrillOption[] = [{ id: 'yes', label: 'Yes' }, { id: 'no', label: 'No' }];
+
+/**
+ * A NOT item's kid-only alternate (KidItem.alt): “NOT all red: none are red?” with a check tile and a cross tile. It
+ * asks about one of the item's own answers (`asked`), on the same statement, with the same teaching; its answer is
+ * whether `asked` is the NOT. The stop sets its id, lesson and skill (the outer item's).
+ */
+function notKidAlt(c: NotCase, asked: Stmt, classic: ItemCore, t: Talk, line: string): ChooseItem | null {
+  const k = kidNotLine(c.s, asked);
+  if (!k) return null;
+  const right = isExactOpposite(c.s, asked);
+  const pick = stmtId(asked);
+  const fb: ChoiceFeedback | undefined = right
+    ? {
+        headline: 'Your answer says this is not the NOT. It is the NOT.',
+        detail: [c.explain(t), 'A statement and its NOT never agree. When one is true, the other is false.'],
+        ...(classic.teach?.cases?.[0] ? { example: classic.teach.cases[0] } : {}),
+      }
+    : classic.feedback?.[pick];
+  if (!fb) return null;
+  const said = say(asked, t.n);
+  const item: ItemCore = {
+    kind: 'choose',
+    prompt: `Is “${bare(asked, t.n)}” the NOT of ${t.whose}?`,
+    scene: { kind: 'text', lines: [line, `Its NOT? “${said}”`] },
+    choices: YES_NO.map((o) => ({ ...o })),
+    answer: right ? 'yes' : 'no',
+    explain: right ? c.explain(t) : `“${t.R}” is the NOT, not “${bare(asked, t.n)}.” ${c.explain(t)}`,
+    feedback: { [right ? 'no' : 'yes']: fb },
+    ...(classic.hint ? { hint: classic.hint } : {}),
+    ...(classic.hintCase ? { hintCase: classic.hintCase } : {}),
+    ...(classic.teach ? { teach: classic.teach } : {}),
+    kid: {
+      prompt: `${k.head}: ${k.tail}?`,
+      nope: right ? 'They never agree.' : 'They can agree.',
+      yes: right ? 'It flips true and false.' : 'Not the NOT: they can agree.',
+      show: kidNotShow(c.tag, c.s),
+      hint: 'One is true, the other is false.',
+      scene: { kind: 'none' },
+    },
+  };
+  syncWhyWrong(item);
+  if (c.conflict) item.conflict = true;
+  return { id: '', stop: 1, lesson: '', skill: `s1.${c.tag}`, ...item };
+}
+
+/**
+ * A NOT board's kid-only replacement step (KidBoard.alt), for Grade 1: the board's learner row as one page per answer,
+ * each asked yes or no under the line “NOT all big:” (“one is not?”, “all small?”), in the classic answers' order.
+ * Answers the kid words cannot say in budget are left out; the right NOT is always asked. Each answer's mark and its
+ * message come from isExactOpposite() and holds() on the board's own cards, like the classic row's.
+ */
+export function notKidDrill(id: string, o: NotDrillOptions): { line: string; step: DrillStep } {
+  const head = kidHead(o.s);
+  if (!head) throw new Error(`notKidDrill: no kid words for “${say(o.s)}”`);
+  const v = holds(o.s, o.cards);
+  const S = `“${bare(o.s)}”`;
+  const fact = cardFact(o.s, o.cards);
+  const asked = [o.right, ...o.wrongs]
+    .map((x) => ({ x, label: say(x), k: kidNotLine(o.s, x) }))
+    .sort((a, b) => a.label.localeCompare(b.label))
+    .filter((a) => a.k);
+  if (!asked.some((a) => a.x === o.right)) throw new Error(`notKidDrill: the NOT of “${say(o.s)}” has no kid words`);
+  const rows: DrillRow[] = asked.map(({ x, k }) => {
+    const right = isExactOpposite(o.s, x);
+    const rid = `${o.id}-${stmtId(x)}`;
+    return {
+      id: rid,
+      label: `${k!.tail}?`,
+      marks: [{
+        id: `${rid}-not`,
+        label: `Is “${bare(x)}” its NOT?`,
+        options: YES_NO,
+        answer: right ? 'yes' : 'no',
+        why: {
+          [right ? 'no' : 'yes']: right
+            ? `${S} is ${tv(v)} here, and “${bare(x)}” is ${tv(!v)} here. They never agree on any cards: it is the NOT.`
+            : `${S} is ${tv(v)} here: ${lc(fact)} “${bare(x)}” is ${tv(v)} here too: ${lc(cardFact(x, o.cards))} A statement and its NOT never agree.`,
+        },
+      }],
+    };
+  });
+  return {
+    line: `NOT ${head}:`,
+    step: {
+      id,
+      title: 'Is it the NOT?',
+      body: [`The statement is ${S}. For each sentence, is it the NOT? Look at the cards.`],
+      scene: { kind: 'things', things: o.cards.map((c, i) => ({ id: `k${i + 1}`, ...c })) },
+      rows,
+      done: `Right. ${S} and its NOT never agree. ${cardFact(o.right, o.cards)}`,
+    },
+  };
+}
+
 export interface NotItemOptions {
   frame: Frame;
   key?: NotKey;
@@ -1875,6 +2128,7 @@ export function notItem(rng: Rng, opts: NotItemOptions): Made {
     feedback,
     hint: `Here is one row, already checked. The NOT must be true every time “${t.S}” is false, and false every time it is true.`,
     hintCase: cases[hintAt >= 0 ? hintAt : 0],
+    kid: notKid(c.tag, c.s),
     teach: {
       rule: NOT_RULE,
       terms: c.terms(t),
@@ -1887,6 +2141,11 @@ export function notItem(rng: Rng, opts: NotItemOptions): Made {
   };
   syncWhyWrong(item);
   if (c.conflict) item.conflict = true;
+  // Grade 1 (kid mode only): one of its own answers asked as yes or no, in the cards' words. The right NOT when it sits
+  // at an even place among the shuffled answers, else the classic mistake (always offered), so either answer comes up.
+  const asked = options.findIndex((s) => stmtId(s) === item.answer) % 2 === 0 ? c.right : kept[0]?.s;
+  const alt = asked ? notKidAlt(c, asked, item, t, line) : null;
+  if (alt) item.kid = { ...item.kid!, alt };
   const wrongs = options.filter((s) => stmtId(s) !== item.answer);
   return { tag: c.tag, item, flip: { s: c.s, right: c.right, wrongs, noun: n, examples: wrongs.map((s) => examples[kept.findIndex((w) => w.s === s)]), cases: caseRows.map((cr) => cr.row) } };
 }

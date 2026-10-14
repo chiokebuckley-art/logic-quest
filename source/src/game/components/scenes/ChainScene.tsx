@@ -5,20 +5,37 @@
  * the frame of the last revealed step: a dashed box trying a block, the gold unit box with its repeats tinted, a teal
  * bar under each piece checked so far, a "Breaks" flag where a block or the stated rule fails. Labels stay short and
  * the row wraps, so it draws at 320 px wide.
+ *
+ * Kid mode (Grades 1 to 3, docs/KID-JOURNEY.md) draws the chain as a picture only: no "Stated" line (screen readers
+ * still hear it; the kid prompt says what it needs), no captions and no position numbers, no notes; a sound, a bell, a
+ * move, a class or a kid of a rota is its pictogram (tokenArt), and the flags are icons named for screen readers.
+ * Letters stay letters: they are the pieces themselves.
  */
 import type { ChainFrame, ChainScene } from '../../../engine/scenes/chain';
 import type { ChainToken } from '../../../engine/scenes/common';
-import { ThingCard } from '../ThingCard';
+import { tokenArt } from '../../../engine/puzzles/observatory/chains';
+import { useKidMode } from '../../kidMode';
+import { Pictogram } from '../Pictogram';
+import { PlayIcon, ThingCard } from '../ThingCard';
 
 /** One token: a shape card, a letter tile, or a sound, move or name tile (its face is its caption; a bell shows "high" over "high bell"). */
-export function ChainTokenView({ token, small = false }: { token: ChainToken; small?: boolean }) {
+export function ChainTokenView({ token, small = false, kid = false }: { token: ChainToken; small?: boolean; kid?: boolean }) {
   if (token.shape && token.color) {
     return (
       <span className={`play-ob-token play-ob-token--shape${small ? ' is-small' : ''}`} role="img" aria-label={token.label}>
         <span aria-hidden="true">
           <ThingCard thing={{ id: token.label, shape: token.shape, color: token.color, size: 'small' }} locked />
         </span>
-        <span className="play-ob-caption" aria-hidden="true">{token.label}</span>
+        {!kid && <span className="play-ob-caption" aria-hidden="true">{token.label}</span>}
+      </span>
+    );
+  }
+  // Kid mode: a sound, a bell, a move, a class or a name is drawn as its picture (named by its caption for screen readers).
+  const art = kid ? tokenArt(token) : undefined;
+  if (art) {
+    return (
+      <span className={`play-ob-token play-ob-token--picto${small ? ' is-small' : ''}`}>
+        <Pictogram name={art} label={token.label} size={small ? 34 : 44} />
       </span>
     );
   }
@@ -28,7 +45,7 @@ export function ChainTokenView({ token, small = false }: { token: ChainToken; sm
   return (
     <span className={`play-ob-token play-ob-token--${token.sound ? 'sound' : 'letter'}${small ? ' is-small' : ''}`} role="img" aria-label={token.label}>
       <span className={`play-ob-token-face${word ? ' play-ob-word' : ''}`} aria-hidden="true">{face}</span>
-      {face !== token.label && <span className="play-ob-caption" aria-hidden="true">{token.label}</span>}
+      {face !== token.label && !kid && <span className="play-ob-caption" aria-hidden="true">{token.label}</span>}
     </span>
   );
 }
@@ -50,9 +67,11 @@ function frameOf(scene: ChainScene, shown: number): ChainFrame {
 }
 
 export function ChainView({ scene, shown }: { scene: ChainScene; shown: number }) {
+  /** Kid mode: the chain as a picture only (see the file note). */
+  const kid = !!useKidMode();
   const f = frameOf(scene, shown);
   const tokens = f.tokens ?? scene.tokens;
-  const numbered = scene.numbered ?? true;
+  const numbered = (scene.numbered ?? true) && !kid;
   const box = f.unit ?? (f.tryUnit && f.tryUnit.ok ? f.tryUnit : undefined);
   const miss = f.miss ?? (f.tryUnit && !f.tryUnit.ok ? missOf(tokens, f.tryUnit.len) : undefined);
   const inBox = (i: number, b?: { start: number; len: number }) => !!b && i >= b.start && i < b.start + b.len;
@@ -64,7 +83,7 @@ export function ChainView({ scene, shown }: { scene: ChainScene; shown: number }
   const long = tokens.length > 8;
   return (
     <div className="play-ob-chain">
-      <p className="play-ob-stated"><span className="play-drill-tag">Stated</span> {scene.stated}</p>
+      {kid ? <p className="play-sr">{scene.stated}</p> : <p className="play-ob-stated"><span className="play-drill-tag">Stated</span> {scene.stated}</p>}
       <ol className={`play-ob-chain-row${long ? ' is-long' : ''}`} aria-label="The chain">
         {tokens.map((t, i) => {
           const blank = scene.blanks?.includes(i);
@@ -81,27 +100,27 @@ export function ChainView({ scene, shown }: { scene: ChainScene; shown: number }
           ].filter(Boolean).join(' ');
           return (
             <li key={i} className={cls}>
-              {blank ? <span className="play-ob-blank" role="img" aria-label={`position ${i + 1}, blank`}>?</span> : <ChainTokenView token={t} small={long} />}
+              {blank ? <span className="play-ob-blank" role="img" aria-label={`position ${i + 1}, blank`}>?</span> : <ChainTokenView token={t} small={long} kid={kid} />}
               {numbered && <span className="play-ob-pos" aria-hidden="true">{i + 1}</span>}
-              {miss === i && <span className="play-ob-flag">Breaks</span>}
-              {f.broken === i && miss !== i && <span className="play-ob-flag">Look again</span>}
+              {miss === i && (kid ? <span className="play-ob-flag play-ob-flag--icon" role="img" aria-label="Breaks"><PlayIcon name="cross" size={12} /></span> : <span className="play-ob-flag">Breaks</span>)}
+              {f.broken === i && miss !== i && (kid ? <span className="play-ob-flag play-ob-flag--icon" role="img" aria-label="Look again"><PlayIcon name="help" size={12} /></span> : <span className="play-ob-flag">Look again</span>)}
             </li>
           );
         })}
       </ol>
-      {f.tryUnit && (
+      {f.tryUnit && !kid && (
         <p className={`play-ob-note ${f.tryUnit.ok ? 'is-ok' : 'is-off'}`}>
           Block of {f.tryUnit.len}: {f.tryUnit.ok ? 'it fits every piece.' : miss !== undefined && miss >= 0 ? `it breaks at position ${miss + 1}.` : 'it does not fit.'}
         </p>
       )}
-      {f.unit && !f.tryUnit && (
+      {f.unit && !f.tryUnit && !kid && (
         <p className="play-ob-note is-ok">
           {f.unit.start === 0 ? 'The unit' : `Block ${Math.floor(f.unit.start / f.unit.len) + 1}`}: {tokens.slice(f.unit.start, f.unit.start + f.unit.len).map((t) => t.label).join(', ')}.
         </p>
       )}
       {scene.tray && scene.tray.length > 0 && (
         <div className="play-ob-tray" aria-label="Spare pieces">
-          {scene.tray.map((t, k) => <ChainTokenView key={k} token={t} small />)}
+          {scene.tray.map((t, k) => <ChainTokenView key={k} token={t} small kid={kid} />)}
         </div>
       )}
     </div>

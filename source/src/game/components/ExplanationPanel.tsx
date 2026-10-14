@@ -10,18 +10,28 @@
  *
  * Everything essential is always open; only the simpler example waits for its button. The words come from
  * explanationFor(), the same model the read-aloud uses.
+ *
+ * In kid mode (Grades 1 to 3), an item with a kid layer gets the compact panel instead: its one "not yet" line,
+ * "Show me" (the kid's picture case, or the item's own example), "Tell me more" (this full panel, behind a small icon
+ * button so the panel stays in the word budget) and the actions ("Try again").
  */
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
-import type { Color, TeachCase } from '../../engine/types';
+import type { Color, KidItem, TeachCase } from '../../engine/types';
 import { explanationSpeech, type ExplanationModel } from '../explanation';
+import { useKidMode } from '../kidMode';
+import { caseText } from '../../engine/teach';
 import { ReadAloudButton } from './ReadAloud';
 import { BecauseRows } from './Distinction';
+import { Pictogram } from './Pictogram';
 import { PlayIcon, ThingCard } from './ThingCard';
 
 const DOT: Record<Color, string> = { red: '#ff4d6d', blue: '#3b82f6', yellow: '#facc15' };
 
-/** One worked case as a card: the label in words, a picture, each sentence's truth (icon and word), a note. */
-export function CaseCard({ c, mark }: { c: TeachCase; mark?: boolean }) {
+/**
+ * One worked case as a card: the label in words, a picture, each sentence's truth (icon and word), a note. `picture`
+ * draws the case as a picture only (a kid hint): the case itself, without its note.
+ */
+export function CaseCard({ c, mark, picture = false }: { c: TeachCase; mark?: boolean; picture?: boolean }) {
   return (
     <div className={`play-case${mark ? ' play-case--mark' : ''}`}>
       <p className="play-case-label">{c.label}</p>
@@ -63,7 +73,7 @@ export function CaseCard({ c, mark }: { c: TeachCase; mark?: boolean }) {
           ))}
         </ul>
       )}
-      {c.note && <p className="play-case-note">{c.note}</p>}
+      {c.note && !picture && <p className="play-case-note">{c.note}</p>}
     </div>
   );
 }
@@ -94,9 +104,69 @@ export interface ExplanationPanelProps {
   tone?: 'learn' | 'review';
   /** Show the player's answer and the right answer in words. False where the host already shows them. Default true. */
   showAnswers?: boolean;
+  /** The item's kid layer: in kid mode the panel opens compact (see KidExplanation). */
+  kid?: KidItem;
+  /** Kid mode: open with the "Show me" picture already in place of the line (the word-budget test renders it). */
+  kidShowOpen?: boolean;
 }
 
-export function ExplanationPanel({ model: m, readAloud, simplerOpen = false, onSimpler, actions, autoFocus = true, tone = 'learn', showAnswers = true }: ExplanationPanelProps) {
+export function ExplanationPanel(props: ExplanationPanelProps) {
+  const kidMode = useKidMode();
+  if (kidMode && props.kid && props.tone !== 'review') return <KidExplanation {...props} kid={props.kid} />;
+  return <FullExplanation {...props} />;
+}
+
+/** What "Show me" shows: the kid layer's picture case, else the case that shows the miss, else the first worked case. */
+export const kidShowCase = (kid: KidItem, m: ExplanationModel): TeachCase | undefined => kid.show ?? m.example ?? m.cases[0];
+
+/**
+ * The compact panel after a miss in kid mode: the one line, "Show me", "Tell me more" and the actions. "Show me" puts
+ * the picture case where the line was; "Tell me more" opens today's full panel.
+ */
+export function KidExplanation({ kid, model: m, readAloud, actions, autoFocus = true, kidShowOpen = false, ...rest }: ExplanationPanelProps & { kid: KidItem }) {
+  const id = useId().replace(/[^A-Za-z0-9_-]/g, '');
+  const [shown, setShown] = useState(kidShowOpen);
+  const [more, setMore] = useState(false);
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const showRef = useRef<HTMLDivElement>(null);
+  const show = kidShowCase(kid, m);
+  useEffect(() => {
+    if (autoFocus) titleRef.current?.focus({ preventScroll: false });
+  }, []);
+  useEffect(() => {
+    if (shown) showRef.current?.focus();
+  }, [shown]);
+  if (more) return <FullExplanation {...rest} model={m} readAloud={readAloud} actions={actions} autoFocus />;
+  return (
+    <section className="play-feedback kid-miss" aria-labelledby={`${id}-nope`}>
+      <div className="kid-feedback-top">
+        <Pictogram name="question" size={48} decorative />
+        {readAloud && <ReadAloudButton text={() => (shown && show ? caseText(show) : [kid.nope])} />}
+      </div>
+      <h3 className={shown ? 'play-sr' : 'kid-nope'} id={`${id}-nope`} ref={titleRef} tabIndex={-1}>
+        {kid.nope}
+      </h3>
+      {shown && show && (
+        <div className="kid-show" ref={showRef} tabIndex={-1}>
+          <CaseCard c={show} />
+        </div>
+      )}
+      <div className="play-actions play-actions--wrap kid-miss-actions">
+        {!shown && show && (
+          <button type="button" className="play-btn play-btn--ghost play-btn--grow" onClick={() => setShown(true)}>
+            Show me
+          </button>
+        )}
+        <button type="button" className="play-btn play-btn--ghost kid-more-btn" aria-label="Tell me more" title="Tell me more" onClick={() => setMore(true)}>
+          <PlayIcon name="help" size={22} />
+        </button>
+        {actions}
+      </div>
+    </section>
+  );
+}
+
+function FullExplanation({ model: m, readAloud, simplerOpen = false, onSimpler, actions, autoFocus = true, tone = 'learn', showAnswers = true }: ExplanationPanelProps) {
   const id = useId().replace(/[^A-Za-z0-9_-]/g, '');
   const [simpler, setSimpler] = useState(simplerOpen);
   const titleRef = useRef<HTMLHeadingElement>(null);

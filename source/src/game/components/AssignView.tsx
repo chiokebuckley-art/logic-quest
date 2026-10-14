@@ -96,9 +96,11 @@ export interface AssignBodyProps {
   onChange(next: Marks): void;
   /** Toggles, after a wrong Check: indexes of the speakers whose words do not fit the answer. */
   flagged?: readonly number[] | null;
+  /** Kid mode: the grid's tap help is for screen readers only. */
+  quietHelp?: boolean;
 }
 
-export function AssignGrid({ item, marks, locked, onChange }: AssignBodyProps) {
+export function AssignGrid({ item, marks, locked, onChange, quietHelp = false }: AssignBodyProps) {
   const [confirmClear, setConfirmClear] = useState(false);
   const [said, setSaid] = useState('');
   const refs = useRef<Record<string, HTMLButtonElement | null>>({});
@@ -140,7 +142,7 @@ export function AssignGrid({ item, marks, locked, onChange }: AssignBodyProps) {
 
   return (
     <div className="play-assign">
-      <p className="play-help">
+      <p className={quietHelp ? 'play-sr' : 'play-help'}>
         Tap a box once for <strong className="play-no-word"><span aria-hidden="true">✗ </span>no</strong>, twice for{' '}
         <strong className="play-yes-word"><span aria-hidden="true">✓ </span>yes</strong>, and a third time to clear it.
         {two ? ' Each row gets one yes in each grid.' : ' Each row gets one yes.'}

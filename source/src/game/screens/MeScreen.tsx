@@ -1,11 +1,15 @@
 /**
- * Me (1i): who is playing, three counts, and the rows that lead to repair quests, progress, Pattern Lab badges,
- * players, grown-ups, play settings and save files.
+ * Me (1i): who is playing, the grade (with a change chip), days played this week, stars, stickers and grade badges,
+ * three counts, and the rows that lead to repair quests, progress, Pattern Lab badges, players, grown-ups, play
+ * settings and save files.
  */
 import { useState } from 'react';
 import { fixableCards } from '../../engine/notebook';
 import { STOPS } from '../../content/stops';
-import { percent, stopCounts, streakDays, totals } from '../progressStats';
+import { percent, stopCounts, totals } from '../progressStats';
+import { GRADE_IDS, gradeById } from '../../content/grades';
+import { allStickers, badges as gradeBadges, daysThisWeek, starsIn } from '../kid';
+import { GradeBadge, WeekDots } from '../components/KidJourney';
 import { useStore } from '../store';
 import { initial } from '../components/Hud';
 import { GIcon, Row } from '../components/kit';
@@ -20,7 +24,11 @@ export function MeScreen() {
   const counts = stopCounts(save.stops);
   const t = totals(save.stats, today, 3650);
   const rate = percent(t.firstTry, t.answered);
-  const streak = streakDays(save.active, today);
+  const week = daysThisWeek(save.active, today);
+  const grade = save.kid.grade;
+  const stars = GRADE_IDS.reduce((n, g) => n + starsIn(save, g).got, 0);
+  const stickers = allStickers(save);
+  const earned = gradeBadges(save);
   const ready = fixableCards(save.notebook ?? {}, today, STOPS).length;
   const open = Object.keys(save.notebook ?? {}).length;
   const bridge = save.patternBridge;
@@ -32,7 +40,12 @@ export function MeScreen() {
       <section className="sl-me-hero">
         <span className="sl-avatar xl" style={{ background: player.color }} aria-hidden="true">{initial(player.name)}</span>
         <h2 className="sl-me-name">{player.name}</h2>
-        <div className="sl-me-path">{bridge.path} path · 🔥 {streak}-day streak</div>
+        <div className="sl-me-path">{bridge.path} path</div>
+        <div className="sl-chips center">
+          <button type="button" className="sl-chip c-gold" onClick={() => actions.navigate({ name: 'journey', track: 'grades' })} disabled={!grade}>{grade ? gradeById(grade).label : 'No grade'}</button>
+          <button type="button" className="sl-chip" onClick={() => actions.navigate({ name: 'grade' })}>{grade ? 'Change' : 'Pick a grade'}</button>
+        </div>
+        <WeekDots {...week} />
         <div className="sl-chips center">
           <button type="button" className="sl-chip" onClick={() => actions.navigate({ name: 'players', mode: 'list' })}>Switch player</button>
           <button type="button" className="sl-chip" aria-expanded={paths} onClick={() => setPaths(!paths)}>Change path</button>
@@ -45,6 +58,18 @@ export function MeScreen() {
           </div>
         )}
       </section>
+
+      <div className="sl-tiles kid-tiles">
+        <div className="sl-tile"><span className="sl-tile-n t-gold">{stars}</span><span>{stars === 1 ? 'star' : 'stars'}</span></div>
+        <div className="sl-tile"><span className="sl-tile-n t-cyan">{stickers.length}</span><span>{stickers.length === 1 ? 'sticker' : 'stickers'}</span></div>
+        <div className="sl-tile"><span className="sl-tile-n t-mint">{earned.length}</span><span>{earned.length === 1 ? 'badge' : 'badges'}</span></div>
+      </div>
+      {(stickers.length > 0 || earned.length > 0) && (
+        <div className="kid-me-prizes">
+          {earned.map((g) => <GradeBadge key={g} band={g} size={48} />)}
+          {stickers.length > 0 && <p className="sl-sub">Stickers: {stickers.map((x) => x.name).join(', ')}</p>}
+        </div>
+      )}
 
       <div className="sl-tiles">
         <div className="sl-tile"><span className="sl-tile-n t-gold">{counts.passed}</span><span>{counts.passed === 1 ? 'stop passed' : 'stops passed'}</span></div>

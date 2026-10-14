@@ -8,6 +8,9 @@ import { describe, expect, it } from 'vitest';
 import { DRILLS, EXAMPLES, EXAMPLE_RULES, TAUGHT_POOL, TWINS, exampleScene, stop2, untaughtItems } from '../../content/stop2';
 import { S2_WORLD } from '../../content/world/s2';
 import { explanationFor } from '../../game/explanation';
+import { kidItemOf } from '../../game/kidPlay';
+import type { KidMode } from '../../game/kidMode';
+import { gradeById } from '../../content/grades';
 import { checkDrill, marksToTap } from '../drill';
 import { freshCheckSet, looks } from '../fresh';
 import { grade } from '../grade';
@@ -26,6 +29,7 @@ import {
   and,
   cardId,
   cardName,
+  cardPicto,
   colorIs,
   depth,
   differences,
@@ -2330,5 +2334,88 @@ describe('stop 2: distinctions taught apart', () => {
       wordsOk(l.drill!.flatMap((st) => [...(st.misconceptions ?? []).map((m) => m.text), st.words?.closing ?? '', st.words?.ask ?? '', st.words?.fit ?? '', st.words?.unfit ?? '']), `${l.id} mix-ups and board words`);
       for (const d of l.distinctions ?? []) wordsOk([d.a, d.b], `${l.id} ${d.id}`);
     }
+  });
+});
+
+// ---------- the kid forms (docs/KID-JOURNEY.md, "Round 2 fields") ----------
+//
+// Lessons 1 to 4 are Grade 1 to 3 rounds. In kid mode a "Which fit NOT x?" item is asked as its kid-only tap form, a
+// count's answers are ten frames, a card answer is its picture, and a board row of six cards draws each card with no
+// name. The classic items are unchanged; these checks re-derive every kid form from what the player sees.
+
+describe('stop 2: the kid forms of its Grade 1 to 3 rounds', () => {
+  const kidMode: KidMode = { grade: 'g2', budget: gradeById('g2').budget, autoRead: false };
+  const young = stop2.lessons.filter((l) => !!l.kid);
+  const items = young.flatMap((l) => Array.from({ length: 60 }, (_, k) => l.practice(createRng(k + 1))).flat());
+  const means = items.filter((it): it is ChooseItem => it.skill === 's2.not-means' && it.kind === 'choose');
+  /** What a kid sees of a tap form: its kid prompt and its cards in order. */
+  const kidLook = (it: Item) => JSON.stringify([it.kid?.prompt, it.kind === 'tapall' ? it.things.map(cardName) : it.id]);
+
+  it('“Which fit NOT x?” is a tap on two cards of each group in kid mode: the same rule, re-solved from its cards, and its answer is the groups the classic answer names', () => {
+    expect(means.length).toBeGreaterThan(50);
+    for (const it of means) {
+      const alt = it.kid?.alt;
+      if (alt?.kind !== 'tapall') throw new Error(`${it.id}: no tap form`);
+      expect([alt.id, alt.stop, alt.lesson, alt.skill], it.id).toEqual([it.id, it.stop, it.lesson, it.skill]);
+      expect(soundness(alt)).toEqual([]);
+      expect(sameMeaning(ruleIn(alt.prompt), ruleIn(it.prompt)), it.id).toBe(true);
+      for (const kind of ['color', 'shape', 'size'] as const) {
+        for (const v of new Set(alt.things.map((t) => t[kind]))) expect(alt.things.filter((t) => t[kind] === v).length, `${it.id} ${v}`).toBe(kind === 'size' ? 3 : 2);
+      }
+      const groups = [...rightLabel(it).toLowerCase().matchAll(VALUE)].map((m) => m[1]);
+      const named = alt.things.filter((t) => groups.some((g) => [t.color, t.shape, t.size].includes(g as never))).map((t) => t.id);
+      expect(key(alt.answer), `${it.id}: ${rightLabel(it)}`).toBe(key(named));
+      expect(alt.kid?.prompt, it.id).toBeTruthy();
+      // Kid mode draws the tap form with the item's own id; classic play draws the item itself.
+      const drawn = kidItemOf(it, kidMode);
+      expect([drawn.kind, drawn.id]).toEqual(['tapall', it.id]);
+      expect(kidItemOf(it, null)).toBe(it);
+    }
+  });
+
+  it('a new example after a miss on the tap form shows a kid other cards or another order', () => {
+    for (const it of means.slice(0, 40)) {
+      const before = kidLook(kidItemOf(it, kidMode));
+      for (const f of freshCheckSet(stop2, it, 7)) expect(kidLook(kidItemOf(f, kidMode)), it.id).not.toBe(before);
+    }
+  });
+
+  it('count answers are ten frames with no word, card answers are card pictures with no word, and the cards draw plain or only as the answers', () => {
+    let counts = 0, picks = 0, yesNo = 0;
+    for (const it of items) {
+      if (it.kind !== 'choose') continue;
+      if (/-count$/.test(it.skill)) {
+        counts++;
+        for (const c of it.choices) expect([c.art, c.word], it.id).toEqual([`ten-frame-${c.label}`, '']);
+        expect(it.kid?.scene, it.id).toEqual({ kind: 'things' });
+      } else if (it.skill === 's2.and-pick' || it.skill === 's2.or-pick') {
+        picks++;
+        for (const c of it.choices) expect([c.art, c.word], it.id).toEqual([cardPicto(cardOfLabel(c.label)!), '']);
+        expect(key(it.choices.map((c) => c.id)), it.id).toBe(key(sceneThings(it).map((t) => cardId(t))));
+        expect(it.kid?.scene, it.id).toEqual({ kind: 'none' });
+      } else if (it.choices.some((c) => c.id === 'yes')) {
+        yesNo++;
+        expect(sceneThings(it).length, it.id).toBe(1);
+        expect(it.kid?.scene, it.id).toEqual({ kind: 'things' });
+      }
+    }
+    expect(Math.min(counts, picks, yesNo)).toBeGreaterThan(20);
+  });
+
+  it('a board row of six cards draws each card as its own picture with no name: one empty kid label per card', () => {
+    let rows = 0;
+    for (const l of young) {
+      l.drill!.forEach((step, j) => {
+        const kb = l.kid!.board![j];
+        step.rows.forEach((r, k) => {
+          if (r.marks.length < 2 || r.marks.every((m) => m.given)) return;
+          rows++;
+          expect(r.marks.every((m) => !!m.thing), r.id).toBe(true);
+          expect(kb.rows?.[k]?.marks, r.id).toEqual(r.marks.map(() => ({ label: '' })));
+          expect(kb.rows?.[k]?.label, r.id).toBeTruthy();
+        });
+      });
+    }
+    expect(rows).toBe(9);
   });
 });

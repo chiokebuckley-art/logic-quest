@@ -9,6 +9,8 @@ import { Icon } from '../components/Icon';
 import { initial } from '../components/Hud';
 import { ImportBox } from './PlayersScreen';
 import { PageHead } from '../components/kit';
+import { GRADES, isYoung, type GradeId } from '../../content/grades';
+import { autoReadDefault } from '../kidMode';
 
 export function SettingsScreen() {
   const { player, save, actions } = useStore();
@@ -23,7 +25,8 @@ export function SettingsScreen() {
         )}
       </div>
       {player && save && <YouPanel player={player} />}
-      {player && save && <PlayPanel settings={save.settings} onChange={actions.updateSettings} plain={save.evidence.plain} onPlain={actions.setPlainLabels} />}
+      {player && save && <GradePanel grade={save.kid.grade} onChange={(g) => actions.setGrade(g, g ? 'grownup' : undefined)} />}
+      {player && save && <PlayPanel settings={save.settings} onChange={actions.updateSettings} plain={save.evidence.plain} onPlain={actions.setPlainLabels} young={isYoung(save.kid.grade)} autoReadByDefault={autoReadDefault(save.kid.grade)} />}
       {player && save && <SyncPanel player={player} />}
       <SavePanel />
       <DevicePlayers />
@@ -130,6 +133,28 @@ function YouPanel({ player }: { player: Player }) {
   );
 }
 
+// ---------- the grade ----------
+
+/** The player's grade on the Kid Journey: set it, change it, or clear it (the classic Journey). */
+function GradePanel({ grade, onChange }: { grade: GradeId | null; onChange(g: GradeId | null): void }) {
+  return (
+    <section className="panel" aria-labelledby="grade-set-title">
+      <h3 id="grade-set-title" className="section-title">GRADE</h3>
+      <div className="row wrap" style={{ alignItems: 'flex-end' }}>
+        <label className="field grow">
+          Grade on the Kid Journey
+          <select className="input" value={grade ?? ''} onChange={(e) => onChange((e.target.value || null) as GradeId | null)}>
+            <option value="">No grade (the classic Journey)</option>
+            {GRADES.map((g) => <option key={g.id} value={g.id}>{g.label} · {g.title}</option>)}
+          </select>
+        </label>
+        {grade && <button type="button" className="btn ghost" onClick={() => onChange(null)}>Clear</button>}
+      </div>
+      <p className="small muted">Grades 1 to 3 play with short words, read-aloud on and no check timer. Every grade stays open to play.</p>
+    </section>
+  );
+}
+
 // ---------- play options ----------
 
 function Toggle({ label, note, on, onChange }: { label: string; note: string; on: boolean; onChange(v: boolean): void }) {
@@ -153,12 +178,13 @@ function Toggle({ label, note, on, onChange }: { label: string; note: string; on
   );
 }
 
-function PlayPanel({ settings, onChange, plain, onPlain }: { settings: Settings; onChange(patch: Partial<Settings>): void; plain: boolean; onPlain(v: boolean): void }) {
+function PlayPanel({ settings, onChange, plain, onPlain, young = false, autoReadByDefault = false }: { settings: Settings; onChange(patch: Partial<Settings>): void; plain: boolean; onPlain(v: boolean): void; young?: boolean; autoReadByDefault?: boolean }) {
   return (
     <section className="panel" aria-labelledby="play-title">
       <h3 id="play-title" className="section-title">PLAY</h3>
-      <Toggle label="Check timer" note="Grown-ups: a calm time limit on check questions. It is 90 seconds, or up to 3 minutes for big puzzles." on={settings.timer} onChange={(v) => onChange({ timer: v })} />
+      <Toggle label="Check timer" note={young ? 'Grown-ups: Grades 1 to 3 never show a timer. This setting counts when the grade changes.' : 'Grown-ups: a calm time limit on check questions. It is 90 seconds, or up to 3 minutes for big puzzles.'} on={settings.timer} onChange={(v) => onChange({ timer: v })} />
       <Toggle label="Read aloud" note="Shows a speaker button that reads the words out loud." on={settings.readAloud} onChange={(v) => onChange({ readAloud: v })} />
+      <Toggle label="Read aloud by itself" note="Grades 1 to 3: each new card and question starts reading after a tap. A tap stops it. It starts on for Grades 1 and 2, and needs Read aloud on." on={settings.autoRead ?? autoReadByDefault} onChange={(v) => onChange({ autoRead: v })} />
       <Toggle label="Reduce motion" note="Turns off moving effects, like shakes and slides." on={settings.reduceMotion} onChange={(v) => onChange({ reduceMotion: v })} />
       <Toggle label="Plain labels for grown-ups" note="The Pattern Observatory names its places Repeating units, Growth rules, Functions, Cycles, Spatial rules and Evidence instead of Star Chain, Rule Machine and the rest. Same skills." on={plain} onChange={onPlain} />
     </section>

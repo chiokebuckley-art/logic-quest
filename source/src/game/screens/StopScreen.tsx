@@ -21,6 +21,8 @@ import { Icon } from '../components/Icon';
 import { Eyebrow, KindTag, Row, stopPlace } from '../components/kit';
 import { stopAction } from './JourneyScreen';
 import { lessonWorld, stopWorld } from '../../content/world';
+import { KidModeContext, checkSeconds, kidModeOf } from '../kidMode';
+import { kidItemOf } from '../kidPlay';
 
 const CHECK_NAME: Record<CheckKind, string> = { pass: 'Stop check', lockin: 'Lock-in check', week: 'Week check' };
 
@@ -180,7 +182,7 @@ export function StopScreen({ route }: { route: Extract<Route, { name: 'stop' }> 
           <Row
             lead={<KindTag kind="check" />}
             title={`${CHECK_NAME[checkKind]} · new questions`}
-            sub={view.status === 'mastered' ? 'Pass, lock-in and week checks all passed' : `passes when every answer is right · ${MAX_NOT_YETS_PER_DAY} tries a day${view.status === 'notYet' ? ` · ${triesLeft} left today` : ''}${save.settings.timer ? ' · calm timer' : ''}`}
+            sub={view.status === 'mastered' ? 'Pass, lock-in and week checks all passed' : `passes when every answer is right · ${MAX_NOT_YETS_PER_DAY} tries a day${view.status === 'notYet' ? ` · ${triesLeft} left today` : ''}${checkSeconds(save, 1) !== null ? ' · calm timer' : ''}`}
             meta={checkMeta.text}
             metaTone={checkMeta.tone}
             tone={checkDue ? 'current' : view.status === 'notYet' || view.status === 'resting' ? 'orange' : undefined}
@@ -243,6 +245,7 @@ export function warmUpFrom(stop: StopDef, stops: readonly StopDef[] = STOPS): St
  * The warm-up card: one item from the stop's bridge(rng), answered in learn mode with no timer. A wrong answer shows
  * its explanation like any lesson answer. Finishing it right marks the stop warm and the card folds to one line.
  * Giving up draws a new warm-up item. It never counts toward passing and never adds a Notebook card.
+ * In kid mode an item with a kid-only alternate is drawn as that alternate (kidItemOf), keeping its id.
  */
 function WarmUp({ stop }: { stop: StopDef }) {
   const { save, player, actions } = useStore();
@@ -261,21 +264,23 @@ function WarmUp({ stop }: { stop: StopDef }) {
   return (
     <section className="sl-warm" aria-labelledby={`warm-${stop.id}`}>
       <h3 id={`warm-${stop.id}`} className="sl-label t-gold">Warm up{from ? ` · from ${stopLabel(from)}` : ''}</h3>
-      <ItemView
-        key={`${item.id}-${round}`}
-        item={item}
-        mode="learn"
-        readAloud={save.settings.readAloud}
-        kicker="Warm up"
-        nextLabel="Done"
-        afterHelpLabel="Done"
-        autoFocus={false}
-        onDone={(r) => {
-          actions.recordAnswer(r, { fromWarmUp: true });
-          if (r.correct) actions.markWarm(stop.id);
-          else setRound((n) => n + 1);
-        }}
-      />
+      <KidModeContext.Provider value={kidModeOf(save)}>
+        <ItemView
+          key={`${item.id}-${round}`}
+          item={kidItemOf(item, kidModeOf(save))}
+          mode="learn"
+          readAloud={save.settings.readAloud}
+          kicker="Warm up"
+          nextLabel="Done"
+          afterHelpLabel="Done"
+          autoFocus={false}
+          onDone={(r) => {
+            actions.recordAnswer(r, { fromWarmUp: true });
+            if (r.correct) actions.markWarm(stop.id);
+            else setRound((n) => n + 1);
+          }}
+        />
+      </KidModeContext.Provider>
     </section>
   );
 }

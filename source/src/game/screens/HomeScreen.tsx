@@ -1,12 +1,14 @@
 /**
  * Home (1b): the one next thing. Who is playing and today's minutes, Find anything, the Next-up card with one gold
- * button, repair quests that are ready, today's plan, and the Pattern Lab badge row.
+ * button, the grade's star sky (once a grade is chosen), repair quests that are ready, today's plan, and the Pattern
+ * Lab badge row. "Days this week" (seven dots) stands where the days-in-a-row flame was. A player in Grades 1 to 3
+ * gets the kid Home instead: Pip, one Play button for the next round, the star sky and the days this week.
  */
 import { nextStep, viewAll, type CheckKind, type NextStep } from '../../engine/journey/mastery';
 import { fixableCards } from '../../engine/notebook';
 import { STOPS, stopById, stopLabel } from '../../content/stops';
 import { dueEvidence, placeTitle } from '../observatory';
-import { DAILY_GOAL_MINUTES, minutesOn, streakDays } from '../progressStats';
+import { DAILY_GOAL_MINUTES, minutesOn } from '../progressStats';
 import { useStore, type Route } from '../store';
 import { Icon } from '../components/Icon';
 import { initial } from '../components/Hud';
@@ -15,6 +17,11 @@ import { art } from '../pattern/PatternBridge';
 import { EVENT_IDS } from '../pattern/bridges';
 import { RepairCard, TodayMeter } from './JourneyScreen';
 import { useOfTheDay } from '../../content/world';
+import { isYoung, nextRound } from '../../content/grades';
+import { daysThisWeek, stickersIn } from '../kid';
+import { lessonById } from '../observatory';
+import { Pip, StarSky, WeekDots } from '../components/KidJourney';
+import { sayRoundStart } from '../kidPlay';
 
 const CHECK_NAME: Record<CheckKind, string> = { pass: 'Stop check', lockin: 'Lock-in check', week: 'Week check' };
 
@@ -88,15 +95,61 @@ export function nextUpInfo(next: NextStep, views: ReturnType<typeof viewAll>, an
 
 interface PlanRow { key: string; title: string; meta: string; state: 'done' | 'current' | 'later'; route?: Route }
 
+/** The kid Home (Grades 1 to 3): Pip, one Play button for the next round, the star sky small, and the days this week. */
+export function KidHome() {
+  const { save, player, today, actions } = useStore();
+  if (!save || !player || !save.kid.grade) return null;
+  const grade = save.kid.grade;
+  const next = nextRound(save);
+  const week = daysThisWeek(save.active, today);
+  const title = next ? lessonById(next.lessonId)?.title ?? '' : '';
+  return (
+    <div className="page sl-page kid-home">
+      <header className="sl-home-head">
+        <button type="button" className="sl-avatar" style={{ background: player.color }} aria-label={`Switch player (${player.name})`} onClick={() => actions.navigate({ name: 'players', mode: 'list' })}>
+          {initial(player.name)}
+        </button>
+        <div className="sl-home-who">
+          <div className="sl-home-name">{player.name}</div>
+        </div>
+      </header>
+      <div className="kid-home-pip">
+        <Pip stickers={stickersIn(save, grade)} />
+      </div>
+      {next ? (
+        <button
+          type="button"
+          className="sl-cta kid-play"
+          onClick={() => {
+            sayRoundStart(save, next.lessonId);
+            actions.navigate({ name: 'lesson', stopId: next.lessonId.split('.')[0], lessonId: next.lessonId, from: 'grades' });
+          }}
+        >
+          Play ▸ {title}
+        </button>
+      ) : (
+        <button type="button" className="sl-cta kid-play" onClick={() => actions.navigate({ name: 'journey', track: 'grades' })}>
+          My map ▸
+        </button>
+      )}
+      <button type="button" className="kid-sky-link" aria-label="Open my map" onClick={() => actions.navigate({ name: 'journey', track: 'grades' })}>
+        <StarSky save={save} band={grade} small />
+      </button>
+      <WeekDots {...week} />
+    </div>
+  );
+}
+
 export function HomeScreen() {
   const { save, player, today, actions } = useStore();
   if (!save || !player) return null;
+  if (isYoung(save.kid.grade)) return <KidHome />;
   const views = viewAll(STOPS, save.stops, today);
   const next = nextStep(STOPS, save.stops, today);
   const anyPractice = views.some(({ stop }) => !!save.stops[stop.id]?.passDay && !!stop.practice);
   const info = nextUpInfo(next, views, anyPractice);
   const repairs = fixableCards(save.notebook ?? {}, today, STOPS).length;
-  const streak = streakDays(save.active, today);
+  const week = daysThisWeek(save.active, today);
   const minutes = minutesOn(save.active, today);
   const bridge = save.patternBridge;
 
@@ -129,8 +182,8 @@ export function HomeScreen() {
           <div className="sl-home-today">Today · {minutes} of {DAILY_GOAL_MINUTES} minutes</div>
           <TodayMeter seconds={save.active[today] ?? 0} />
         </div>
-        <div className="sl-streak" title="Days in a row with at least one minute of play">
-          <Icon name="flame" size={15} /> {streak}<span className="sr-only"> {streak === 1 ? 'day' : 'days'} in a row</span>
+        <div className="sl-week" title="Days you played this week">
+          <Icon name="star" size={15} /> {week.count}<span className="sr-only"> of 7 days played this week</span>
         </div>
       </header>
 
@@ -154,6 +207,18 @@ export function HomeScreen() {
           )}
         </div>
       </section>
+
+      {save.kid.grade && (
+        <section className="sl-section" aria-labelledby="sky-title">
+          <div className="sl-section-head">
+            <h3 id="sky-title" className="sl-label">My grade</h3>
+            <button type="button" className="sl-link" onClick={() => actions.navigate({ name: 'journey', track: 'grades' })}>Open the map</button>
+          </div>
+          <StarSky save={save} band={save.kid.grade} small onPick={(lessonId) => actions.navigate({ name: 'lesson', stopId: lessonId.split('.')[0], lessonId, from: 'grades' })} />
+        </section>
+      )}
+
+      <WeekDots {...week} />
 
       {repairs > 0 && <RepairCard ready={repairs} onOpen={() => actions.navigate({ name: 'notebook', fix: true })} />}
 

@@ -15,7 +15,7 @@
  * Every answer, explanation, hint and board mark below is computed from these two models.
  */
 import { syncWhyWrong } from '../teach';
-import type { ChoiceFeedback, Color, DrillMark, DrillRow, DrillStep, IdeaCard, Rng, Scene, Shape, Teach, TeachCase, Thing } from '../types';
+import type { ChoiceFeedback, ChooseItem, Color, DrillMark, DrillRow, DrillStep, IdeaCard, KidItem, KidScene, Picto, Rng, Scene, Shape, Teach, TeachCase, Thing } from '../types';
 import type { ItemCore, Made } from './statements';
 
 // ---------- model A: the four words ----------
@@ -57,6 +57,8 @@ export interface Kind {
   color: Color;
   /** Shape cards only: drawn as this shape. */
   shape?: Shape;
+  /** One thing of this kind in a kid scene: a dot of its color, a spell card, a letter tile or a shape card. */
+  art: Picto;
 }
 
 export type SkinId = 'marbles' | 'socks' | 'beads' | 'eggs' | 'spells' | 'gems' | 'shapes' | 'letters';
@@ -72,9 +74,11 @@ export interface Skin {
   kinds: readonly [Kind, Kind, Kind];
 }
 
-const colorKinds = (noun: string, nouns: string, words: [string, string, string] = ['red', 'blue', 'yellow']): [Kind, Kind, Kind] => {
+/** The color words of a skin's kinds, each drawn in kid mode as a dot of that color. */
+type DotColor = 'red' | 'blue' | 'yellow' | 'pink' | 'gold';
+const colorKinds = (noun: string, nouns: string, words: [DotColor, DotColor, DotColor] = ['red', 'blue', 'yellow']): [Kind, Kind, Kind] => {
   const colors: Color[] = ['red', 'blue', 'yellow'];
-  return words.map((w, i) => ({ id: w, one: `${w} ${noun}`, many: `${w} ${nouns}`, is: w, are: w, word: w, color: colors[i] })) as [Kind, Kind, Kind];
+  return words.map((w, i) => ({ id: w, one: `${w} ${noun}`, many: `${w} ${nouns}`, is: w, are: w, word: w, color: colors[i], art: `guess-dot-${w}` as const })) as [Kind, Kind, Kind];
 };
 
 export const SKINS: Record<SkinId, Skin> = {
@@ -85,26 +89,26 @@ export const SKINS: Record<SkinId, Skin> = {
   spells: {
     id: 'spells', frame: 'fantasy', noun: 'card', nouns: 'cards', the: 'the wizard’s hat',
     kinds: [
-      { id: 'fire', one: 'fire card', many: 'fire cards', is: 'a fire card', are: 'fire cards', word: 'fire', color: 'red' },
-      { id: 'ice', one: 'ice card', many: 'ice cards', is: 'an ice card', are: 'ice cards', word: 'ice', color: 'blue' },
-      { id: 'star', one: 'star card', many: 'star cards', is: 'a star card', are: 'star cards', word: 'star', color: 'yellow' },
+      { id: 'fire', one: 'fire card', many: 'fire cards', is: 'a fire card', are: 'fire cards', word: 'fire', color: 'red', art: 'guess-fire' },
+      { id: 'ice', one: 'ice card', many: 'ice cards', is: 'an ice card', are: 'ice cards', word: 'ice', color: 'blue', art: 'guess-ice' },
+      { id: 'star', one: 'star card', many: 'star cards', is: 'a star card', are: 'star cards', word: 'star', color: 'yellow', art: 'guess-star' },
     ],
   },
   gems: { id: 'gems', frame: 'fantasy', noun: 'gem', nouns: 'gems', the: 'the magic pouch', kinds: colorKinds('gem', 'gems', ['red', 'blue', 'gold']) },
   shapes: {
     id: 'shapes', frame: 'abstract', noun: 'card', nouns: 'cards', the: 'the bag',
     kinds: [
-      { id: 'circle', one: 'circle', many: 'circles', is: 'a circle', are: 'circles', word: 'circle', color: 'red', shape: 'circle' },
-      { id: 'square', one: 'square', many: 'squares', is: 'a square', are: 'squares', word: 'square', color: 'blue', shape: 'square' },
-      { id: 'triangle', one: 'triangle', many: 'triangles', is: 'a triangle', are: 'triangles', word: 'triangle', color: 'yellow', shape: 'triangle' },
+      { id: 'circle', one: 'circle', many: 'circles', is: 'a circle', are: 'circles', word: 'circle', color: 'red', shape: 'circle', art: 'card-big-red-circle' },
+      { id: 'square', one: 'square', many: 'squares', is: 'a square', are: 'squares', word: 'square', color: 'blue', shape: 'square', art: 'card-big-blue-square' },
+      { id: 'triangle', one: 'triangle', many: 'triangles', is: 'a triangle', are: 'triangles', word: 'triangle', color: 'yellow', shape: 'triangle', art: 'card-big-yellow-triangle' },
     ],
   },
   letters: {
     id: 'letters', frame: 'abstract', noun: 'tile', nouns: 'tiles', the: 'the tile bag',
     kinds: [
-      { id: 'A', one: 'A tile', many: 'A tiles', is: 'an A', are: 'A tiles', word: 'A', color: 'red' },
-      { id: 'B', one: 'B tile', many: 'B tiles', is: 'a B', are: 'B tiles', word: 'B', color: 'blue' },
-      { id: 'C', one: 'C tile', many: 'C tiles', is: 'a C', are: 'C tiles', word: 'C', color: 'yellow' },
+      { id: 'A', one: 'A tile', many: 'A tiles', is: 'an A', are: 'A tiles', word: 'A', color: 'red', art: 'guess-tile-a' },
+      { id: 'B', one: 'B tile', many: 'B tiles', is: 'a B', are: 'B tiles', word: 'B', color: 'blue', art: 'guess-tile-b' },
+      { id: 'C', one: 'C tile', many: 'C tiles', is: 'a C', are: 'C tiles', word: 'C', color: 'yellow', art: 'guess-tile-c' },
     ],
   },
 };
@@ -237,6 +241,192 @@ function bagGroups(s: Skin, c: Counts) {
   const g = c.flatMap((n, i) => (n > 0 ? [{ label: cap(s.kinds[i].many), n, color: s.kinds[i].color }] : []));
   return g.length ? g : [{ label: cap(s.nouns), n: 0 }];
 }
+
+// ---------- the kid layer (Grade 2, docs/KID-JOURNEY.md) ----------
+//
+// Beside the classic text, never instead of it. Grade 2's budget: at most 20 words on a screen, buttons and the header
+// ("Round k of n", 4 words) included, so 16 words of content; 2 sentences, 10 words in a sentence. The four words draw
+// as four picture tiles (a bag of five dots: the filled ones fit). "Show me" draws a small row of shape cards with a
+// label and a note: a twin of the same idea, never a quiz's own bag (its colors and shapes are mixed, and a quiz bag
+// of cards always pairs one shape with one color). The kid words say "has to come soon" for “due”.
+//
+// Every item draws its bag or its draws as pictures with no words (KidItem.scene): a bag you can see into, then each
+// thing in it, kind by kind; or a bag nobody can see into, then each draw in order. An item whose classic answers are
+// sentences is asked in kid mode as its kid-only form (KidItem.alt) on the same bag or the same draws, with the four
+// word tiles or a yes tile and a no tile; its answer is worked out here from the same model, never typed in. Such an
+// item's own kid words are its kid-only form's, so what the budget and reading checks read is what a kid sees.
+
+/** The four words as picture tiles: a bag of five dots, filled when they fit (all, most, one, none). */
+export const WORD_ART: Record<Word, Picto> = { must: 'guess-must', likely: 'guess-likely', unlikely: 'guess-unlikely', cant: 'guess-cant' };
+/** The four words as answers: kid mode draws each as its picture tile with the word under it. */
+const wordChoices = () => WORD_OPTIONS.map((x) => ({ ...x, art: WORD_ART[x.id] }));
+/** A yes and a no answer: kid mode draws them as a check tile and a cross tile. */
+const yesNoChoices = () => [{ id: 'yes', label: 'Yes' }, { id: 'no', label: 'No' }];
+
+/** The bag you can see (model A) in kid mode: the open bag, then each thing in it, kind by kind. */
+export function kidBagScene(s: Skin, c: Counts): KidScene {
+  return { kind: 'pictos', rows: [[{ art: 'guess-bag-see' }], c.flatMap((n, i) => Array.from({ length: n }, () => ({ art: s.kinds[i].art })))] };
+}
+
+/** The draws from a bag nobody can see into (model B) in kid mode: the closed bag, then each draw in order. */
+export function kidDrawsScene(k: Kind, n: number, then?: Kind): KidScene {
+  return { kind: 'pictos', rows: [[{ art: 'guess-bag-hidden' }], [...Array.from({ length: n }, () => ({ art: k.art })), ...(then ? [{ art: then.art }] : [])]] };
+}
+
+/**
+ * A kid-only form of an item of this lesson (KidItem.alt): a whole item with its own teaching, on the same case. Its
+ * id is a placeholder: kid mode draws it with the outer item's id and tags (kidItemOf).
+ */
+function kidAlt(tag: string, core: ItemCore): ChooseItem {
+  return syncWhyWrong<ChooseItem>({ id: 'kid-alt', stop: 7, lesson: 's7.l1', skill: `s7.${tag}`, ...core });
+}
+
+/** The kid words of an item asked in its kid-only form: that form's own, with the form beside them. */
+const kidWithAlt = (alt: ChooseItem): KidItem => ({ ...alt.kid!, alt });
+
+const kidThing = (id: string, color: Color, shape: Shape): Thing => ({ id, shape, color, size: 'big' });
+const kidThings = (cards: [Color, Shape][]): Thing[] => cards.map(([c, sh], i) => kidThing(`k${i + 1}`, c, sh));
+
+/** "Show me" for a word: a small bag of cards whose red ones give that word. */
+const KID_WORD_BAG: Record<Word, Thing[]> = {
+  must: kidThings([['red', 'circle'], ['red', 'square'], ['red', 'triangle']]),
+  likely: kidThings([['red', 'circle'], ['red', 'square'], ['red', 'triangle'], ['blue', 'circle']]),
+  unlikely: kidThings([['red', 'circle'], ['blue', 'square'], ['blue', 'circle'], ['blue', 'triangle']]),
+  cant: kidThings([['blue', 'circle'], ['blue', 'square'], ['yellow', 'triangle']]),
+};
+const KID_WORD_NOTE: Record<Word, string> = {
+  must: 'Every card is red: it must be.',
+  likely: 'Most are red: red is likely.',
+  unlikely: 'Most are not red: red is unlikely.',
+  cant: 'No card is red: it can’t be.',
+};
+export const kidWordShow = (w: Word): TeachCase => ({ label: 'Is the next card red?', things: KID_WORD_BAG[w], note: KID_WORD_NOTE[w] });
+
+/** "Show me" for a streak: red came out three times, and the bag still holds a blue one. */
+export const KID_HIDING: TeachCase = {
+  label: 'Red came out 3 times.',
+  things: kidThings([['red', 'circle'], ['red', 'circle'], ['red', 'circle'], ['red', 'circle'], ['blue', 'circle']]),
+  note: 'This bag still has a blue one.',
+};
+/** "Show me" for what was seen: three red draws, each one looked at. */
+export const KID_SAW: TeachCase = {
+  label: 'Red came out 3 times.',
+  things: kidThings([['red', 'circle'], ['red', 'circle'], ['red', 'circle']]),
+  note: 'Those 3 were red for sure.',
+};
+/** "Show me" for the streak trap: a draw went back, so the bag is the same. */
+export const KID_SAME_BAG: TeachCase = {
+  label: 'Red came out and went back.',
+  things: kidThings([['red', 'circle'], ['red', 'circle'], ['red', 'circle'], ['blue', 'circle']]),
+  note: 'Still 3 red and 1 blue.',
+};
+/** "Show me" for a broken streak: red, red, red, then a blue square. */
+export const KID_BROKE: TeachCase = {
+  label: 'Red, red, red, then blue!',
+  things: kidThings([['red', 'circle'], ['red', 'circle'], ['red', 'circle'], ['blue', 'square']]),
+  note: 'The new one broke the guess.',
+};
+
+/**
+ * A model A question in kid words: the sentence and “Which word fits?” (the four words as picture tiles), with the
+ * bag as the picture. After a miss and under “Yes!”: the count's reason for the asked kind, the right answer's.
+ */
+export function chanceKid(s: Skin, k: Kind, right: Word, counts: Counts): KidItem {
+  const Is = cap(k.is);
+  const nope: Record<Word, string> = {
+    must: `Every ${s.noun} is ${k.is}. It must be ${k.is}.`,
+    likely: `Most are ${k.are}, but not all. ${Is} is likely.`,
+    unlikely: `Most are not ${k.are}. ${Is} is unlikely.`,
+    cant: `No ${s.noun} is ${k.is}. It can’t be ${k.is}.`,
+  };
+  const yes: Record<Word, string> = {
+    must: `Every ${s.noun} is ${k.is}, so it must be.`,
+    likely: `Most are ${k.are}, so ${k.is} is likely.`,
+    // “it”, as in the must and can’t lines: with the kind named twice, “Most are not fire cards, so a fire card is
+    // unlikely.” runs 11 words, over Grade 2's 10.
+    unlikely: `Most are not ${k.are}, so it is unlikely.`,
+    cant: `No ${s.noun} is ${k.is}, so it can’t be.`,
+  };
+  return {
+    prompt: `“${nextSays(s, k)}” Which word fits?`,
+    nope: nope[right],
+    yes: yes[right],
+    show: kidWordShow(right),
+    hint: 'Count what fits, and what does not.',
+    scene: kidBagScene(s, counts),
+  };
+}
+
+/**
+ * “Does Kai know this for sure?” about one answer of “What does Kai know for sure?”, said in kid words (`claim`), with
+ * the draws as the picture. `sure`: the claim is what Kai saw, the only part that is sure.
+ */
+export function sureKnowKid(st: Streak, claim: string, sure: boolean): KidItem {
+  const { s, k, name, draws } = st;
+  return {
+    prompt: `“${claim}” Does ${name} know this for sure?`,
+    nope: sure ? `${name} saw them, so that part is sure.` : `${name} saw only ${draws} ${s.nouns}. The rest is hidden.`,
+    yes: sure ? `What ${name} saw is sure.` : `${name} knows only what ${name} saw.`,
+    show: sure ? KID_SAW : KID_HIDING,
+    hint: sure ? `Did ${name} look at each of these?` : `Did ${name} see all of ${s.the}?`,
+    scene: kidDrawsScene(k, draws),
+  };
+}
+
+/** “Which word is best?” for the next draw after a streak from a bag nobody can see into: Likely, not Must. */
+export function sureBestKid(st: Streak): KidItem {
+  const { s, k, name, draws } = st;
+  return {
+    prompt: `“${nextSays(s, k)}” Which word is best?`,
+    nope: `Probably ${k.is}, but not for sure.`,
+    yes: 'A good guess, but a new one can break it.',
+    show: KID_HIDING,
+    hint: `Did ${name} see all of ${s.the}?`,
+    scene: kidDrawsScene(k, draws),
+  };
+}
+
+/** The streak trap with the bag open, in kid words: after the streak, which word fits kind `a`? The bag is the same. */
+export function dueKnownKid(st: Streak, a: Kind, w: Word, counts: Counts): KidItem {
+  const { s, k, draws } = st;
+  return {
+    prompt: `After ${draws} ${k.many}, which word fits ${a.is}?`,
+    nope: `Each one went back. ${cap(s.the)} did not change.`,
+    yes: `Nothing changed, so ${a.is} is still ${WORD_LABEL[w].toLowerCase()}.`,
+    show: KID_SAME_BAG,
+    hint: `Did anything leave ${s.the} for good?`,
+    scene: kidBagScene(s, counts),
+  };
+}
+
+/** The streak trap with the bag hidden, in kid words (“due” is said as “has to come soon”): is the child right? */
+export function dueHiddenKid(st: Streak): KidItem {
+  const { s, k, o, name, draws } = st;
+  return {
+    prompt: `${name} says, “${cap(o.is)} has to come soon!” Is ${name} right?`,
+    nope: `Each one went back. ${cap(s.the)} did not change.`,
+    yes: 'Each one went back, so nothing has to come soon.',
+    show: KID_SAME_BAG,
+    hint: `Did anything leave ${s.the} for good?`,
+    scene: kidDrawsScene(k, draws),
+  };
+}
+
+/** The can-fail question in kid words, with the draws and the new one as the picture: no proof, and the guess broke. */
+export function breakKid(st: Streak, form: 'proof' | 'show'): KidItem {
+  const { k, o, draws } = st;
+  return {
+    prompt: form === 'proof' ? `Did the ${k.many} prove what comes next?` : `Did the ${o.one} break the guess?`,
+    nope: `Then ${withA(o.one)} came out. The guess broke.`,
+    yes: form === 'proof' ? 'A good guess is not for sure.' : 'One new one can break a guess.',
+    show: KID_BROKE,
+    hint: 'Could the next one be different?',
+    scene: kidDrawsScene(k, draws, o),
+  };
+}
+
+/** The Yes or No a classic “Yes. …” or “No. …” answer starts with. */
+const yesNoOfLabel = (label: string): 'yes' | 'no' => (/^No\b/.test(label) ? 'no' : 'yes');
 
 // ---------- model A items: which word fits the next draw ----------
 
@@ -411,52 +601,73 @@ export function chanceItem(rng: Rng, skin: SkinId, o: { want?: Word; form?: 'sen
   const k = s.kinds[bag.ask];
   const right = wordFor(bag.counts[bag.ask], total);
   const picks: Record<string, { kind: number; word: Word }> = {};
-  let choices: { id: string; label: string }[];
-  let answer: string;
-  let prompt: string;
   if (form === 'word') {
-    choices = WORD_OPTIONS.map((x) => ({ ...x }));
     WORDS.forEach((w) => { picks[w] = { kind: bag.ask, word: w }; });
-    answer = right;
-    prompt = `${cap(s.the)} has ${bagText(s, bag.counts)}. ${drawLine(s, name)} Read the sentence: “${nextSays(s, k)}” Which word fits it?`;
-  } else {
-    // Wrong sentences: the asked kind with another word (not the next-door word that a reader could call “also true”),
-    // and another kind with a word its count does not give.
-    const near: Partial<Record<Word, Word>> = { must: 'likely', cant: 'unlikely' };
-    const same = WORDS.filter((w) => w !== right && w !== near[right]).map((w) => ({ kind: bag.ask, word: w }));
-    const otherKinds = [0, 1, 2].filter((i) => i !== bag.ask);
-    const diff = otherKinds.flatMap((ki) => {
-      const t = wordFor(bag.counts[ki], total);
-      const nearT = near[t];
-      return WORDS.filter((w) => w !== t && w !== nearT).map((w) => ({ kind: ki, word: w }));
-    });
-    const pickedSame = rng.shuffle(same).slice(0, rng.int(1, 2));
-    const pickedDiff = rng.shuffle(diff).slice(0, 3 - pickedSame.length);
-    const all = [{ kind: bag.ask, word: right }, ...pickedSame, ...pickedDiff];
-    for (const p of all) picks[`${s.kinds[p.kind].id}-${p.word}`] = p;
-    choices = rng.shuffle(all).map((p) => ({ id: `${s.kinds[p.kind].id}-${p.word}`, label: wordSentence(s.kinds[p.kind], p.word) }));
-    answer = `${k.id}-${right}`;
-    prompt = `${cap(s.the)} has ${bagText(s, bag.counts)}. ${drawLine(s, name)} Which sentence about the next ${s.noun} is right?`;
+    return { tag: 'pattern-chance', item: chanceWordCore(s, bag, name), model: { t: 'chance', form, bag, name, picks } };
   }
+  // Wrong sentences: the asked kind with another word (not the next-door word that a reader could call “also true”),
+  // and another kind with a word its count does not give.
+  const near: Partial<Record<Word, Word>> = { must: 'likely', cant: 'unlikely' };
+  const same = WORDS.filter((w) => w !== right && w !== near[right]).map((w) => ({ kind: bag.ask, word: w }));
+  const otherKinds = [0, 1, 2].filter((i) => i !== bag.ask);
+  const diff = otherKinds.flatMap((ki) => {
+    const t = wordFor(bag.counts[ki], total);
+    const nearT = near[t];
+    return WORDS.filter((w) => w !== t && w !== nearT).map((w) => ({ kind: ki, word: w }));
+  });
+  const pickedSame = rng.shuffle(same).slice(0, rng.int(1, 2));
+  const pickedDiff = rng.shuffle(diff).slice(0, 3 - pickedSame.length);
+  const all = [{ kind: bag.ask, word: right }, ...pickedSame, ...pickedDiff];
+  for (const p of all) picks[`${s.kinds[p.kind].id}-${p.word}`] = p;
+  const choices = rng.shuffle(all).map((p) => ({ id: `${s.kinds[p.kind].id}-${p.word}`, label: wordSentence(s.kinds[p.kind], p.word) }));
+  const answer = `${k.id}-${right}`;
   const feedback: Record<string, ChoiceFeedback> = {};
   for (const ch of choices) if (ch.id !== answer) feedback[ch.id] = chanceFeedback(s, bag.counts, picks[ch.id].kind, picks[ch.id].word, ch.label);
   const n = bag.counts[bag.ask];
   const item: ItemCore = {
     kind: 'choose',
-    prompt,
+    prompt: `${cap(s.the)} has ${bagText(s, bag.counts)}. ${drawLine(s, name)} Which sentence about the next ${s.noun} is right?`,
     scene: bagScene(s, bag.counts),
     choices,
     answer,
-    explain: form === 'sentence'
-      ? `Each ${s.noun} goes back, so count the ${k.many} in ${s.the}. ${countWord(n, total, s.noun, s.nouns)} So “${wordSentence(k, right)}” is right.`
-      : `Each ${s.noun} goes back, so count what is in ${s.the}. ${countWord(n, total, s.noun, s.nouns)}`,
+    explain: `Each ${s.noun} goes back, so count the ${k.many} in ${s.the}. ${countWord(n, total, s.noun, s.nouns)} So “${wordSentence(k, right)}” is right.`,
     hint: `Count the ${s.nouns} that fit and the ones that do not. Here is another sentence about this bag, checked for you.`,
     hintCase: chanceHint(bag),
     teach: chanceTeach(bag),
     feedback,
+    // Kid mode asks the same bag as “Which word fits?” about the same sentence's kind: the four words as tiles.
+    kid: kidWithAlt(kidAlt('pattern-chance', chanceWordCore(s, bag, name))),
   };
   syncWhyWrong(item);
   return { tag: 'pattern-chance', item, model: { t: 'chance', form, bag, name, picks } };
+}
+
+/**
+ * Model A, form 'word': which of the four words fits one sentence about the bag (the four words as picture tiles in
+ * kid mode), answered from the counts. Uses no randomness, so it is also the sentence form's kid-only form.
+ */
+function chanceWordCore(s: Skin, bag: ChanceModel, name: string): ItemCore {
+  const total = totalOf(bag.counts);
+  const k = s.kinds[bag.ask];
+  const n = bag.counts[bag.ask];
+  const right = wordFor(n, total);
+  const choices = wordChoices();
+  const feedback: Record<string, ChoiceFeedback> = {};
+  for (const ch of choices) if (ch.id !== right) feedback[ch.id] = chanceFeedback(s, bag.counts, bag.ask, ch.id, ch.label);
+  const item: ItemCore = {
+    kind: 'choose',
+    prompt: `${cap(s.the)} has ${bagText(s, bag.counts)}. ${drawLine(s, name)} Read the sentence: “${nextSays(s, k)}” Which word fits it?`,
+    scene: bagScene(s, bag.counts),
+    choices,
+    answer: right,
+    explain: `Each ${s.noun} goes back, so count what is in ${s.the}. ${countWord(n, total, s.noun, s.nouns)}`,
+    hint: `Count the ${s.nouns} that fit and the ones that do not. Here is another sentence about this bag, checked for you.`,
+    hintCase: chanceHint(bag),
+    teach: chanceTeach(bag),
+    feedback,
+    kid: chanceKid(s, k, right, bag.counts),
+  };
+  return syncWhyWrong(item);
 }
 
 // ---------- model B items: a bag you can’t see ----------
@@ -633,8 +844,81 @@ export function sureItem(rng: Rng, skin: SkinId, o: { form?: 'know' | 'best'; na
     teach: sureTeach(st),
     feedback,
   };
+  item.kid = kidWithAlt(sureAlt(st, form, pool, ids[0], item));
   syncWhyWrong(item);
   return { tag: 'pattern-sure', item, model: { t: 'sure', form, skin, name, kind: st.ki, other: st.oi, draws } };
+}
+
+/** The classic “Probably …” answer as one of the four words: the good guess after a streak. */
+const PROBABLY = 'likely' satisfies Word;
+
+/**
+ * The kid-only form of a “for sure” item, on the same draws, with its hint and teaching. Form 'know': “Does Kai know
+ * this for sure?” about the first answer a player sees, said in fewer words: Yes only for what Kai saw. Form 'best':
+ * which of the four words is best for “The next one is …” (the streak's kind): the good guess, as the classic answer
+ * “Probably …” says (Likely), and Must is its trap.
+ */
+function sureAlt(st: Streak, form: 'know' | 'best', pool: Record<string, { label: string; fb?: ChoiceFeedback }>, first: string, help: Pick<ItemCore, 'hint' | 'hintCase' | 'teach'>): ChooseItem {
+  const { s, k, o, name, draws } = st;
+  const lead = `${hiddenLine(st)} All ${draws} were ${k.are}.`;
+  const shared = { kind: 'choose' as const, scene: drawsScene(name, k, draws), hint: help.hint, hintCase: help.hintCase, teach: help.teach };
+  if (form === 'know') {
+    // Only what was seen is sure: the claim about the draws themselves.
+    const sure = first === 'saw';
+    const says: Record<string, string> = {
+      saw: `${name} saw ${draws} ${k.many}.`,
+      all: `Every ${s.noun} is ${k.is}.`,
+      must: `The next ${s.noun} must be ${k.is}.`,
+      none: `${cap(s.the)} has no ${o.many}.`,
+    };
+    const feedback: Record<string, ChoiceFeedback> = sure
+      ? {
+          no: {
+            headline: `Your answer says ${name} is not sure of the draws, but ${name} saw each one.`,
+            detail: [`Your answer means even what ${name} saw is a guess.`, `${name} looked at all ${draws} ${s.nouns}, and all were ${k.are}. That part is sure.`, `Only the rest of ${s.the} is hidden, so only the rest is a guess.`],
+            example: {
+              label: `${name}’s ${draws} draws: all ${k.are}.`,
+              truths: [{ who: `${name} saw them`, value: true }, { who: 'Your answer', value: false }],
+              note: 'What you saw is sure. The rest is a guess.',
+            },
+          },
+        }
+      : { yes: pool[first].fb! };
+    return kidAlt('pattern-sure', {
+      ...shared,
+      prompt: `${lead} Is this something ${name} knows for sure? “${pool[first].label}”`,
+      choices: yesNoChoices(),
+      answer: sure ? 'yes' : 'no',
+      explain: sure
+        ? `${name} saw those ${draws} ${s.nouns}, and all were ${k.are}. What you saw is sure. Only the rest of ${s.the} is a guess.`
+        : `${name} saw only ${draws} ${s.nouns}, and all were ${k.are}. That is sure. “${pool[first].label}” is about what ${name} has not seen, so it is a guess.`,
+      feedback,
+      kid: sureKnowKid(st, says[first], sure),
+    });
+  }
+  // Every word but the good guess is a miss: Must is the classic trap, and the bag gave this kind every time.
+  const feedback: Record<Exclude<Word, typeof PROBABLY>, ChoiceFeedback> = {
+    must: pool.must.fb!,
+    unlikely: {
+      headline: `Your answer says ${k.is} is unlikely, but ${draws} ${k.word} draws in a row make ${k.is} a good guess.`,
+      detail: ['Your answer means fewer fit than not.', `${name} saw ${draws} ${k.many} in a row, and nothing else came out.`, `So ${k.is} is the good guess: likely, but not a must.`],
+      example: hidingCase(st, 'Your answer'),
+    },
+    cant: {
+      headline: `Your answer says ${k.is} can’t come out, but ${draws} ${k.many} already came out.`,
+      detail: ['Your answer means nothing in the bag fits.', `Each ${s.noun} went back, so ${s.the} still has ${k.many}.`, `So ${k.is} can come out again. It is the good guess: likely.`],
+      example: hidingCase(st, 'Your answer'),
+    },
+  };
+  return kidAlt('pattern-sure', {
+    ...shared,
+    prompt: `${lead} Read the sentence: “${nextSays(s, k)}” Which word is best for it?`,
+    choices: wordChoices(),
+    answer: PROBABLY,
+    explain: `After ${draws} ${k.many} in a row, ${k.is} is a good guess. But ${s.the} could still hide something else. So ${k.is} is likely, not a must.`,
+    feedback,
+    kid: sureBestKid(st),
+  });
 }
 
 // ---------- the streak trap: “the other kind is due” ----------
@@ -818,8 +1102,66 @@ export function dueItem(rng: Rng, skin: SkinId, o: { form?: 'known' | 'hidden'; 
     feedback,
     conflict: true,
   };
+  item.kid = kidWithAlt(dueAlt(st, counts, pool[right].label, item, sameBag));
   syncWhyWrong(item);
   return { tag: 'pattern-due', item, model: { t: 'due', form, skin, name, kind: st.ki, other: st.oi, draws, ...(counts ? { counts } : {}) } };
+}
+
+/** What “due” means, and why nothing is due when each draw goes back. */
+const DUE_MEANS = '“Due” means it has to come soon. When each draw goes back, nothing in the bag is ever due.';
+
+/**
+ * The kid-only form of the streak trap, on the same case, with its hint and teaching. Bag open (`counts`): which of
+ * the four words fits after the streak, asked about the other kind (the one a child calls due) after an even streak,
+ * else about the streak's own kind; the bag did not change, so the word is the one its counts give. Bag hidden: the
+ * classic question “Is Kai right?” with a yes tile and a no tile, answered as the classic answer (“No. Past draws …”).
+ */
+function dueAlt(st: Streak, counts: Counts | undefined, rightLabel: string, item: ItemCore, sameBag: (c?: Counts) => string): ChooseItem {
+  const { s, k, o, name, draws } = st;
+  const shared = { kind: 'choose' as const, scene: item.scene, hint: item.hint, hintCase: item.hintCase, teach: item.teach, conflict: true };
+  if (counts) {
+    const ai = draws % 2 === 0 ? st.oi : st.ki;
+    const a = s.kinds[ai];
+    const w = wordFor(counts[ai], totalOf(counts));
+    const feedback: Record<string, ChoiceFeedback> = {};
+    for (const x of WORDS) {
+      if (x === w) continue;
+      const fb = chanceFeedback(s, counts, ai, x, WORD_LABEL[x]);
+      // A “due” pick (the other kind is likely now, or must come) first hears what “due” means.
+      const due = ai === st.oi && (x === 'likely' || x === 'must');
+      feedback[x] = { ...fb, detail: [...(due ? [DUE_MEANS] : []), sameBag(counts), ...fb.detail] };
+    }
+    return kidAlt('pattern-due', {
+      ...shared,
+      prompt: `${cap(s.the)} has ${bagText(s, counts)}. ${name} takes one ${s.noun} without looking and puts it back each time. The last ${draws} were all ${k.are}. Read the sentence: “${nextSays(s, a)}” Which word fits it now?`,
+      choices: wordChoices(),
+      answer: w,
+      explain: `${sameBag(counts)} So ${a.is} is still ${WORD_LABEL[w].toLowerCase()}, and nothing is due.`,
+      feedback,
+      kid: dueKnownKid(st, a, w, counts),
+    });
+  }
+  const answer = yesNoOfLabel(rightLabel);
+  if (answer !== 'no') throw new Error('dueAlt: the hidden bag’s answer is No');
+  return kidAlt('pattern-due', {
+    ...shared,
+    prompt: item.prompt,
+    choices: yesNoChoices(),
+    answer,
+    explain: item.explain,
+    feedback: {
+      yes: {
+        headline: `Your answer says ${o.is} is due, but a streak does not change ${s.the}.`,
+        detail: [DUE_MEANS, sameBag(), `${cap(s.the)} might have no ${o.many} at all. Then ${o.is} could never come out.`],
+        example: {
+          label: `A bag with only ${k.many}.`,
+          truths: [{ who: `Fits the ${draws} draws`, value: true }, { who: 'Your answer', value: false }],
+          note: `This bag fits the draws, and ${withA(o.one)} can never come out of it.`,
+        },
+      },
+    },
+    kid: dueHiddenKid(st),
+  });
 }
 
 // ---------- can it fail? A new case breaks the streak ----------
@@ -946,8 +1288,48 @@ export function breakItem(rng: Rng, skin: SkinId, o: { form?: 'proof' | 'show'; 
     feedback,
     tags: ['can-fail'],
   };
+  item.kid = kidWithAlt(breakAlt(st, form, pool, item, broke));
   syncWhyWrong(item);
   return { tag: 'pattern-break', item, model: { t: 'break', form, skin, name, kind: st.ki, other: st.oi, draws } };
+}
+
+/**
+ * The kid-only form of the can-fail question, on the same draws, with its hint and teaching, as a yes tile and a no
+ * tile. Form 'proof': the classic question “Did the streak prove the next draw?”, answered as the classic answer
+ * (“No. A streak is a good guess, not a proof.”). Form 'show': “Did the new one break the pattern?”: Yes, since it is
+ * another kind than the streak's.
+ */
+function breakAlt(st: Streak, form: 'proof' | 'show', pool: Record<string, { label: string; fb?: ChoiceFeedback }>, item: ItemCore, broke: TeachCase): ChooseItem {
+  const { s, k, o, name, draws } = st;
+  const answer = form === 'proof' ? yesNoOfLabel(pool.guess.label) : st.oi !== st.ki ? 'yes' : 'no';
+  if (answer !== (form === 'proof' ? 'no' : 'yes')) throw new Error('breakAlt: a streak proves nothing, and a new kind breaks it');
+  const feedback: Record<string, ChoiceFeedback> =
+    form === 'proof'
+      ? { yes: pool.proof.fb! }
+      : {
+          no: {
+            headline: `Your answer keeps the old pattern, but ${withA(o.one)} just came out of ${s.the}.`,
+            detail: ['Your answer means the pattern still holds.', `The ${o.one} is a real draw. It shows ${s.the} has more than ${k.many}.`, 'When a new case breaks a pattern, change the guess. Do not throw out the case.'],
+            example: broke,
+          },
+        };
+  return kidAlt('pattern-break', {
+    kind: 'choose',
+    prompt:
+      form === 'proof'
+        ? item.prompt
+        : `${name} can’t see inside ${s.the}. ${name} took out ${draws} ${k.many} in a row, putting each one back. Then ${withA(o.one)} came out! Did the ${o.one} break the pattern?`,
+    scene: item.scene,
+    choices: yesNoChoices(),
+    answer,
+    explain: item.explain,
+    hint: item.hint,
+    hintCase: item.hintCase,
+    teach: item.teach,
+    feedback,
+    tags: ['can-fail'],
+    kid: breakKid(st, form),
+  });
 }
 
 // ---------- See and Do: the worked bag, its cards and boards ----------

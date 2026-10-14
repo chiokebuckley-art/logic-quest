@@ -7,6 +7,7 @@ import { newEvidence, parseEvidence, type Evidence } from '../evidence';
  */
 import type { StopProgress } from '../journey/mastery';
 import type { Notebook } from '../notebook';
+import { GRADE_IDS, type GradeId } from '../types';
 import { parseLink, type SyncLink } from './syncLink';
 
 export const REGISTRY_KEY = 'logic-quest.players.v1';
@@ -37,6 +38,11 @@ export interface Settings {
   timer: boolean;
   readAloud: boolean;
   reduceMotion: boolean;
+  /**
+   * "Read aloud by itself" (Kid Journey, Grades 1 to 3): each new card and question starts reading after a tap.
+   * Missing until a grown-up sets it: then it follows the grade (on for Grades 1 and 2, off otherwise).
+   */
+  autoRead?: boolean;
 }
 
 /** answered, right on the first try */
@@ -118,6 +124,71 @@ export interface SaveData {
    * the diagnostic, primers passed, plain labels. One top-level key, so an older copy carries it through untouched.
    */
   evidence: Evidence;
+  /** The Kid Journey: grade, placement, stars, world checks and glow (docs/KID-JOURNEY.md). */
+  kid: KidSave;
+}
+
+/** How a round was starred: every try first-try with no hint (clean), or finished after a repair (mended). */
+export type StarKind = 'clean' | 'mended';
+
+/**
+ * One world of the Kid Journey: the day its check was first passed, its tries, and the last "not yet": the rounds it
+ * missed and the ones played again since (like a stop check's notYet). The retry opens once `redone` covers `missed`.
+ */
+export interface KidWorld {
+  passDay?: string;
+  tries: number;
+  notYet?: { day: string; missed: string[]; redone: string[] };
+}
+
+/**
+ * The Kid Journey's save key (docs/KID-JOURNEY.md): the grade, how it was placed, the stars by lesson, the world
+ * checks, and the glow a lesson's star gets from its stop's lock-in (1) and week (2) checks. Stickers, buildings and
+ * badges are derived from these, never stored.
+ */
+export interface KidSave {
+  /** null: not chosen (a grown-up, or the classic Journey). */
+  grade: GradeId | null;
+  placed?: { grade: GradeId; day: string; by: 'check' | 'grownup' };
+  stars: Record<string, StarKind>;
+  worlds: Record<string, KidWorld>;
+  glow: Record<string, 1 | 2>;
+}
+
+export const newKid = (): KidSave => ({ grade: null, stars: {}, worlds: {}, glow: {} });
+
+const LESSON_RE = /^s\d{1,2}\.l\d{1,2}$/;
+const WORLD_RE = /^(g[1-8]|hs)\.w\d{1,2}$/;
+const isGrade = (x: unknown): x is GradeId => typeof x === 'string' && (GRADE_IDS as readonly string[]).includes(x);
+
+/** Whitelist the Kid Journey key: anything missing or damaged gets the defaults (an older save has none). */
+export function parseKid(raw: unknown): KidSave {
+  const k = newKid();
+  if (!isObj(raw)) return k;
+  if (isGrade(raw.grade)) k.grade = raw.grade;
+  const pl = raw.placed;
+  if (isObj(pl) && isGrade(pl.grade) && isDay(pl.day) && (pl.by === 'check' || pl.by === 'grownup')) k.placed = { grade: pl.grade, day: pl.day, by: pl.by };
+  if (isObj(raw.stars)) {
+    for (const [id, v] of Object.entries(raw.stars).slice(0, 400)) if (LESSON_RE.test(id) && (v === 'clean' || v === 'mended')) k.stars[id] = v;
+  }
+  if (isObj(raw.worlds)) {
+    for (const [id, w] of Object.entries(raw.worlds).slice(0, 100)) {
+      if (!WORLD_RE.test(id) || !isObj(w)) continue;
+      const out: KidWorld = { tries: num(w.tries, 0, 1e6) };
+      if (isDay(w.passDay)) out.passDay = w.passDay;
+      const ny = w.notYet;
+      if (isObj(ny) && isDay(ny.day)) {
+        const missed = [...new Set(strs(ny.missed, 10).filter((id) => LESSON_RE.test(id)))];
+        // An older save has no `redone`: nothing played again yet.
+        out.notYet = { day: ny.day, missed, redone: [...new Set(strs(ny.redone, 10).filter((id) => missed.includes(id)))] };
+      }
+      k.worlds[id] = out;
+    }
+  }
+  if (isObj(raw.glow)) {
+    for (const [id, v] of Object.entries(raw.glow).slice(0, 400)) if (LESSON_RE.test(id) && (v === 1 || v === 2)) k.glow[id] = v;
+  }
+  return k;
 }
 
 export interface KV {
@@ -129,7 +200,7 @@ export interface KV {
 export const DEFAULT_SETTINGS: Settings = { timer: true, readAloud: true, reduceMotion: false };
 
 export function newSave(now = Date.now()): SaveData {
-  return { patternBridge: freshBridge(), game: 'logic-quest', v: SAVE_VERSION, savedAt: now, stops: {}, stats: {}, active: {}, settings: { ...DEFAULT_SETTINGS }, notebook: {}, fixedCount: 0, help: {}, gaps: [], lessonRun: null, drilled: [], evidence: newEvidence() };
+  return { patternBridge: freshBridge(), game: 'logic-quest', v: SAVE_VERSION, savedAt: now, stops: {}, stats: {}, active: {}, settings: { ...DEFAULT_SETTINGS }, notebook: {}, fixedCount: 0, help: {}, gaps: [], lessonRun: null, drilled: [], evidence: newEvidence(), kid: newKid() };
 }
 
 /** Skill tags look like 's2.or-both'. Anything else in an imported save is dropped (it would also break the CSV). */
@@ -233,6 +304,7 @@ export function parseSave(raw: unknown): SaveData | null {
   }
   if (Array.isArray(raw.drilled)) s.drilled = [...new Set(strs(raw.drilled, 400).filter((id) => /^s\d{1,2}\.l\d{1,2}$/.test(id)))];
   s.evidence = parseEvidence(raw.evidence);
+  s.kid = parseKid(raw.kid);
   if (Array.isArray(raw.gaps)) s.gaps = [...new Set(raw.gaps.filter((g): g is string => typeof g === 'string' && /^s\d{1,2}\.[\w.:-]{1,120}$/.test(g)))].slice(-MAX_GAPS);
   if (isObj(raw.settings)) {
     const st = raw.settings;
@@ -240,6 +312,7 @@ export function parseSave(raw: unknown): SaveData | null {
       timer: typeof st.timer === 'boolean' ? st.timer : DEFAULT_SETTINGS.timer,
       readAloud: typeof st.readAloud === 'boolean' ? st.readAloud : DEFAULT_SETTINGS.readAloud,
       reduceMotion: typeof st.reduceMotion === 'boolean' ? st.reduceMotion : DEFAULT_SETTINGS.reduceMotion,
+      ...(typeof st.autoRead === 'boolean' ? { autoRead: st.autoRead } : {}),
     };
   }
   // Fields from a newer version are carried through untouched, so an older tab that saves does not wipe them.

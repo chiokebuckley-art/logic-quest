@@ -1,4 +1,8 @@
-/** Hosts one lesson: key-idea cards, then guided tries. */
+/**
+ * Hosts one lesson: key-idea cards, then guided tries. A round opened from the Kid Journey's grade map (or from a
+ * world check's "Learn it again") skips the stop-order and place gates and names its round and world in the header.
+ * Every lesson this screen completes is starred first (clean or mended, from the run's summary), then recorded done.
+ */
 import { useState } from 'react';
 import { lessonWaitsFor, planKey } from '../../engine/drill';
 import { seedFor } from '../../engine/journey/mastery';
@@ -7,6 +11,9 @@ import { stopById } from '../../content/stops';
 import { useStore, type Route } from '../store';
 import { LessonRunner } from '../components/LessonRunner';
 import { lessonLevel, placeNeeds } from '../observatory';
+import { bandOf, worldOf } from '../../content/grades';
+import { KidModeContext, kidModeOf } from '../kidMode';
+import { starsIn } from '../kid';
 
 type LessonRoute = Extract<Route, { name: 'lesson' }>;
 
@@ -23,7 +30,7 @@ export function LessonScreen({ route }: { route: LessonRoute }) {
   // or a run that has used up its quiz items.
   const [run, setRun] = useState(() => {
     const r = save?.lessonRun;
-    if (!r || !lesson || r.lessonId !== route.lessonId || r.stopId !== route.stopId || route.from === 'check') return null;
+    if (!r || !lesson || r.lessonId !== route.lessonId || r.stopId !== route.stopId || route.from === 'check' || route.from === 'worldcheck') return null;
     if (r.next > 0 && !r.results) return null;
     if (r.next >= MAX_RUN) return null;
     if (r.plan !== planKey(lesson, r.seed, level)) return null;
@@ -34,6 +41,10 @@ export function LessonScreen({ route }: { route: LessonRoute }) {
 
   const last = state.lastCheck && state.lastCheck.stopId === route.stopId ? state.lastCheck : null;
   const resultRoute: Route | null = route.from === 'check' && last ? { name: 'check', stopId: last.stopId, kind: last.kind, result: true } : null;
+  /** The round's world on the grade map, and the world check result a "Learn it again" came from. */
+  const world = worldOf(route.lessonId);
+  const lastWorld = state.lastWorldCheck && world && state.lastWorldCheck.worldId === world.id ? state.lastWorldCheck : null;
+  const fromMap = route.from === 'grades' || route.from === 'worldcheck';
 
   /** Leaving without finishing: back to where the lesson was opened. */
   const back = (): Route => {
@@ -43,6 +54,8 @@ export function LessonScreen({ route }: { route: LessonRoute }) {
       case 'journey': return { name: 'journey' };
       case 'stop': return { name: 'stop', stopId: route.stopId };
       case 'check': return resultRoute ?? { name: 'stop', stopId: route.stopId };
+      case 'grades': return { name: 'journey', track: 'grades' };
+      case 'worldcheck': return lastWorld ? { name: 'worldcheck', worldId: lastWorld.worldId, result: true } : { name: 'journey', track: 'grades' };
     }
   };
 
@@ -67,7 +80,8 @@ export function LessonScreen({ route }: { route: LessonRoute }) {
   }
 
   // An Observatory place opens on skills: the lessons it requires (anywhere), the diagnostic's credit, or its primer.
-  const needs = stop.lessonOrder === 'free' ? placeNeeds(lesson, save) : [];
+  // A round from the grade map skips this gate and the next: the map's order already puts what it needs first.
+  const needs = stop.lessonOrder === 'free' && !fromMap ? placeNeeds(lesson, save) : [];
   if (needs.length) {
     return (
       <div className="page">
@@ -86,7 +100,7 @@ export function LessonScreen({ route }: { route: LessonRoute }) {
 
   // Lessons open in teaching order (from the Library or a search too): the lesson before must be done, or its
   // guided boards marked, first.
-  const waits = lessonWaitsFor(stop, lesson.id, save.stops[stop.id]?.lessonsDone ?? [], save.drilled ?? []);
+  const waits = fromMap ? null : lessonWaitsFor(stop, lesson.id, save.stops[stop.id]?.lessonsDone ?? [], save.drilled ?? []);
   if (waits) {
     const n = stop.lessons.indexOf(waits) + 1;
     return (
@@ -102,9 +116,23 @@ export function LessonScreen({ route }: { route: LessonRoute }) {
     );
   }
 
+  // The star screen's "k of n": the grade's stars with this round's star counted, toward the grade badge.
+  const band = bandOf(lesson.id);
+  const kidMode = kidModeOf(save);
+  const tally = band && kidMode ? starsIn(save, band) : null;
+  const kidTally = tally ? { got: tally.got + (save.kid.stars[lesson.id] ? 0 : 1), of: tally.of } : undefined;
+
+  const round = fromMap && world ? { k: world.rounds.indexOf(lesson.id) + 1, n: world.rounds.length } : undefined;
+  // Classic play names the world too; in kid mode the header is "Round k of n" alone (LessonRunner).
+  const over = round && world ? `Round ${round.k} of ${round.n} · ${world.title}` : undefined;
+
   return (
+    <KidModeContext.Provider value={kidMode}>
     <div className="page-play">
       <LessonRunner
+        over={over}
+        round={round}
+        kidTally={kidTally}
         key={seed}
         stop={stop}
         lesson={lesson}
@@ -124,12 +152,15 @@ export function LessonScreen({ route }: { route: LessonRoute }) {
         }}
         onProgress={(p) => actions.setLessonRun({ stopId: stop.id, lessonId: lesson.id, seed, plan: planKey(lesson, seed, level), ...p })}
         onDrilled={() => actions.markDrilled(lesson.id)}
-        onComplete={() => {
+        onComplete={(summary) => {
+          // The star comes from the run's own results (the pass rule), before the lesson is recorded and its run cleared.
+          actions.starRound(lesson.id, summary.clean ? 'clean' : 'mended');
           actions.completeLesson(stop.id, lesson.id);
           actions.navigate(afterDone(lesson.id));
         }}
         onExit={() => actions.navigate(back())}
       />
     </div>
+    </KidModeContext.Provider>
   );
 }

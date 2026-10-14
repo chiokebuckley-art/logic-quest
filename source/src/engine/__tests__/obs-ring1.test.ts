@@ -6,9 +6,15 @@
  * instead of letter names), plus the shapes the contract asks for, the acceptance checks of docs/OBSERVATORY.md §4
  * that this ring owns, the words (curly quotes, no symbols, reading level) and the Track 1 diagnostic items.
  */
+import { createElement as h } from 'react';
+import { renderToString } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { S14_EXAMPLES, stop14 } from '../../content/stop14';
+import { gradeById } from '../../content/grades';
+import { ECHO_KID, REPAIR_KID, S14_EXAMPLES, STAR_KID, stop14 } from '../../content/stop14';
 import { S14_WORLD } from '../../content/world/s14';
+import { KidModeContext } from '../../game/kidMode';
+import { isPicto } from '../../game/components/Pictogram';
+import { ChainView } from '../../game/components/scenes/ChainScene';
 import { chainSpeech } from '../../game/components/scenes/speech';
 import { checkDrill, marksToTap } from '../drill';
 import { looks } from '../fresh';
@@ -17,7 +23,7 @@ import { READING, fkGrade, longestSentence } from '../readability';
 import { createRng } from '../rng';
 import type { ChainScene } from '../scenes/chain';
 import { caseText, teachStrings } from '../teach';
-import type { ChooseItem, DrillStep, Item, LessonDef } from '../types';
+import type { ChooseItem, DrillStep, Item, LessonDef, TeachCase, Thing } from '../types';
 
 // ---------- second methods (never the generator's own code) ----------
 
@@ -720,5 +726,193 @@ describe('the Track 1 diagnostic items and the new examples after a miss', () =>
       expect(stop14.skillNames?.[s], s).toBeTruthy();
       expect(S14_WORLD.skills[s]?.length, s).toBeGreaterThan(0);
     }
+  });
+});
+
+// ---------- the kid layer (Grades 1 to 3, docs/KID-JOURNEY.md) ----------
+
+/** A twin's card by its color (the twins are red circles and yellow squares), or null for a face-down gap. */
+const twinName = (t: Thing) => (t.hidden ? null : t.color);
+const kidChain = (scene: ChainScene) =>
+  renderToString(h(KidModeContext.Provider, { value: { grade: 'g1', budget: gradeById('g1').budget, autoRead: false } }, h(ChainView, { scene, shown: 0 })));
+
+describe('the kid layer (Grades 1 to 3)', () => {
+  it('every item anywhere in the ring has its kid block: a prompt, a miss line, a Yes! line, a Show me twin, a hint of 8 words or fewer', () => {
+    for (const it of ALL) {
+      const k = it.kid!;
+      expect(k, it.id).toBeTruthy();
+      for (const t of [k.prompt, k.nope, k.yes!, k.hint!, k.show!.label]) {
+        expect(t, it.id).toBeTruthy();
+        expect(t, t).not.toMatch(STRAIGHT);
+        expect(t, t).not.toMatch(SYMBOLS);
+      }
+      expect(k.hint!.split(/\s+/).length, k.hint).toBeLessThanOrEqual(8);
+    }
+  });
+
+  it('a piece answer is a picture tile with no word (cards, sounds, beads, names, and a letter as its tile)', () => {
+    const pieceItems = ALL.filter((x): x is ChooseItem => x.kind === 'choose' && x.choices.every((c) => /^pc\d$/.test(c.id)));
+    expect(pieceItems.length).toBeGreaterThan(0);
+    for (const it of pieceItems) {
+      for (const c of it.choices) {
+        expect(c.art && isPicto(c.art), `${it.id} ${c.label}`).toBe(true);
+        expect(c.word, `${it.id} ${c.label}`).toBe('');
+        if (/^[A-Z]$/.test(c.label)) expect(c.art).toBe(C.tokenArt({ letter: c.label, label: c.label }));
+      }
+    }
+  });
+
+  it('the kid alternates ask the same chain, and their answers check out by brute force', () => {
+    const yes = (b: boolean) => (b ? 'yes' : 'no');
+    let n = 0;
+    for (const it of ALL) {
+      const alt = it.kid?.alt as ChooseItem | undefined;
+      if (!alt) continue;
+      n++;
+      expect(alt.kind, it.id).toBe('choose');
+      expect(alt.frame, it.id).toBeUndefined();
+      expect(alt.skill, it.id).toBe(it.skill);
+      expect(alt.scene, it.id).toEqual(it.scene);
+      expect(alt.kid?.alt, it.id).toBeUndefined();
+      expect(alt.choices.map((c) => c.id)).toContain(alt.answer);
+      const xs = labelsOf(it);
+      if (it.skill === 's14.unit-why') {
+        const block = /“(.+)”/.exec(alt.kid!.prompt)![1].split(', ');
+        expect(xs.slice(0, block.length)).toEqual(block);
+        expect(alt.answer, it.id).toBe(yes(bfMiss(xs, block.length) < 0));
+      } else if (it.skill === 's14.unit') expect(Number(alt.answer), it.id).toBe(bfShortest(xs));
+      else if (it.skill === 's14.repair-why') {
+        const rule = statedBlock((it.scene as ChainScene).stated);
+        expect(alt.answer, it.id).toBe(yes(xs.every((x, i) => x === rule[i % rule.length])));
+      } else if (it.skill === 's14.echo-why') {
+        expect(alt.answer, it.id).toBe(yes(/the same spots match\?$/.test(alt.kid!.prompt)));
+      } else if (it.skill === 's14.translate') {
+        const block = alt.choices.find((c) => c.id === alt.answer)!.label.split(', ');
+        expect(sameStructure(xs.slice(0, block.length), block), it.id).toBe(true);
+      } else {
+        // The faded items without their frame: the same choices and answer.
+        expect(alt.answer, it.id).toBe((it as ChooseItem).answer);
+        expect(alt.choices, it.id).toEqual((it as ChooseItem).choices);
+      }
+    }
+    expect(n).toBeGreaterThan(100);
+  });
+
+  it('Repair Bench draws its rule above the chain in kid mode: a sign, then the stated block as pictures', () => {
+    for (const it of ALL.filter((x) => x.lesson === 's14.l2')) {
+      const k = (it.kid?.alt ?? it).kid!;
+      if (it.skill === 's14.is-repeat') continue;
+      const sc = k.scene!;
+      expect(sc.kind === 'pictos' && sc.keep, it.id).toBe(true);
+      if (sc.kind !== 'pictos') continue;
+      const rule = statedBlock((it.scene as ChainScene).stated);
+      expect(sc.rows[0][0], it.id).toEqual({ art: 'signpost', word: 'Rule' });
+      const tokens = (it.scene as ChainScene).tokens;
+      const artOf = (l: string) => {
+        const t = tokens.find((x) => x.label === l)!;
+        return t.shape && t.color ? `card-big-${t.color}-${t.shape}` : C.tokenArt(t);
+      };
+      expect(sc.rows[0].slice(1).map((p) => p.art), it.id).toEqual(rule.map(artOf));
+    }
+  });
+
+  it('the Show me twins are solved right, checked against their own cards', () => {
+    const shows = new Map<string, TeachCase>();
+    for (const it of ALL) if (it.kid?.show?.things) shows.set(JSON.stringify(it.kid.show), it.kid.show);
+    expect(shows.size).toBe(9);
+    for (const c of shows.values()) {
+      const cards = c.things!.map(twinName);
+      const seen = cards.filter((x): x is NonNullable<typeof x> => x !== null);
+      const say = `${c.label} ${c.note}`.toLowerCase();
+      if (c.label === 'What comes next?') expect(c.note!.toLowerCase()).toContain(bfAt(seen.slice(0, bfShortest(seen)), seen.length + 1)!);
+      else if (c.label === 'Spot 6?') expect(c.note!.toLowerCase()).toContain(bfAt(seen.slice(0, bfShortest(seen)), 6)!);
+      else if (c.label === 'The gap?') {
+        const gap = cards.indexOf(null);
+        const unit = cards.slice(0, gap) as string[];
+        expect(gap).toBeGreaterThan(1);
+        expect(c.note!.toLowerCase().startsWith(bfAt(unit.slice(0, bfShortest(unit)), gap + 1))).toBe(true);
+        for (let i = gap + 1; i < cards.length; i++) expect(cards[i]).toBe(bfAt(unit.slice(0, bfShortest(unit)), i + 1));
+      } else if (c.label === 'Red alone?') expect(say).toContain(`spot ${bfMiss(seen, 1) + 1}`);
+      else if (c.label === 'Spot 6 breaks.') {
+        // The rule is red, yellow: the first piece that breaks it is spot 6, and the rule puts yellow there.
+        expect(bfMiss(seen, 2) + 1).toBe(6);
+        expect(c.note!.toLowerCase()).toContain(bfAt(seen.slice(0, 2), 6));
+      } else if (c.label === 'Repeats?') expect(c.note!.startsWith(bfRepeats(seen) ? 'Yes' : 'No')).toBe(true);
+      else {
+        // The unit and its length: red, yellow, 2.
+        expect(bfShortest(seen)).toBe(2);
+        expect(say).toMatch(/red, yellow/);
+      }
+    }
+  });
+
+  it('Echo Bells’ twins read a block of another skin in letters and say which spots match', () => {
+    for (const it of ALL.filter((x) => x.lesson === 's14.l3')) {
+      const show = it.kid!.show!;
+      const m = /^(.+) is ([A-C](?:, [A-C])+)\.$/.exec(show.label)!;
+      expect(m, show.label).toBeTruthy();
+      const block = m[1].toLowerCase().split(', ');
+      const letters = m[2].split(', ');
+      expect(sameStructure(block, letters), show.label).toBe(true);
+      // The twin is never in the item's own pieces.
+      const own = new Set(labelsOf(it).map((x) => x.toLowerCase()));
+      expect(block.some((x) => own.has(x)), `${it.id} ${show.label}`).toBe(false);
+      const pairs = letters.flatMap((a, i) => letters.slice(i + 1).flatMap((b, d) => (a === b ? [`${i + 1} and ${i + d + 2}`] : [])));
+      expect(show.note).toBe(`Spots ${pairs.join(', and ')} match.`);
+    }
+  });
+
+  it('the rounds’ kid layers: one card per card, one board per board, a row per row, and every named picture drawn', () => {
+    for (const [l, kid] of [[STAR, STAR_KID], [REPAIR, REPAIR_KID], [ECHO, ECHO_KID]] as const) {
+      expect(l.kid).toBe(kid);
+      expect(kid.cards).toHaveLength(l.ideas.length);
+      expect(kid.board).toHaveLength(boardsOf(l).length);
+      kid.board!.forEach((b, j) => expect(b.rows, `${l.id} board ${j + 1}`).toHaveLength(boardsOf(l)[j].rows.length));
+      for (const c of kid.cards) expect(c.art !== 'scene' && !!c.art && isPicto(c.art), c.line).toBe(true);
+      for (const b of kid.board!) for (const r of b.rows ?? []) if (r.art) expect(isPicto(r.art), r.art).toBe(true);
+    }
+    // Repair Bench's letter board draws each part's letters under the rule's (K, M, M): a part that matches, or K, M, K.
+    const twin = S14_EXAMPLES.REPAIR_TWIN;
+    const rows = REPAIR_KID.board![1].rows!.slice(0, -1);
+    expect(rows.map((r) => r.label)).toEqual(C.blocksOf(twin).map((x) => `Part ${x.j}`));
+    expect(C.unitText(twin)).toBe('K, M, M');
+    expect(rows.map((r) => r.art)).toEqual(C.blocksOf(twin).map((x) => {
+      const part = twin.seq.slice(x.s - 1, x.e).map((i) => twin.skin.pieces[i].token.label).join(', ');
+      return part === 'K, M, M' ? 'repair-kmm-ok' : part === 'K, M, K' ? 'repair-kmm-break' : 'none';
+    }));
+  });
+
+  it('a kid chain is a picture: no stated line, no captions or numbers; word pieces as pictures, letters as letter tiles', () => {
+    const shapes = ALL.find((x) => x.skill === 's14.extend' && (x.scene as ChainScene).tokens[0].shape)!.scene as ChainScene;
+    const kid = kidChain(shapes);
+    expect(kid).not.toContain('play-ob-stated');
+    expect(kid).not.toContain('play-ob-pos');
+    expect(kid).not.toContain('play-ob-caption');
+    expect(kid).toContain(`>${shapes.stated}<`); // for screen readers only
+    expect(kid).toContain('class="play-sr"');
+    // The classic chain keeps all of them.
+    const classic = renderToString(h(ChainView, { scene: shapes, shown: 0 }));
+    expect(classic).toContain('play-ob-stated');
+    expect(classic).toContain('play-ob-pos');
+    expect(classic).toContain('play-ob-caption');
+    for (const skin of ['sounds', 'bells', 'moves', 'timetable', 'rota'] as const) {
+      const sc: ChainScene = { kind: 'chain', tokens: C.tokensOf(C.modelOf(C.makeSkin(skin), [0, 1, 1], 6)), stated: 'x' };
+      const out = kidChain(sc);
+      for (const t of sc.tokens) {
+        expect(out, `${skin} ${t.label}`).toContain(`data-picto="${C.tokenArt(t)}"`);
+        expect(out).toContain(`aria-label="${t.label}"`);
+      }
+      expect(out).not.toContain('play-ob-token-face');
+    }
+    for (const skin of ['letters', 'abc'] as const) {
+      const letters: ChainScene = { kind: 'chain', tokens: C.tokensOf(C.modelOf(C.makeSkin(skin), [0, 1], 4)), stated: 'x' };
+      const out = kidChain(letters);
+      expect(out).not.toContain('play-ob-token-face');
+      for (const t of letters.tokens) expect(out).toContain(`data-picto="${C.tokenArt(t)}"`);
+    }
+    // A break is flagged by an icon with its name, not a word.
+    const broken: ChainScene = { ...shapes, broken: 2 };
+    expect(kidChain(broken)).toContain('aria-label="Look again"');
+    expect(kidChain(broken)).not.toMatch(/>Look again</);
   });
 });

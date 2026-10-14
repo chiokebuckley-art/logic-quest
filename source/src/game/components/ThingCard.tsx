@@ -10,7 +10,7 @@ import { thingName } from '../speech';
 
 const FILL: Record<Color, string> = { red: '#ff4d6d', blue: '#3b82f6', yellow: '#facc15' };
 
-export type IconName = 'back' | 'speaker' | 'stop' | 'check' | 'cross' | 'lock' | 'clock' | 'bulb' | 'shield' | 'mask' | 'gem' | 'help';
+export type IconName = 'back' | 'speaker' | 'stop' | 'check' | 'cross' | 'lock' | 'clock' | 'bulb' | 'shield' | 'mask' | 'gem' | 'help' | 'next';
 
 /** Small stroke icons, always hidden from screen readers (the button or text around them names them). */
 export function PlayIcon({ name, size = 20 }: { name: IconName; size?: number }) {
@@ -52,6 +52,8 @@ export function PlayIcon({ name, size = 20 }: { name: IconName; size?: number })
       return <svg {...common}><path d="M7 3h10l4 6-9 12L3 9z" /><path d="M3 9h18M7 3l5 6 5-6M12 9v12" /></svg>;
     case 'help':
       return <svg {...common}><circle cx="12" cy="12" r="9" /><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 1-1 1.7" /><path d="M12 17h.01" /></svg>;
+    case 'next':
+      return <svg {...common}><path d="M9 5l7 7-7 7" /></svg>;
   }
 }
 

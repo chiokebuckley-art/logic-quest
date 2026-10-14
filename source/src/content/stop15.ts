@@ -23,7 +23,7 @@ import {
   type Chain, type ElapsedKind,
 } from '../engine/puzzles/observatory/cycles';
 import { looks } from '../engine/fresh';
-import type { ChooseItem, Item, LessonDef, NumberItem, Rng, StopDef, Thing } from '../engine/types';
+import type { ChooseItem, Item, KidLesson, LessonDef, NumberItem, Rng, StopDef, Thing } from '../engine/types';
 
 type Made = ChooseItem | NumberItem;
 type Level = 1 | 2 | 3 | 4;
@@ -235,6 +235,32 @@ function groupPrimer(rng: Rng): Item[] {
 // The places
 // ======================================================================================================
 
+/**
+ * Growing Staircase’s kid layer (Grade 3, docs/KID-JOURNEY.md): one line and a picture per card, one line per board
+ * with a picture on each row to mark, and the star line. The one new word is "term", named on the fourth card. The
+ * items’ kid words come from their generators (growth.ts), and in kid mode the staircase is a picture with no words.
+ */
+const GROWING_KID: KidLesson = {
+  cards: [
+    { line: 'Each step keeps the center tile and adds a pair.', art: 'stair-grow' },
+    { line: 'Step 10 has 10 pairs and the center tile. That is 21 tiles.', art: 'stair-far' },
+    { line: 'Adding 2 only finds the next step. Use the step number to go far.', art: 'stair-next' },
+    { line: 'Term: one number in a list. Term 10 is 9 jumps after term 1.', art: 'jump-list' },
+    { line: 'Is the rule told? Then you know any step. If not, you only guess.', art: 'stair-told' },
+  ],
+  board: [
+    // Step 4 is shown on the cards; steps 5, 8 and 12 are marked one at a time.
+    // Step 12 has two marks, each on its own page with its kid label.
+    {
+      line: 'Count the pairs, then add the center tile.',
+      rows: [{}, { art: 'stair-grow' }, { art: 'stair-grow' }, { art: 'stair-grow', marks: [{ label: 'How many pairs?' }, { label: 'How many tiles?' }] }],
+    },
+    // Term 3 is shown; term 8 is marked (its jumps, then its value).
+    { line: 'Start at 4 and add 5 each time.', rows: [{}, { art: 'jump-list', marks: [{ label: 'How many jumps from term 1?' }, { label: 'What is term 8?' }] }] },
+  ],
+  star: 'You can find far steps!',
+};
+
 const growing: LessonDef = {
   id: 's15.l1',
   title: 'Growing Staircase',
@@ -250,6 +276,7 @@ const growing: LessonDef = {
   pass: { firstTry: 3, include: [{ tag: 'far-step', label: 'a far step worked out from its position, not the next one' }] },
   review: review(stairReview, 's15.l1'),
   independent: stairIndependent,
+  kid: GROWING_KID,
 };
 
 const machine: LessonDef = {

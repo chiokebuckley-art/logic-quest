@@ -26,3 +26,9 @@
   .play-ob-chain-row { gap: 4px; }
   .play-ob-slot { padding: 3px; }
 }
+
+/* Kid mode (Grades 1 to 3): a sound, a bell, a move, a class or a kid of a rota drawn as its picture, the size of a
+   tile; a flag drawn as an icon. */
+.play-ob-token--picto { display: grid; place-items: center; min-width: 44px; min-height: 56px; }
+.play-ob-token--picto.is-small { min-width: 34px; min-height: 44px; }
+.play-ob-flag.play-ob-flag--icon { display: grid; place-items: center; padding: 2px; line-height: 0; }

@@ -2,8 +2,17 @@
  * A lesson, See -> Do -> Quiz: the key-idea cards (ending on a worked example with one case marked), then the
  * guided boards the learner marks by taps, then the quiz tries one at a time (learn mode), then a short recap.
  * The lesson is passed only when the boards are marked right and the pass rule is met (default: 3 right on the
- * first try with no hint); extra quiz items from the same lesson come until it is. onComplete() runs when the
- * player leaves the recap of a passed lesson. Tapping Next through the cards never passes it.
+ * first try with no hint); extra quiz items from the same lesson come until it is. onComplete(summary) runs when the
+ * player leaves the recap of a passed lesson, and reports whether every try was clean. Tapping Next through the
+ * cards never passes it. In kid mode (Grades 1 to 3) the thinking-routine strip and line and the "why it matters"
+ * line stay hidden.
+ *
+ * A round with a kid layer (LessonDef.kid) in kid mode also draws its kid cards and boards and three goal stars in place
+ * of the "To finish" sentence. Every round in kid mode ends on the star screen (passed) or "Not yet. Try again?" (not
+ * passed), never the classic recap, and a round from the grade map (`round`) has the header "Round k of n" alone. Read-aloud starts by itself on each new
+ * card, board, item and the star screen (Grades 1 and 2), from the tap that opened it, and any tap stops it.
+ * In kid mode each quiz item, planned or extra, is drawn as its kid-only alternate when it has one (kidItemOf, applied
+ * by LearnItem); the run keeps the classic items, so extra items and new examples come from what the lesson made.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { extraQuizItem, passGoal, passState, practiceFor, type QuizResult } from '../../engine/drill';
@@ -12,7 +21,7 @@ import { MAX_RUN } from '../../engine/save/save';
 import type { Item, LessonDef, StopDef } from '../../engine/types';
 import { stopLabel } from '../../content/stops';
 import type { AnswerRecord, LessonRunnerProps } from './contracts';
-import { DrillBoard } from './DrillBoard';
+import { DrillBoard, kidBoardPages, kidBoardStep, kidPageSpeech, kidPaged } from './DrillBoard';
 import { IdeaCards } from './IdeaCards';
 import { PlayHeader, type DotState } from './ItemView';
 import { LearnItem } from './LearnItem';
@@ -20,6 +29,24 @@ import { ROUTINE } from '../pattern/bridges';
 import { lessonWorld } from '../../content/world';
 import { PHASE_NAMES, RoutineStrip } from './RoutineStrip';
 import type { Phase } from '../../engine/types';
+import { useKidMode } from '../kidMode';
+import { autoSay, kidCardSpeech, kidItemOf, kidItemSpeech, kidStarSpeech } from '../kidPlay';
+import { stopSpeaking } from '../speech';
+import { GoalStars, KidNotYet, KidStarScreen, roundTitle } from './KidPlay';
+
+/** What a finished lesson run reports: clean when every try was right on the first try, with no hint and no miss before. */
+export interface RunSummary {
+  clean: boolean;
+}
+
+/**
+ * The run's summary, or null when the lesson is not passed: the guided boards must be marked and the pass rule met.
+ * Tapping Next through the cards and boards gives no results, so it never passes and never earns a star.
+ */
+export function runSummary(lesson: LessonDef, drilled: boolean, results: readonly QuizResult[]): RunSummary | null {
+  if (!drilled || !passState(lesson.pass, results).met) return null;
+  return { clean: results.every((r) => r.clean) };
+}
 
 /** The thinking routine shared with Pattern Lab, as one line under the key idea. */
 function RoutineLine() {
@@ -166,7 +193,12 @@ export function RealLife({ world }: { world: NonNullable<ReturnType<typeof lesso
   );
 }
 
-export function LessonRunner({ stop, lesson, seed, level, readAloud, onAnswer, onComplete, onExit, onDrilled, start, onProgress, onRestart }: LessonRunnerProps) {
+export function LessonRunner({ stop, lesson, seed, level, readAloud, onAnswer, onComplete, onExit, onDrilled, start, onProgress, onRestart, over: overLine, kidTally, round }: LessonRunnerProps) {
+  const kid = useKidMode();
+  /** The thinking-routine strip and line show unless the band hides them (Grades 1 to 3). */
+  const strip = !kid || kid.budget.strip;
+  /** The round's kid layer, drawn in kid mode. */
+  const kidLayer = kid && lesson.kid ? lesson.kid : null;
   const drill = lesson.drill ?? [];
   const planned = useMemo(() => practiceFor(lesson, createRng(seed), level).length, [lesson, seed, level]);
   const resumed = !!start && (start.next > 0 || !!start.drilled);
@@ -210,7 +242,7 @@ export function LessonRunner({ stop, lesson, seed, level, readAloud, onAnswer, o
   }, [stepKey]);
 
   const k = stop.lessons.findIndex((l) => l.id === lesson.id);
-  const over = `${stopLabel(stop)} · Lesson ${k >= 0 ? k + 1 : 1} of ${Math.max(1, stop.lessons.length)}`;
+  const over = overLine ?? `${stopLabel(stop)} · Lesson ${k >= 0 ? k + 1 : 1} of ${Math.max(1, stop.lessons.length)}`;
   const pass = passState(lesson.pass, results);
   const passed = drilled && pass.met;
 
@@ -240,14 +272,37 @@ export function LessonRunner({ stop, lesson, seed, level, readAloud, onAnswer, o
       onDrilled?.();
       onProgress?.({ next: resumeAt, firstTry, drilled: true, results });
     }
-    if (s + 1 < stages.length) setStep({ at: 'stage', s: s + 1 });
-    else setStep(resumeAt < items.length ? { at: 'try', i: resumeAt } : { at: 'recap' });
+    const next: Step = s + 1 < stages.length ? { at: 'stage', s: s + 1 } : resumeAt < items.length ? { at: 'try', i: resumeAt } : { at: 'recap' };
+    setStep(next);
+    say(next, items);
+  };
+
+  /** Kid mode: start reading the screen a tap just opened (its kid line, prompt and answers). */
+  const say = (to: Step, list: readonly Item[]) => {
+    if (!kidLayer) return;
+    if (to.at === 'try') autoSay(kid, list[to.i] ? kidItemSpeech(kidItemOf(list[to.i], kid)) : []);
+    else if (to.at === 'recap') autoSay(kid, passed || passState(lesson.pass, results).met ? kidStarSpeech(kidLayer) : []);
+    else {
+      const st = stages[to.s];
+      if (st?.kind === 'cards') {
+        const c = kidLayer.cards[st.from];
+        if (c) autoSay(kid, kidCardSpeech(c));
+      } else if (st?.kind === 'board') {
+        const b = kidLayer.board?.[st.j];
+        // The board's first page as the board itself reads it: its kid-only step when it has one, and for a board
+        // of rows the first mark's page (the line, the row's label, the mark's label); else the line alone.
+        const s = b && drill[st.j] ? kidBoardStep(drill[st.j], b) : undefined;
+        if (b && s) autoSay(kid, kidPageSpeech(b, s, kidPaged(s) ? kidBoardPages(s)[0] : undefined));
+      }
+    }
   };
 
   const finish = () => {
     if (completed.current) return;
     completed.current = true;
-    if (passed) onComplete();
+    // The summary is read from this run's results, before the host records the lesson and clears the saved run.
+    const summary = runSummary(lesson, drilled, results);
+    if (summary) onComplete(summary);
     else onExit();
   };
 
@@ -260,10 +315,12 @@ export function LessonRunner({ stop, lesson, seed, level, readAloud, onAnswer, o
     onProgress?.({ next: i + 1, firstTry: wins, drilled: true, results: now });
     if (i + 1 < items.length) {
       setStep({ at: 'try', i: i + 1 });
+      say({ at: 'try', i: i + 1 }, items);
       return;
     }
     if (passState(lesson.pass, now).met) {
       setStep({ at: 'recap' });
+      if (kidLayer) autoSay(kid, kidStarSpeech(kidLayer));
       return;
     }
     // Not passed yet: one more quiz item from the same lesson (a tag the rule still needs comes first).
@@ -271,9 +328,11 @@ export function LessonRunner({ stop, lesson, seed, level, readAloud, onAnswer, o
     if (more.length > items.length) {
       setItems(more);
       setStep({ at: 'try', i: i + 1 });
+      say({ at: 'try', i: i + 1 }, more);
     } else {
       setOutOfItems(true);
       setStep({ at: 'recap' });
+      autoSay(kid, ['Not yet.', 'Try again?']);
     }
   };
 
@@ -296,16 +355,17 @@ export function LessonRunner({ stop, lesson, seed, level, readAloud, onAnswer, o
   };
 
   return (
-    <div className="play-root" ref={rootRef}>
+    // With read-aloud starting by itself, the next tap anywhere stops it (a tap that opens a new screen starts that one).
+    <div className="play-root" ref={rootRef} onPointerDownCapture={kid?.autoRead ? () => stopSpeaking() : undefined}>
       <PlayHeader
-        over={over}
-        title={lesson.title}
+        over={kid && round ? undefined : over}
+        title={kid && round ? roundTitle(round.k, round.n) : lesson.title}
         onBack={step.at === 'recap' ? finish : onExit}
         backLabel={step.at === 'recap' ? (passed ? 'Finish the lesson' : 'Leave the lesson') : 'Leave the lesson'}
         dots={dots}
         dotsLabel={dotsLabel}
       />
-      {lesson.routine && <RoutineStrip at={stripAt} />}
+      {lesson.routine && strip && <RoutineStrip at={stripAt} />}
       {here?.kind === 'cards' && step.at === 'stage' && (
         <IdeaCards
           key={`cards-${step.s}`}
@@ -313,10 +373,11 @@ export function LessonRunner({ stop, lesson, seed, level, readAloud, onAnswer, o
           numberFrom={here.from + 1}
           numberOf={lesson.ideas.length}
           readAloud={readAloud}
+          kid={kidLayer?.cards.slice(here.from, here.to + 1)}
           doneLabel={cardsDone(step.s).label}
           doneNote={cardsDone(step.s).note}
-          after={lesson.routine ? undefined : <RoutineLine />}
-          why={here.from === 0 ? lessonWorld(lesson.id)?.why : undefined}
+          after={lesson.routine || !strip ? undefined : <RoutineLine />}
+          why={here.from === 0 && !kid ? lessonWorld(lesson.id)?.why : undefined}
           onDone={() => nextStage(step.s)}
         />
       )}
@@ -325,17 +386,19 @@ export function LessonRunner({ stop, lesson, seed, level, readAloud, onAnswer, o
           key={`board-${here.j}`}
           step={drill[here.j]}
           readAloud={readAloud}
+          kid={kidLayer?.board?.[here.j]}
           kicker={drill.length > 1 ? `Do it · ${here.j + 1} of ${drill.length}` : 'Do it'}
-          doneLabel={step.s + 1 < stages.length ? (stages[step.s + 1].kind === 'board' ? 'Next board' : 'Next') : items.length ? 'Start the puzzles' : 'Finish'}
+          doneLabel={kidLayer ? (step.s + 1 < stages.length ? 'Next' : 'Go') : step.s + 1 < stages.length ? (stages[step.s + 1].kind === 'board' ? 'Next board' : 'Next') : items.length ? 'Start the puzzles' : 'Finish'}
           onDone={() => nextStage(step.s)}
         />
       )}
-      {resumed && step.at === 'try' && step.i === resumeAt && resumeAt > 0 && (
+      {resumed && step.at === 'try' && step.i === resumeAt && resumeAt > 0 && !kidLayer && (
         <p className="play-fresh-note" role="status">
           Welcome back. You are on {tryLabel(step.i).toLowerCase()}. Your earlier answers are saved.
         </p>
       )}
-      {step.at === 'try' && (
+      {step.at === 'try' && kidLayer && <GoalStars have={pass.have} need={pass.need} />}
+      {step.at === 'try' && !kidLayer && (
         <p className="play-pass-note">
           To finish: {passGoal(lesson.pass)}
           {pass.missing.length > 0 && pass.have >= pass.need ? `, including ${pass.missing.map((m) => m.label).join(' and ')}` : ''}. You have {pass.have}.
@@ -358,7 +421,21 @@ export function LessonRunner({ stop, lesson, seed, level, readAloud, onAnswer, o
           onDone={(r) => answered(step.i, r)}
         />
       )}
-      {step.at === 'recap' && (
+      {step.at === 'recap' && kid && passed && (
+        <KidStarScreen
+          kind={results.every((r) => r.clean) ? 'clean' : 'mended'}
+          line={kidLayer?.star}
+          got={kidTally?.got}
+          of={kidTally?.of}
+          readAloud={readAloud}
+          onDone={finish}
+        />
+      )}
+      {step.at === 'recap' && kid && !passed && (
+        // Kid mode never shows the classic recap: a round not passed (out of questions) asks to try again.
+        <KidNotYet readAloud={readAloud} onAgain={onRestart ?? finish} />
+      )}
+      {step.at === 'recap' && !kid && (
         <LessonRecap
           stop={stop}
           lesson={lesson}

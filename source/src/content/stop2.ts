@@ -37,6 +37,7 @@ import {
   cardFitting,
   cardId,
   cardName,
+  cardPicto,
   cardTestRow,
   colorIs,
   copiedMarkPicks,
@@ -75,6 +76,7 @@ import {
 import type { Card, CardWords, Feature, FeatureKind, Formula, MatchWords, RuleGuess } from '../engine/puzzles/rules';
 import { FRAMES, rowItem, type RowTemplate } from '../engine/puzzles/statements';
 import { syncWhyWrong } from '../engine/teach';
+import { createRng } from '../engine/rng';
 import type {
   BoardWords,
   ChoiceFeedback,
@@ -88,8 +90,13 @@ import type {
   GlossaryTerm,
   IdeaCard,
   Item,
+  KidItem,
+  KidLesson,
+  KidRow,
+  KidScene,
   LessonDef,
   LessonPass,
+  Picto,
   Rng,
   Scene,
   StopDef,
@@ -657,7 +664,7 @@ const checkedOther = (s: Skin) => `Here is a different ${s.one}, checked for you
 function tapItem(
   b: Base,
   s: Skin,
-  p: { prompt: string; things: Thing[]; rule: Formula; explain: string; hint: string; diagnose: Diag[] },
+  p: { prompt: string; things: Thing[]; rule: Formula; explain: string; hint: string; diagnose: Diag[]; kid?: KidItem },
 ): TapAllItem {
   const answer = pickIds(p.rule, p.things);
   if (answer.length === 0 || answer.length === p.things.length) throw new Error(`${b.id}: trivial answer for ${R(p.rule)}`);
@@ -685,6 +692,7 @@ function tapItem(
     explain: p.explain, hint: `${p.hint} ${checkedOne(s)}`,
     hintCase: hintCaseOf(teach, [(c) => out(c) && onBoard(p.things)(c), out], b.id),
     diagnose, teach,
+    ...(p.kid ? { kid: p.kid } : {}),
   };
 }
 
@@ -692,8 +700,8 @@ function tapItem(
 function chooseItem(
   b: Base,
   p: {
-    prompt: string; scene?: Scene; choices: { id: string; label: string }[]; answer: string; explain: string; hint: string;
-    hintCase: TeachCase; feedback: Record<string, ChoiceFeedback>; teach: Teach;
+    prompt: string; scene?: Scene; choices: { id: string; label: string; art?: Picto; word?: string }[]; answer: string; explain: string; hint: string;
+    hintCase: TeachCase; feedback: Record<string, ChoiceFeedback>; teach: Teach; kid?: KidItem;
   },
 ): ChooseItem {
   if (!p.choices.some((c) => c.id === p.answer)) throw new Error(`${b.id}: answer is not a choice`);
@@ -706,6 +714,7 @@ function chooseItem(
   return syncWhyWrong<ChooseItem>({
     kind: 'choose', ...baseOf(b), prompt: p.prompt, ...(p.scene ? { scene: p.scene } : {}),
     choices: p.choices, answer: p.answer, explain: p.explain, hint: p.hint, hintCase: p.hintCase, feedback, teach: p.teach,
+    ...(p.kid ? { kid: p.kid } : {}),
   });
 }
 
@@ -715,7 +724,17 @@ interface CountWrong {
   fb: () => ChoiceFeedback;
 }
 
-/** Number choices: the right count plus distractor counts (each with its feedback), deduped, sorted. Ids are the numbers. */
+/** A count's answer tile in kid mode: a ten frame with one to ten dots (index: the count minus one). */
+const TEN_FRAMES: readonly Picto[] = [
+  'ten-frame-1', 'ten-frame-2', 'ten-frame-3', 'ten-frame-4', 'ten-frame-5',
+  'ten-frame-6', 'ten-frame-7', 'ten-frame-8', 'ten-frame-9', 'ten-frame-10',
+];
+
+/**
+ * Number choices: the right count plus distractor counts (each with its feedback), deduped, sorted. Ids are the numbers.
+ * In kid mode each count is a picture tile, a ten frame with that many dots and no word under it (Choice.word ''), so
+ * a young reader counts dots instead of reading digits; classic play shows the numbers. Every count here is 1 to 10.
+ */
 function countChoices(right: number, cands: CountWrong[], max = 3) {
   const used = new Set([right]);
   const feedback: Record<string, ChoiceFeedback> = {};
@@ -727,13 +746,22 @@ function countChoices(right: number, cands: CountWrong[], max = 3) {
     feedback[`n${c.n}`] = c.fb();
   }
   values.sort((x, y) => x - y);
-  return { choices: values.map((v) => ({ id: `n${v}`, label: String(v) })), answer: `n${right}`, feedback };
+  const tiles = values.every((v) => Number.isInteger(v) && v >= 1 && v <= TEN_FRAMES.length);
+  return {
+    choices: values.map((v) => ({ id: `n${v}`, label: String(v), ...(tiles ? { art: TEN_FRAMES[v - 1], word: '' } : {}) })),
+    answer: `n${right}`,
+    feedback,
+  };
 }
 
-/** Cards shown as the choices of a "which card" item. Ids come from the card ('big-red-circle'), not its place. */
+/**
+ * Cards shown as the choices of a "which card" item. Ids come from the card ('big-red-circle'), not its place. In kid
+ * mode each choice is a picture tile of its card with no name under it (Choice.word ''); it is still announced and read
+ * aloud by its name.
+ */
 function choiceThings(rng: Rng, cards: Card[]) {
   const things: Thing[] = rng.shuffle(cards).map((c) => ({ id: cardId(c), shape: c.shape, color: c.color, size: c.size }));
-  return { things, choices: things.map((t) => ({ id: t.id, label: cap(cardName(t)) })) };
+  return { things, choices: things.map((t) => ({ id: t.id, label: cap(cardName(t)), art: cardPicto(t), word: '' })) };
 }
 
 const YES_NO = [
@@ -744,6 +772,212 @@ const YES_NO = [
 type Gen = (rng: Rng, id: string, s: Skin) => Item;
 
 const L1 = 's2.l1', L2 = 's2.l2', L3 = 's2.l3', L4 = 's2.l4', L5 = 's2.l5';
+
+// ---------- the kid layer of the items (Grades 1 to 3, docs/KID-JOURNEY.md) ----------
+//
+// Beside the classic text, never instead of it. Every generator of lessons 1 to 4 gives its item a kid block: a short
+// prompt, one line after a miss (nope), one under "Yes!", a "Show me" twin and a hint line of at most 8 words; a
+// "which card" item gives each card choice its picture (choiceThings). The twin is a rule of the same kind on other
+// features, never the question's own rule, drawn on cards with their marks (yes: it fits; no: it is left out). AND
+// (lesson 2) is a Grade 1 round, NOT (lesson 1) and OR (lesson 3) are Grade 2, brackets (lesson 4) is Grade 3; each
+// line keeps to its band's budget. The twins use plain features (colorIs, sizeIs), so they are ready at load time.
+
+/** 'red ones', 'circles', 'big ones': the cards with one feature, in kid words. */
+const kidPl = (f: Feature) => (f.kind === 'shape' ? `${f.value}s` : `${f.value} ones`);
+
+/**
+ * The kid scenes (docs/KID-JOURNEY.md, round 2): an item's cards drawn plain, with no position numbers to read (a count
+ * item, a yes/no item on one card), or no scene at all when its cards are its picture tiles (which card fits).
+ */
+const PLAIN_CARDS: KidScene = { kind: 'things' };
+const NO_SCENE: KidScene = { kind: 'none' };
+
+/** The first twin that is not the question's own rule. */
+function kidTwin(rule: Formula, twins: readonly Formula[]): Formula {
+  const t = twins.find((x) => !sameMeaning(x, rule));
+  if (!t) throw new Error(`no kid twin for ${render(rule)}`);
+  return t;
+}
+
+/** A "Show me" twin: the rule, its cards with their marks, and one line. */
+const kidCase = (rule: Formula, cards: readonly Card[], note: string): TeachCase => ({
+  label: cap(R(rule)),
+  things: cards.map((c): Thing => ({ id: `kid-${cardId(c)}`, shape: c.shape, color: c.color, size: c.size, mark: evaluate(rule, c) ? 'yes' : 'no' })),
+  note,
+});
+
+/** For a two-part rule (or NOT ( … )): a card that fits both parts, one that fits only the first, one that fits neither. */
+function kidCards(rule: Formula): { both: Card; first: Card; none: Card } {
+  const j = isJoin(rule) ? rule : rule.op === 'not' && isJoin(rule.a) ? rule.a : null;
+  if (!j) throw new Error(`${render(rule)} has no two parts`);
+  return { both: example(and(j.a, j.b)), first: example(and(j.a, not(j.b))), none: example(and(not(j.a), not(j.b))) };
+}
+
+/** NOT's twins: NOT big (on a big and a small card), or NOT blue for a question about size (on three colors). */
+const NOT_TWINS = { size: not(sizeIs('big')), other: not(colorIs('blue')) } as const;
+
+function kidNotShow(rule: Formula, note: (x: Feature) => string): TeachCase {
+  const twin = featOf(rule).kind === 'size' ? NOT_TWINS.other : kidTwin(rule, [NOT_TWINS.size]);
+  const x = featOf(twin);
+  const cards: Card[] = x.kind === 'size'
+    ? [{ size: 'big', color: 'yellow', shape: 'circle' }, { size: 'small', color: 'yellow', shape: 'circle' }]
+    : [{ size: 'small', color: 'blue', shape: 'square' }, { size: 'small', color: 'red', shape: 'square' }, { size: 'small', color: 'yellow', shape: 'square' }];
+  return kidCase(twin, cards, note(x));
+}
+
+/** A NOT x item in kid words (Grade 2): tap the cards, count them, or say which groups fit. */
+function kidNot(rule: Formula, ask: 'tap' | 'count' | 'means'): KidItem {
+  const x = featOf(rule);
+  const but = (f: Feature) => `every card but the ${kidPl(f)}`;
+  switch (ask) {
+    case 'tap':
+      return {
+        prompt: `Tap each card that is ${R(rule)}.`,
+        nope: `${R(rule)} takes ${but(x)}.`,
+        yes: `${cap(but(x))} fits.`,
+        show: kidNotShow(rule, (f) => `${cap(but(f))} fits.`),
+        hint: `Find the ${kidPl(x)}. Tap all the rest.`,
+      };
+    case 'count':
+      return {
+        prompt: `How many cards are ${R(rule)}?`,
+        scene: PLAIN_CARDS,
+        nope: `Count ${but(x)}.`,
+        yes: `${cap(but(x))} counts.`,
+        show: kidNotShow(rule, (f) => `Count ${but(f)}.`),
+        hint: `Skip the ${kidPl(x)}. Count the rest.`,
+      };
+    case 'means':
+      return {
+        prompt: `Which fit ${R(rule)}?`,
+        nope: `${R(rule)} takes ${but(x)}.`,
+        yes: `It takes ${but(x)}.`,
+        show: kidNotShow(rule, (f) => `${cap(featuresOf(f.kind).filter((o) => !sameFeature(o, f)).map((o) => o.value).join(' and '))} cards fit.`),
+        hint: `Which cards are not ${ft(x)}?`,
+      };
+  }
+}
+
+/** AND's twins (one-word parts, so a Grade 1 "Show me" fits six words). */
+const AND_TWINS: readonly Formula[] = [and(colorIs('red'), sizeIs('big')), and(colorIs('blue'), sizeIs('small'))];
+
+/**
+ * An A AND B item in kid words (Grade 1: a prompt of seven words at most, four after a miss, six under "Yes!"). A pick
+ * item's cards are its picture tiles, so it draws no scene; a count item draws its cards plain.
+ */
+function kidAnd(rule: Formula, ask: 'tap' | 'pick' | 'count'): KidItem {
+  const twin = kidTwin(rule, AND_TWINS);
+  const k = kidCards(twin);
+  return {
+    prompt: ask === 'tap' ? `Tap: ${R(rule)}.` : ask === 'pick' ? `Which is ${R(rule)}?` : `How many are ${R(rule)}?`,
+    ...(ask === 'pick' ? { scene: NO_SCENE } : ask === 'count' ? { scene: PLAIN_CARDS } : {}),
+    nope: 'Both parts must fit.',
+    yes: ask === 'pick' ? 'It fits both parts.' : 'Those fit both parts.',
+    show: ask === 'count' ? kidCase(twin, [k.both, k.first, k.none], 'Only one fits.') : kidCase(twin, [k.both, k.first], 'Needs both parts.'),
+    hint: ask === 'count' ? 'Count cards that fit both parts.' : 'Check both parts on each card.',
+  };
+}
+
+/** OR's twins. */
+const OR_TWINS: readonly Formula[] = [or(colorIs('red'), sizeIs('big')), or(colorIs('blue'), sizeIs('small'))];
+
+/**
+ * An A OR B item in kid words (Grade 2): tap, count, the card that does not fit, or yes/no on one card. The card that
+ * does not fit is picked from its picture tiles (no scene); a count or a yes/no item draws its cards plain.
+ */
+function kidOr(rule: Formula, ask: 'tap' | 'count' | 'notFit' | OrCard): KidItem {
+  const twin = kidTwin(rule, OR_TWINS);
+  const k = kidCards(twin);
+  const all = [k.both, k.first, k.none];
+  const yesNo = (nope: string, yes: string, c: Card, note: string): KidItem => ({
+    prompt: `Does it fit ${R(rule)}?`, scene: PLAIN_CARDS, nope, yes, show: kidCase(twin, [c], note), hint: 'Check each part. Is one a yes?',
+  });
+  switch (ask) {
+    case 'tap':
+      return {
+        prompt: `Tap each card that is ${R(rule)}.`,
+        nope: 'One part is enough, and both parts count too.',
+        yes: 'One part or both parts is enough.',
+        show: kidCase(twin, all, 'A card with both parts fits too.'),
+        hint: 'Does a card with both parts fit?',
+      };
+    case 'count':
+      return {
+        prompt: `How many cards are ${R(rule)}?`,
+        scene: PLAIN_CARDS,
+        nope: 'Count the cards with both parts too.',
+        yes: 'One part or both parts counts.',
+        show: kidCase(twin, all, 'Two fit, and one has both parts.'),
+        hint: 'Did you count cards with both parts?',
+      };
+    case 'notFit':
+      return {
+        prompt: `Which card does not fit ${R(rule)}?`,
+        scene: NO_SCENE,
+        nope: 'A card with one part still fits.',
+        yes: 'It fits no part, so it is out.',
+        show: kidCase(twin, all, 'Only the card with no part is out.'),
+        hint: 'Find the card that fits no part.',
+      };
+    case 'both': return yesNo('It fits both parts, so OR takes it.', 'Both parts fit, and OR takes that.', k.both, 'It fits both parts, so it fits.');
+    case 'one': return yesNo('One part is enough for OR.', 'One part fits, and that is enough.', k.first, 'It fits one part, so it fits.');
+    case 'neither': return yesNo('It fits no part, so OR leaves it out.', 'It fits no part, so it is out.', k.none, 'It fits no part, so it is out.');
+  }
+}
+
+/** NOT ( … )'s twins, with AND inside and with OR inside. */
+const BRACKET_TWINS: Record<'and' | 'or', readonly Formula[]> = {
+  and: [not(and(colorIs('red'), sizeIs('big'))), not(and(colorIs('blue'), sizeIs('small')))],
+  or: [not(or(colorIs('red'), sizeIs('big'))), not(or(colorIs('blue'), sizeIs('small')))],
+};
+
+/** A NOT ( … ) item in kid words (Grade 3): tap the cards, or yes/no on a card that fits the first part only. */
+function kidBracket(rule: Formula, ask: 'tap' | 'yesno'): KidItem {
+  const op = innerOf(rule).op === 'and' ? 'and' : 'or';
+  const twin = kidTwin(rule, BRACKET_TWINS[op]);
+  const k = kidCards(twin);
+  if (ask === 'tap') {
+    return {
+      prompt: `Tap each card that is ${R(rule)}.`,
+      nope: 'Do the inside first. Then NOT flips it.',
+      yes: op === 'and' ? 'NOT left out only the cards that fit the inside.' : 'Only the cards that fit no part are in.',
+      show: kidCase(twin, [k.both, k.first, k.none], op === 'and' ? 'Only the card that fits the inside is left out.' : 'Cards that fit the inside are left out.'),
+      hint: 'Do the inside first, then flip it.',
+    };
+  }
+  return op === 'and'
+    ? {
+      prompt: `Does it fit ${R(rule)}?`,
+      scene: PLAIN_CARDS,
+      nope: 'The inside is false here, so NOT flips it to true.',
+      yes: 'The inside is false, so NOT makes it fit.',
+      show: kidCase(twin, [k.first], 'The inside is false here, so it fits.'),
+      hint: 'Do the inside first. Then flip it.',
+    }
+    : {
+      prompt: `Does it fit ${R(rule)}?`,
+      scene: PLAIN_CARDS,
+      nope: 'The inside is true here, so NOT flips it to false.',
+      yes: 'The inside is true, so NOT leaves it out.',
+      show: kidCase(twin, [k.first], 'The inside is true here, so it is out.'),
+      hint: 'Do the inside first. Then flip it.',
+    };
+}
+
+/** "Which rule means the same?" in kid words (Grade 3). The twin is the switch on other features. */
+function kidSame(given: Formula, bracket: Formula, pushed: Formula, op: 'and' | 'or'): KidItem {
+  const twin = kidTwin(bracket, BRACKET_TWINS[op]);
+  const inner = innerOf(twin);
+  if (!isJoin(inner)) throw new Error('the twin has no two parts');
+  const twinPushed = op === 'and' ? or(not(inner.a), not(inner.b)) : and(not(inner.a), not(inner.b));
+  return {
+    prompt: `Which one means ${R(given)}?`,
+    nope: 'When NOT moves, AND and OR switch.',
+    yes: `${cap(R(bracket))} means ${R(pushed)}.`,
+    show: { label: cap(R(twin)), note: `It means the same as ${R(twinPushed)}.` },
+    hint: 'Test each one on one card.',
+  };
+}
 
 // ---------- lesson 1: NOT ----------
 
@@ -765,6 +999,7 @@ function notTapOn(id: string, s: Skin, x: Feature, things: Thing[]): TapAllItem 
   const fx = ft(x);
   return tapItem({ id, lesson: L1, skill: 's2.not' }, s, {
     prompt: s.tap(R(rule)),
+    kid: kidNot(rule, 'tap'),
     things,
     rule,
     explain: `${Q(rule)} means every ${s.one} that is not ${fx}. The ${groups(others, s)} fit. That makes ${n}.`,
@@ -825,6 +1060,7 @@ const notMeans: Gen = (rng, id, s) => {
   const teach = teachFor(rule, s, []);
   return chooseItem({ id, lesson: L1, skill: 's2.not-means' }, {
     prompt: s.which(R(rule)),
+    kid: { ...kidNot(rule, 'means'), alt: notMeansAlt(id, s, x, [s.which(R(rule)), ...choices.map((c) => c.label)].join('|')) },
     choices: choices.map(({ id: cid, label: l }) => ({ id: cid, label: l })),
     answer: right[0].id,
     explain: `${Q(rule)} means every ${s.one} that is not ${fx}. So ${groups(others, s)} fit.`,
@@ -835,6 +1071,39 @@ const notMeans: Gen = (rng, id, s) => {
     teach,
   });
 };
+
+/**
+ * The cards of the kid form of "Which fit NOT x?": two of each color, two of each shape and three of each size, so
+ * NOT x takes every other group and leaves its own group out, whatever x is.
+ */
+const MEANS_DECK: readonly Card[] = [
+  { size: 'small', color: 'yellow', shape: 'circle' }, { size: 'big', color: 'red', shape: 'square' },
+  { size: 'small', color: 'blue', shape: 'triangle' }, { size: 'big', color: 'yellow', shape: 'triangle' },
+  { size: 'small', color: 'red', shape: 'circle' }, { size: 'big', color: 'blue', shape: 'square' },
+];
+
+/** A whole number from text (FNV-1a), to seed a kid-only form from what its classic item shows. */
+function textSeed(text: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619);
+  return h >>> 0;
+}
+
+/**
+ * The kid-only form of "Which fit NOT x?" (KidItem.alt; docs/KID-JOURNEY.md, round 2): its answers are four groups in
+ * words ("Red cards and blue cards", "Only yellow cards", …), more than a Grade 2 screen holds. The same rule on the
+ * same skill instead asks a young reader to tap every card that fits, on two cards of each group, so tapping the
+ * groups NOT x takes is the answer the classic item names (the answer and every misreading come from the rule engine,
+ * as for a tap item). The cards' order comes from what the classic item shows (`shows`: its question and its answers
+ * in order), never from the item's random source, so the classic pack after it stays the same, and two items that
+ * look different (a new example after a miss) put the cards in a different order.
+ */
+function notMeansAlt(id: string, s: Skin, x: Feature, shows: string): TapAllItem {
+  const things: Thing[] = createRng(textSeed(shows))
+    .shuffle(MEANS_DECK)
+    .map((c, i) => ({ id: `c${i + 1}`, shape: c.shape, color: c.color, size: c.size }));
+  return { ...notTapOn(id, s, x, things), skill: 's2.not-means' };
+}
 
 const notCount: Gen = (rng, id, s) => {
   const kind = oneKind(rng);
@@ -885,6 +1154,7 @@ const notCount: Gen = (rng, id, s) => {
   const teach = teachFor(rule, s, things);
   return chooseItem({ id, lesson: L1, skill: 's2.not-count' }, {
     prompt: s.count(R(rule)),
+    kid: kidNot(rule, 'count'),
     scene: { kind: 'things', things },
     ...countChoices(right, cands),
     explain: `There ${plural(nx, 'is', 'are')} ${nx} ${group(x, s, nx)}. Every other ${s.one} fits ${Q(rule, ',')} so the answer is ${right}.`,
@@ -916,6 +1186,7 @@ function andTapOn(id: string, s: Skin, a: Feature, b: Feature, things: Thing[]):
     : `In all, ${fit.length} ${s.many} fit ${Q(rule, '.')}`;
   return tapItem({ id, lesson: L2, skill: 's2.and' }, s, {
     prompt: s.tap(R(rule)),
+    kid: kidAnd(rule, 'tap'),
     things,
     rule,
     explain: `${first} ${The(miss)} is ${ft(a)}, but it is not ${ft(b)}, so it does not fit.`,
@@ -979,6 +1250,7 @@ const andPick: Gen = (rng, id, s) => {
   const teach = teachFor(rule, s, things);
   return chooseItem({ id, lesson: L2, skill: 's2.and-pick' }, {
     prompt: s.fit(R(rule)),
+    kid: kidAnd(rule, 'pick'),
     scene: { kind: 'things', things },
     choices,
     answer: right[0].id,
@@ -1015,6 +1287,7 @@ const andCount: Gen = (rng, id, s) => {
   const either = pickIds(rule, things, 'andAsOr').length;
   return chooseItem({ id, lesson: L2, skill: 's2.and-count' }, {
     prompt: s.count(R(rule)),
+    kid: kidAnd(rule, 'count'),
     scene: { kind: 'things', things },
     ...countChoices(right, [
       {
@@ -1052,6 +1325,7 @@ function orTapOn(id: string, s: Skin, a: Feature, b: Feature, things: Thing[]): 
   const nBoth = pickIds(and(A, B), things).length;
   return tapItem({ id, lesson: L3, skill: 's2.or-both', conflict: true }, s, {
     prompt: s.tap(R(rule)),
+    kid: kidOr(rule, 'tap'),
     things,
     rule,
     explain: `A ${s.one} fits if it is ${ft(a)}, if it is ${ft(b)}, or if it is ${ft(a)} and ${ft(b)}. ${The(both)} is ${ft(a)} and ${ft(b)}, so it fits too. In all, ${nFit(n, s)}.`,
@@ -1095,6 +1369,7 @@ const orNotFit: Gen = (rng, id, s) => {
   }
   return chooseItem({ id, lesson: L3, skill: 's2.or-pick', conflict: true }, {
     prompt: s.notFit(R(rule)),
+    kid: kidOr(rule, 'notFit'),
     scene: { kind: 'things', things },
     choices,
     answer: out[0].id,
@@ -1122,6 +1397,7 @@ const orCount: Gen = (rng, id, s) => {
   const teach = teachFor(rule, s, things);
   return chooseItem({ id, lesson: L3, skill: 's2.or-count', conflict: true }, {
     prompt: s.count(R(rule)),
+    kid: kidOr(rule, 'count'),
     scene: { kind: 'things', things },
     ...countChoices(right, [
       {
@@ -1194,6 +1470,7 @@ function orYesNoAs(rng: Rng, id: string, s: Skin, want?: OrCard): ChooseItem {
       };
   return chooseItem({ id, lesson: L3, skill: 's2.or-yesno', conflict: which === 'both' }, {
     prompt: s.yesNo(R(rule)),
+    kid: kidOr(rule, which),
     scene: { kind: 'things', things: [{ id: cardId(c), shape: c.shape, color: c.color, size: c.size }] },
     choices: YES_NO,
     answer,
@@ -1566,6 +1843,7 @@ function notAndTapOn(id: string, s: Skin, a: Feature, b: Feature, things: Thing[
   const [p, q] = has(one, a) ? [a, b] : [b, a];
   return withInside(tapItem({ id, lesson: L4, skill: 's2.not-both', conflict: true }, s, {
     prompt: s.tap(R(rule)),
+    kid: kidBracket(rule, 'tap'),
     things,
     rule,
     explain: `First find the ${s.many} that fit ${Q(inner, '.')} NOT takes every other ${s.one}, so ${n} fit. ${The(one)} fits: it is ${ft(p)}, but it is not ${ft(q)}.`,
@@ -1589,6 +1867,7 @@ const notOrTap: Gen = (rng, id, s) => {
     : `NOT takes the rest, so ${nFit(fit.length, s)}. Each one is not ${ft(a)} and not ${ft(b)}.`;
   return withInside(tapItem({ id, lesson: L4, skill: 's2.not-either', conflict: true }, s, {
     prompt: s.tap(R(rule)),
+    kid: kidBracket(rule, 'tap'),
     things,
     rule,
     explain: `First find the ${s.many} that fit ${Q(inner, '.')} ${second}`,
@@ -1699,6 +1978,7 @@ function sameMeaningAs(rng: Rng, id: string, want?: 'and' | 'or'): ChooseItem {
     : `${Q(bracket)} is true only for a card that is not ${ft(a)} and also not ${ft(b)}. ${Q(pushed)} says the same thing. So the two rules fit exactly the same cards.`;
   return chooseItem({ id, lesson: L4, skill: 's2.same-meaning', conflict: true }, {
     prompt: `Which rule means the same as ${R(given)}? Two rules mean the same when they fit exactly the same cards.`,
+    kid: kidSame(given, bracket, pushed, op),
     choices,
     answer: ruleId(right),
     explain,
@@ -1762,6 +2042,7 @@ function bracketYesNoAs(rng: Rng, id: string, s: Skin, want?: 'and' | 'or'): Cho
   const shown: Thing[] = [{ id: cardId(c), shape: c.shape, color: c.color, size: c.size }];
   return withInside(chooseItem({ id, lesson: L4, skill: 's2.bracket-yesno', conflict: true }, {
     prompt: s.yesNo(R(rule)),
+    kid: kidBracket(rule, 'yesno'),
     scene: { kind: 'things', things: shown },
     choices: YES_NO,
     answer,
@@ -2835,6 +3116,91 @@ const TERMS: Record<string, GlossaryTerm[]> = {
   [L3]: [{ term: 'OR', means: 'A rule with OR has two parts. A card fits when one part fits it, or when both parts do.' }],
 };
 
+/**
+ * The kid layers (docs/KID-JOURNEY.md): lesson 2 (AND) is a Grade 1 round, lessons 1 (NOT) and 3 (OR) Grade 2, and
+ * lesson 4 (brackets) Grade 3. One line and a picture per card (a picture of the card's own cards, since a scene's
+ * numbered cards would be words to read), one line per board with each row's rule, and the star line. The one new
+ * word of each round is on its first card: feature, AND, OR, brackets. The items' kid words come from their
+ * generators (kidNot, kidAnd, kidOr, kidBracket, kidSame). Lesson 5 is a Grade 4 round: no kid layer.
+ */
+/**
+ * A kid row over a board row of six card marks (docs/KID-JOURNEY.md, round 2): its label, and each card's mark with no
+ * name ('' draws no words), so a page shows the board's line, the rule, the card itself as the picture, and a check
+ * and a cross. Read aloud and announced, the card keeps its name.
+ */
+function kidCardRow(step: DrillStep, k: number, label: string): KidRow {
+  return { label, marks: step.rows[k].marks.map(() => ({ label: '' })) };
+}
+
+const KID: Record<string, KidLesson> = {
+  [L1]: {
+    cards: [
+      { line: 'Feature: one thing you can see, like color. Shape and size are features too.', art: 'rule-features' },
+      { line: 'Pick red. Each red card is in, and the rest are out.', art: 'rule-red-in' },
+      { line: 'NOT red takes every card that is not red. Blue and yellow both fit.', art: 'rule-not-red' },
+      { line: 'NOT a circle takes squares and triangles. NOT big takes the small ones.', art: 'rule-not-circle' },
+      { line: 'Look at one card. If it has the feature, NOT leaves it out.', art: 'not-flip' },
+    ],
+    board: [
+      { line: 'Does this card fit?', rows: [kidCardRow(DRILLS[L1][0], 0, cap(R(E.notBlue)))] },
+      { line: 'Does this card fit?', rows: [kidCardRow(DRILLS[L1][1], 0, cap(R(E.notSquare)))] },
+    ],
+    star: 'NOT takes everything else!',
+  },
+  [L2]: {
+    cards: [
+      { line: 'AND: both parts must fit.', art: 'rule-and-join' },
+      { line: 'Only red circles fit both parts.', art: 'rule-and-only' },
+      { line: 'AND makes a smaller group.', art: 'rule-and-smaller' },
+      { line: 'Both parts yes? Then it fits.', art: 'rule-two-checks' },
+    ],
+    board: [{ line: 'Does it fit?', rows: [kidCardRow(DRILLS[L2][0], 0, cap(R(E.redAndBig)))] }],
+    star: 'You can use AND!',
+  },
+  [L3]: {
+    cards: [
+      { line: 'OR: one part is enough. A circle fits, and a blue card fits.', art: 'rule-or-join' },
+      { line: 'A blue circle is a circle and blue. It fits OR too!', art: 'rule-or-both' },
+      { line: 'At home, juice or milk means pick one. In logic, OR takes both too.', art: 'cup' },
+      { line: 'OR makes a bigger group. Each part adds more cards.', art: 'rule-or-bigger' },
+      { line: 'Check each part. If one says yes, the card fits.', art: 'check' },
+    ],
+    board: [{ line: 'Does this card fit?', rows: [kidCardRow(DRILLS[L3][0], 0, cap(R(E.bigOrRed)))] }],
+    star: 'OR takes one part or both!',
+  },
+  [L4]: {
+    cards: [
+      { line: 'Brackets: they group parts of a rule. The part in them is the inside. Do the inside first.', art: 'rule-brackets' },
+      { line: 'NOT (red AND big) has the inside red AND big. Only the big red circle fits the inside.', art: 'rule-inside' },
+      { line: 'The small red square does not fit the inside. So it fits the whole rule. NOT flips it.', art: 'card-small-red-square' },
+      { line: 'NOT takes every card that does not fit the inside. Only the big red circle is left out.', art: 'rule-not-inside' },
+      { line: 'No brackets: a card must be not red and not big. Only small blue or yellow cards fit.', art: 'rule-not-red-not-big' },
+      { line: 'NOT (red OR big): find red OR big first, then flip it. The same two cards fit.', art: 'rule-not-red-not-big' },
+      { line: 'To move NOT inside, put NOT on each part. Then AND turns into OR. NOT (red AND big) means NOT red OR NOT big.', art: 'rule-switch' },
+    ],
+    board: [
+      {
+        line: 'The small red square: does it fit?',
+        rows: [
+          { label: `The inside: ${R(innerOf(E.notRedAndBig))}`, art: 'card-small-red-square' },
+          { label: `The whole rule: ${R(E.notRedAndBig)}`, art: 'card-small-red-square' },
+        ],
+      },
+      { line: 'Do the inside first, then flip it.', rows: [{}, kidCardRow(DRILLS[L4][1], 1, R(E.notBlueAndSmall))] },
+      { line: 'No brackets now: does this card fit?', rows: [{}, kidCardRow(DRILLS[L4][2], 1, R(E.notBlueAndNotSmall))] },
+      {
+        line: 'Do the inside first, then flip it.',
+        rows: [
+          kidCardRow(DRILLS[L4][3], 0, `The inside: ${R(innerOf(E.notBlueOrSmall))}`),
+          kidCardRow(DRILLS[L4][3], 1, `The whole rule: ${R(E.notBlueOrSmall)}`),
+        ],
+      },
+      { line: 'Does this card fit?', rows: [kidCardRow(DRILLS[L4][4], 0, R(E.notBlueOrNotSmall))] },
+    ],
+    star: 'You can do the inside first!',
+  },
+};
+
 const lessons: LessonDef[] = [L1, L2, L3, L4, L5].map((lid) => ({
   id: lid,
   title: TITLES[lid],
@@ -2843,6 +3209,7 @@ const lessons: LessonDef[] = [L1, L2, L3, L4, L5].map((lid) => ({
   ...(TERMS[lid] ? { terms: TERMS[lid] } : {}),
   ...(DISTINCTIONS[lid] ? { distinctions: DISTINCTIONS[lid] } : {}),
   ...(PASS[lid] ? { pass: PASS[lid] } : {}),
+  ...(KID[lid] ? { kid: KID[lid] } : {}),
   practice(rng: Rng): Item[] {
     const gens = LESSON_GENS[lid];
     const skins = lessonSkins(rng, gens.length);

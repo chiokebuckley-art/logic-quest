@@ -18,14 +18,15 @@ import * as notebook from '../engine/notebook';
 import type { KV, Player, Registry, SaveData, Settings } from '../engine/save/save';
 import * as sync from '../engine/save/sync';
 import type { Fetch, RemoteSave, SyncLink } from '../engine/save/sync';
-import type { Item } from '../engine/types';
+import type { GradeId, Item } from '../engine/types';
 import { stopById } from '../content/stops';
 import type { AnswerRecord } from './components/contracts';
+import * as kid from './kid';
 
 // ---------- routes ----------
 
 /** Where a lesson was opened from, so finishing or leaving it goes back there. */
-export type LessonFrom = 'journey' | 'learn' | 'check' | 'stop' | 'library' | 'home';
+export type LessonFrom = 'journey' | 'learn' | 'check' | 'stop' | 'library' | 'home' | 'grades' | 'worldcheck';
 
 /** The Library's kind filter. */
 export type LibraryKind = 'all' | 'ideas' | 'real' | 'words' | 'practice' | 'lab' | 'soon';
@@ -34,7 +35,16 @@ export type Route =
   | { name: 'players'; mode?: 'list' | 'new' | 'import' | 'link'; pinFor?: string }
   | { name: 'pattern'; workshop?: boolean; event?: string }
   | { name: 'home' }
-  | { name: 'journey'; track?: 'main' | 'side' | 'observatory' }
+  /** `track: 'grades'`: the Kid Journey's grade map (the first chip once a grade is chosen). */
+  | { name: 'journey'; track?: 'main' | 'side' | 'observatory' | 'grades' }
+  /** "Which grade are you in?": after a new player, and from Me or the grade map. */
+  | { name: 'grade' }
+  /** A world's check in the Kid Journey; `result`: its last result (Learn it again comes back here). */
+  | { name: 'worldcheck'; worldId: string; result?: boolean }
+  /** The placement check: two questions per grade from Grade 1 up, until two misses in a row. */
+  | { name: 'placement' }
+  /** The grade badge ceremony, shown once when a band's last world check passes. */
+  | { name: 'badge'; grade: GradeId }
   /** One page per stop: lessons, checks, practice, Pattern Lab events and repair cards. */
   | { name: 'stop'; stopId: string }
   /** `stop`: open that stop's section (the Real life view). */
@@ -71,6 +81,15 @@ export interface LastCheck {
   missed: string[];
 }
 
+/** The last finished world check, kept for this session so "Learn it again" can come back to the result. */
+export interface LastWorldCheck {
+  worldId: string;
+  items: Item[];
+  records: AnswerRecord[];
+  passed: boolean;
+  missed: string[];
+}
+
 export interface State {
   registry: Registry;
   /** The unlocked player, or null while nobody is playing. */
@@ -80,6 +99,7 @@ export interface State {
   /** Goes up on every navigation. Screens are keyed by it, so each visit starts fresh. */
   routeSeq: number;
   lastCheck: LastCheck | null;
+  lastWorldCheck?: LastWorldCheck | null;
 }
 
 type Action =
@@ -89,7 +109,8 @@ type Action =
   | { type: 'save'; fn: (s: SaveData) => SaveData }
   | { type: 'replaceSave'; save: SaveData }
   | { type: 'navigate'; route: Route }
-  | { type: 'lastCheck'; lastCheck: LastCheck | null };
+  | { type: 'lastCheck'; lastCheck: LastCheck | null }
+  | { type: 'lastWorldCheck'; lastWorldCheck: LastWorldCheck | null };
 
 function reducer(s: State, a: Action): State {
   switch (a.type) {
@@ -107,6 +128,8 @@ function reducer(s: State, a: Action): State {
       return { ...s, route: a.route, routeSeq: s.routeSeq + 1 };
     case 'lastCheck':
       return { ...s, lastCheck: a.lastCheck };
+    case 'lastWorldCheck':
+      return { ...s, lastWorldCheck: a.lastWorldCheck };
   }
 }
 
@@ -180,6 +203,16 @@ function uniqueName(players: readonly Player[], name: string): string {
 
 // ---------- context ----------
 
+/**
+ * Where an answer came from, when it is not a lesson, practice or check answer: a Notebook fix, the stop page's
+ * warm-up, or the placement check. Warm-up and placement answers count nowhere.
+ */
+export interface AnswerOpts {
+  fromNotebook?: boolean;
+  fromWarmUp?: boolean;
+  fromPlacement?: boolean;
+}
+
 /** How a push ended: the cloud has this copy, this device took the cloud's later copy instead, or it did not work. */
 type PushOutcome = 'pushed' | 'took' | 'failed';
 /** How a pull ended: the same as a push, or nothing to do. */
@@ -218,7 +251,14 @@ export interface Actions {
    * `fromWarmUp`: the stop page's warm-up item. It is not a lesson answer, so it counts nowhere: no stats, no help
    * tally and never a Notebook card.
    */
-  recordAnswer(record: Pick<AnswerRecord, 'skill' | 'firstTry' | 'correct' | 'stop' | 'lesson' | 'help'>, opts?: { fromNotebook?: boolean; fromWarmUp?: boolean }): void;
+  recordAnswer(record: Pick<AnswerRecord, 'skill' | 'firstTry' | 'correct' | 'stop' | 'lesson' | 'help'>, opts?: AnswerOpts): void;
+  // ---- the Kid Journey (docs/KID-JOURNEY.md) ----
+  /** Choose or clear the grade. `by`: placed by the placement check or a grown-up (a kid's own pick leaves it out). */
+  setGrade(grade: GradeId | null, by?: 'check' | 'grownup'): void;
+  /** Star a passed round (LessonScreen, when the runner reports a passed run): clean or mended. */
+  starRound(lessonId: string, kind: saves.StarKind): void;
+  /** A world check finished. Returns whether it passed and the band whose badge it just earned, if any. */
+  finishWorldCheck(worldId: string, items: Item[], records: AnswerRecord[]): { passed: boolean; missed: string[]; badge: GradeId | null } | null;
   /** The stop page's warm-up item was answered right: the page shows it as done (StopProgress.warm). */
   markWarm(stopId: string): void;
   /** A Wrong-Answer Notebook fix attempt on a skill. Returns true when that card is now cleared. */
@@ -520,7 +560,8 @@ export function StoreProvider({ children, kv: kvProp, fetchFn = browserFetch }: 
           fn: (d) => {
             // The guided boards come first: without them the lesson is not passed, whatever called this.
             if (lesson?.drill?.length && !d.drilled.includes(lessonId)) return d;
-            const next = { ...d, lessonRun: d.lessonRun?.lessonId === lessonId ? null : d.lessonRun, stops: { ...d.stops, [stopId]: mastery.completeLesson(d.stops[stopId], lessonId) } };
+            // A round a world check missed counts as played again (the world check's retry waits for every one).
+            const next = kid.redoInto({ ...d, lessonRun: d.lessonRun?.lessonId === lessonId ? null : d.lessonRun, stops: { ...d.stops, [stopId]: mastery.completeLesson(d.stops[stopId], lessonId) } }, lessonId);
             // An Observatory place: Lesson complete on the evidence profile, and the first delayed review in about two days.
             return lesson?.routine ? { ...next, evidence: evidence.markComplete(next.evidence, lessonId, todayNow()) } : next;
           },
@@ -535,6 +576,8 @@ export function StoreProvider({ children, kv: kvProp, fetchFn = browserFetch }: 
         delete before.openCheck;
         const outcome = mastery.recordCheck(stop, before, kind, records.map((r) => ({ lesson: r.lesson, correct: r.correct })), todayNow());
         dispatch({ type: 'save', fn: (d) => ({ ...d, stops: { ...d.stops, [stopId]: outcome.progress } }) });
+        // A passed lock-in or week check makes the stop's stars glow on the grade map.
+        if (outcome.passed) dispatch({ type: 'save', fn: (d) => kid.glowInto(d, stop, kind) });
         dispatch({ type: 'lastCheck', lastCheck: { stopId, kind, items, records, passed: outcome.passed, missed: outcome.missed } });
         return outcome;
       },
@@ -555,10 +598,31 @@ export function StoreProvider({ children, kv: kvProp, fetchFn = browserFetch }: 
       },
 
       recordAnswer: (record, opts) => {
-        // A warm-up answer is never a lesson answer: nothing to count and nothing for the Notebook.
-        if (opts?.fromWarmUp) return;
+        // A warm-up or placement answer is never a lesson answer: nothing to count and nothing for the Notebook.
+        if (opts?.fromWarmUp || opts?.fromPlacement) return;
         const day = todayNow();
         dispatch({ type: 'save', fn: (d) => answerInto(d, record, day, opts) });
+      },
+
+      setGrade: (grade, by) => {
+        const day = todayNow();
+        dispatch({ type: 'save', fn: (d) => kid.setGradeInto(d, grade, by, day) });
+      },
+
+      starRound: (lessonId, kindOf) => {
+        dispatch({ type: 'save', fn: (d) => kid.starInto(d, lessonId, kindOf) });
+      },
+
+      finishWorldCheck: (worldId, items, records) => {
+        const s = stateRef.current;
+        const world = kid.worldById(worldId);
+        if (!world || !s.save) return null;
+        const { passed, missed } = kid.worldCheckOutcome(world, items, records);
+        const day = todayNow();
+        const { badge } = kid.worldCheckInto(s.save, worldId, passed, missed, day);
+        dispatch({ type: 'save', fn: (d) => kid.worldCheckInto(d, worldId, passed, missed, day).save });
+        dispatch({ type: 'lastWorldCheck', lastWorldCheck: { worldId, items, records, passed, missed } });
+        return { passed, missed, badge };
       },
 
       markWarm: (stopId) => {
@@ -916,15 +980,15 @@ export function StoreProvider({ children, kv: kvProp, fetchFn = browserFetch }: 
 /**
  * What one answered item does to a save (the store's recordAnswer): it counts in the day's stats and help tallies,
  * and a miss adds a Notebook card. A Notebook fix attempt (`fromNotebook`) never adds a card; a warm-up answer
- * (`fromWarmUp`) changes nothing at all.
+ * (`fromWarmUp`) and a placement answer (`fromPlacement`) change nothing at all.
  */
 export function answerInto(
   d: SaveData,
   { skill, firstTry, correct, stop, lesson, help }: Pick<AnswerRecord, 'skill' | 'firstTry' | 'correct' | 'stop' | 'lesson' | 'help'>,
   day: string,
-  opts?: { fromNotebook?: boolean; fromWarmUp?: boolean },
+  opts?: AnswerOpts,
 ): SaveData {
-  if (opts?.fromWarmUp) return d;
+  if (opts?.fromWarmUp || opts?.fromPlacement) return d;
   let counted = saves.recordAnswer(d, day, skill, firstTry);
   if (help) counted = saves.recordHelp(counted, day, skill, help);
   if (help?.gap) counted = saves.recordGap(counted, help.gap);
@@ -941,10 +1005,10 @@ export function useStore(): Store {
 export function tabFor(route: Route): Tab | null {
   switch (route.name) {
     case 'home': case 'search': return 'home';
-    case 'journey': case 'stop': case 'lesson': case 'check': return 'journey';
+    case 'journey': case 'stop': case 'lesson': case 'check': case 'worldcheck': case 'placement': case 'badge': return 'journey';
     case 'arcade': return 'arcade';
     case 'library': case 'learn': case 'pattern': return 'library';
-    case 'me': case 'progress': case 'notebook': case 'grownups': case 'settings': return 'me';
+    case 'me': case 'progress': case 'notebook': case 'grownups': case 'settings': case 'grade': return 'me';
     default: return null;
   }
 }
@@ -972,6 +1036,8 @@ export function parentRoute(route: Route): Route | null {
     case 'learn': return { name: 'library', kind: 'ideas' };
     case 'pattern': return { name: 'library', kind: 'lab' };
     case 'progress': case 'notebook': case 'grownups': case 'settings': return { name: 'me' };
+    case 'worldcheck': case 'badge': return { name: 'journey', track: 'grades' };
+    case 'placement': return { name: 'grade' };
     default: return { name: 'home' };
   }
 }

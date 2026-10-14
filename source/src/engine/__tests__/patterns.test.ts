@@ -6,10 +6,14 @@ import { describe, expect, it } from 'vitest';
 import { arcadeItem, checkItems, freshItems, lesson } from '../../content/stop7/patterns';
 import { checkDrill, marksToTap } from '../drill';
 import { EXAMPLE_SCENE, SKINS, TWIN_SCENE, breakItem, chanceItem, dueItem, sureItem, wordFor, wordWhy, type Skin, type SkinId } from '../puzzles/patterns';
-import { READING, fkGrade, longestSentence } from '../readability';
+import { READING, fkGrade, longestSentence, words } from '../readability';
 import { createRng } from '../rng';
 import { feedbackText, teachStrings } from '../teach';
 import type { ChooseItem, Item, Scene, Thing } from '../types';
+import { gradeById } from '../../content/grades';
+import { kidItemOf } from '../../game/kidPlay';
+import type { KidMode } from '../../game/kidMode';
+import { PICTO_NAMES } from '../../game/components/Pictogram';
 
 const SEEDS = Array.from({ length: 250 }, (_, i) => i + 1);
 
@@ -455,5 +459,215 @@ describe('s7.l1 reading level', () => {
     const text = [...lesson.ideas.flatMap((c) => [c.title, ...c.body]), ...lesson.drill!.flatMap((b) => [b.title, ...b.body, b.done, b.twin ?? '', ...b.rows.flatMap((r) => [r.label, r.note ?? '', ...r.marks.flatMap((m) => [m.label, ...Object.values(m.why)])])])].join('\n');
     expect(text).not.toMatch(/["']/);
     expect(longestSentence(text).words).toBeLessThanOrEqual(READING.maxSentenceWords);
+  });
+});
+
+describe('s7.l1 kid layer (Grade 2)', () => {
+  it('every kid line of every form, word and skin keeps 10 words a sentence, curly quotes, no symbols, never “wrong” or “due”; a hint is at most 8 words', () => {
+    const lines = new Set<string>([...lesson.kid!.cards.map((c) => c.line), ...lesson.kid!.board!.flatMap((b) => [b.line, ...(b.rows ?? []).flatMap((r) => (r.label ? [r.label] : []))]), lesson.kid!.star!]);
+    for (const skin of Object.keys(SKINS) as SkinId[]) {
+      for (let seed = 1; seed <= 30; seed++) {
+        const rng = createRng(seed);
+        const made = [
+          ...(['must', 'likely', 'unlikely', 'cant'] as const).flatMap((want) => [chanceItem(rng, skin, { form: 'word', want }), chanceItem(rng, skin, { form: 'sentence', want })]),
+          sureItem(rng, skin, { form: 'know' }), sureItem(rng, skin, { form: 'best' }),
+          dueItem(rng, skin, { form: 'known' }), dueItem(rng, skin, { form: 'hidden' }),
+          breakItem(rng, skin, { form: 'proof' }), breakItem(rng, skin, { form: 'show' }),
+        ];
+        for (const m of made) {
+          const it = choose({ id: 'x', stop: 7, lesson: 's7.l1', skill: `s7.${m.tag}`, ...m.item });
+          const k = it.kid!;
+          expect(k, it.prompt).toBeTruthy();
+          if (k.hint) expect(words(k.hint).length, k.hint).toBeLessThanOrEqual(8);
+          // “Which word fits?” draws the four words as picture tiles; no other item has a picture answer.
+          if (it.choices.map((c) => c.label).join() === 'Must,Likely,Unlikely,Can’t') expect(it.choices.map((c) => c.art)).toEqual(['guess-must', 'guess-likely', 'guess-unlikely', 'guess-cant']);
+          else expect(it.choices.some((c) => c.art)).toBe(false);
+          for (const x of [k.prompt, k.nope, k.yes, k.hint, k.show?.label, k.show?.note]) if (x) lines.add(x);
+        }
+      }
+    }
+    for (const x of lines) {
+      expect(longestSentence(x).words, x).toBeLessThanOrEqual(10);
+      expect(x, x).not.toMatch(/['"]/);
+      expect(x, x).not.toMatch(/[¬∧∨→↔✓✗<>=+*/\\#&%@|~^_]/);
+      expect(x, x).not.toMatch(/\b(wrong|due)\b/i);
+    }
+  });
+});
+
+// ---------- the kid forms (docs/KID-JOURNEY.md, "Round 2 fields") ----------
+//
+// In kid mode every item draws its bag or its draws as pictures with no words (KidItem.scene), and an item whose
+// classic answers are sentences is asked as its kid-only form (KidItem.alt) on the same case: the four word tiles, or a
+// yes tile and a no tile. Each kid answer is worked out again here from what a kid sees (the pictures and the kid
+// prompt), never from the function that set it.
+
+describe('s7.l1 kid forms (Grade 2)', () => {
+  const G2: KidMode = { grade: 'g2', budget: gradeById('g2').budget, autoRead: false };
+  const asItem = (m: { tag: string; item: Omit<ChooseItem, 'id' | 'stop' | 'lesson' | 'skill'> }, id: string) => choose({ id, stop: 7, lesson: 's7.l1', skill: `s7.${m.tag}`, ...m.item });
+  /** Every item a kid can meet: the quiz packs, the stop check's two items and the Arcade item. */
+  const everyItem = (): ChooseItem[] =>
+    SEEDS.flatMap((seed) => [...pack(seed), ...checkItems(createRng(seed)).map((m, i) => asItem(m, `c${i}`)), asItem(arcadeItem(createRng(seed)), 'a')]);
+
+  /** The kid scene as a kid sees it: the bag (open or not), then each thing or each draw, by kind. */
+  function pictures(s: Skin, it: Item): { open: boolean; kinds: number[] } {
+    const sc = it.kid?.scene;
+    if (sc?.kind !== 'pictos') throw new Error(`${it.id}: no kid pictures`);
+    expect(sc.keep).toBeUndefined();
+    expect(sc.rows).toHaveLength(2);
+    expect(sc.rows[0]).toHaveLength(1);
+    for (const p of sc.rows.flat()) expect(p.word, it.id).toBeUndefined();
+    const open = sc.rows[0][0].art === 'guess-bag-see';
+    if (!open) expect(sc.rows[0][0].art).toBe('guess-bag-hidden');
+    const kinds = sc.rows[1].map((p) => s.kinds.findIndex((k) => k.art === p.art));
+    expect(kinds.length).toBeGreaterThan(0);
+    expect(kinds.every((i) => i >= 0), it.id).toBe(true);
+    return { open, kinds };
+  }
+  const countKinds = (kinds: number[]) => [0, 1, 2].map((i) => kinds.filter((x) => x === i).length);
+
+  it('every kind of every skin has its own picture, and each picture is in the pictogram set', () => {
+    for (const s of Object.values(SKINS)) {
+      expect(new Set(s.kinds.map((k) => k.art)).size, s.id).toBe(3);
+      for (const k of s.kinds) expect(PICTO_NAMES, `${s.id} ${k.id}`).toContain(k.art);
+    }
+  });
+
+  it('every item draws its bag or its draws as pictures with no words: the same bag or the same draws as its classic scene', () => {
+    for (const it of everyItem()) {
+      const s = skinOf(it);
+      const kid = kidItemOf(it, G2);
+      const { open, kinds } = pictures(s, kid);
+      // A bag you can see draws its things kind by kind; the draws keep their order.
+      if (open) {
+        expect(countKinds(kinds), it.id).toEqual(bagOf(s, it.scene));
+        expect([...kinds].sort(), it.id).toEqual(kinds);
+      } else {
+        const { draws, then } = drawsOf(it.scene);
+        expect(kinds.map((i) => s.kinds[i].word), it.id).toEqual([...draws, ...(then ? [then] : [])]);
+      }
+    }
+  });
+
+  it('a kid-only form keeps the item: its id and tags in kid mode, its lesson, skill and conflict; classic play never sees it', () => {
+    let alts = 0;
+    for (const it of everyItem()) {
+      const alt = it.kid?.alt as ChooseItem | undefined;
+      if (!alt) {
+        // Only “Which word fits?” on a bag is asked as it is.
+        expect(it.choices.map((c) => c.label).join(), it.id).toBe('Must,Likely,Unlikely,Can’t');
+        expect(kidItemOf(it, G2)).toBe(it);
+        continue;
+      }
+      alts++;
+      const drawn = kidItemOf(it, G2);
+      expect([drawn.id, drawn.tags], it.id).toEqual([it.id, it.tags]);
+      expect([alt.stop, alt.lesson, alt.skill, !!alt.conflict], it.id).toEqual([it.stop, it.lesson, it.skill, !!it.conflict]);
+      expect(kidItemOf(it, null)).toBe(it);
+      expect(alt.kid?.alt).toBeUndefined();
+      // The item's own kid words are its kid form's, so the budget and reading checks read what a kid sees.
+      expect(it.kid).toEqual({ ...alt.kid, alt });
+      // Every wrong answer is taught; the right one has no feedback.
+      for (const c of alt.choices) {
+        if (c.id === alt.answer) expect(alt.feedback?.[c.id]).toBeUndefined();
+        else {
+          expect(alt.feedback?.[c.id], `${it.id} ${c.id}`).toBeDefined();
+          expect(alt.whyWrong?.[c.id]).toBe(feedbackText(alt.feedback![c.id]));
+        }
+      }
+      expect(alt.teach?.cases?.length).toBeGreaterThanOrEqual(2);
+      expect(alt.hintCase).toBeDefined();
+    }
+    expect(alts).toBeGreaterThan(SEEDS.length * 3);
+  });
+
+  it('each kid answer is worked out again from the pictures and the kid prompt: four word tiles or a yes and a no tile', () => {
+    const seen = new Set<string>();
+    for (const it of everyItem()) {
+      const s = skinOf(it);
+      const kid = choose(kidItemOf(it, G2));
+      const ids = kid.choices.map((c) => c.id).join();
+      if (ids === 'yes,no') expect(kid.choices.map((c) => [c.label, c.art])).toEqual([['Yes', undefined], ['No', undefined]]);
+      else {
+        expect(ids).toBe('must,likely,unlikely,cant');
+        expect(kid.choices.map((c) => c.art)).toEqual(['guess-must', 'guess-likely', 'guess-unlikely', 'guess-cant']);
+      }
+      const { open, kinds } = pictures(s, kid);
+      const p = kid.kid!.prompt;
+      const kindIs = (is: string) => s.kinds.findIndex((k) => k.is.toLowerCase() === is.toLowerCase());
+      const total = kinds.length;
+      let want: string;
+      let m: RegExpMatchArray | null;
+      if (open && (m = p.match(/^“The next (\w+) is (.+)\.” Which word fits\?$/))) {
+        // A bag you can count: the four words from the counts.
+        expect(it.skill).toBe('s7.pattern-chance');
+        expect(m[1]).toBe(s.noun);
+        want = word(countKinds(kinds)[kindIs(m[2])], total);
+      } else if (open && (m = p.match(/^After (\d+) (.+), which word fits (.+)\?$/))) {
+        // The streak trap with the bag open: the draws went back, so the bag's counts still give the word.
+        expect(it.skill).toBe('s7.pattern-due');
+        const ki = s.kinds.findIndex((k) => k.many === m![2]);
+        expect(ki).toBeGreaterThanOrEqual(0);
+        expect(it.prompt).toContain(`The last ${m[1]} were all ${s.kinds[ki].are}.`);
+        const ai = kindIs(m[3]);
+        expect(ai).toBeGreaterThanOrEqual(0);
+        want = word(countKinds(kinds)[ai], total);
+        seen.add(`due ${ai === ki ? 'own' : 'other'} ${want}`);
+      } else {
+        expect(open, p).toBe(false);
+        const streak = kinds[0];
+        const n = kinds.filter((i) => i === streak).length;
+        const last = kinds[kinds.length - 1];
+        const k = s.kinds[streak];
+        if ((m = p.match(/^“The next (\w+) is (.+)\.” Which word is best\?$/))) {
+          // Draws you can see, from a bag you can’t: the streak's kind is the good guess, likely and never a must.
+          expect(it.skill).toBe('s7.pattern-sure');
+          expect(new Set(kinds).size).toBe(1);
+          expect(kindIs(m[2])).toBe(streak);
+          want = 'likely';
+        } else if ((m = p.match(/^“(.+)” Does (\w+) know this for sure\?$/))) {
+          // Only what was seen is sure.
+          expect(it.skill).toBe('s7.pattern-sure');
+          expect(new Set(kinds).size).toBe(1);
+          want = m[1] === `${m[2]} saw ${n} ${k.many}.` ? 'yes' : 'no';
+          seen.add(`know ${want}`);
+        } else if ((m = p.match(/^(\w+) says, “(.+) has to come soon!” Is (\w+) right\?$/))) {
+          // A draw that goes back changes nothing, so nothing has to come soon.
+          expect(it.skill).toBe('s7.pattern-due');
+          expect(m[3]).toBe(m[1]);
+          expect(new Set(kinds).size).toBe(1);
+          expect(kindIs(m[2])).not.toBe(streak);
+          want = 'no';
+        } else if ((m = p.match(/^Did the (.+) prove what comes next\?$/))) {
+          // A streak is never a proof: here the next one even broke it.
+          expect(it.skill).toBe('s7.pattern-break');
+          expect(m[1]).toBe(k.many);
+          expect(last).not.toBe(streak);
+          want = 'no';
+        } else if ((m = p.match(/^Did the (.+) break the guess\?$/))) {
+          // The last draw is another kind than the streak's: it broke the guess.
+          expect(it.skill).toBe('s7.pattern-break');
+          expect(n).toBe(kinds.length - 1);
+          expect(s.kinds.findIndex((x) => x.one === m![1])).toBe(last);
+          want = last !== streak ? 'yes' : 'no';
+        } else throw new Error(`${it.id}: unknown kid prompt: ${p}`);
+      }
+      expect(kid.answer, `${it.id}: ${p}`).toBe(want);
+      seen.add(`${it.skill} ${want}`);
+    }
+    for (const x of ['must', 'likely', 'unlikely', 'cant']) expect(seen).toContain(`s7.pattern-chance ${x}`);
+    for (const x of ['due own likely', 'due other unlikely', 'know yes', 'know no', 's7.pattern-break yes', 's7.pattern-break no']) expect(seen).toContain(x);
+  });
+
+  it('a kid-only form’s own words (its prompt, answers, teaching and feedback) read at grade 7 or lower, with curly quotes', () => {
+    for (const it of everyItem()) {
+      const alt = it.kid?.alt;
+      if (!alt || alt.kind !== 'choose') continue;
+      const text = [alt.prompt, alt.explain, ...teachStrings(alt), ...alt.choices.map((c) => c.label)].join('\n');
+      expect(fkGrade(text), it.id).toBeLessThanOrEqual(READING.maxGrade);
+      const long = longestSentence(text);
+      expect(long.words, long.sentence).toBeLessThanOrEqual(READING.maxSentenceWords);
+      expect(text, 'curly quotes only').not.toMatch(/["']/);
+    }
   });
 });

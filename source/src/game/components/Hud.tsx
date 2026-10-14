@@ -1,21 +1,21 @@
-/** Top bar: the game name, the day streak, the player chip (opens Players) and Settings. */
-import { streakDays } from '../progressStats';
+/** Top bar: the game name, the days played this week, the player chip (opens Players) and Settings. */
+import { daysThisWeek } from '../kid';
 import { useStore } from '../store';
 import { Icon } from './Icon';
 
 export function Hud() {
   const { state, player, save, today, actions } = useStore();
-  const streak = save ? streakDays(save.active, today) : 0;
+  const week = save ? daysThisWeek(save.active, today).count : 0;
   const onSettings = state.route.name === 'settings';
   return (
     <header className="hud">
       <h1 className="hud-title">LOGIC QUEST</h1>
       <div className="hud-spacer" />
       {player && save && (
-        <div className="hud-streak" title="Days in a row with at least one minute of play">
-          <Icon name="flame" size={18} />
-          <span>{streak} {streak === 1 ? 'day' : 'days'}</span>
-          <span className="sr-only"> in a row</span>
+        <div className="hud-streak" title="Days you played this week">
+          <Icon name="star" size={18} />
+          <span>{week} {week === 1 ? 'day' : 'days'}</span>
+          <span className="sr-only"> played this week</span>
         </div>
       )}
       {player && (

@@ -8,6 +8,11 @@
  * what you know for sure after a streak (pattern-sure), the “due” trap (pattern-due, a conflict item), and the
  * can-fail question: a new case breaks a streak (pattern-break, tag can-fail).
  *
+ * Kid layer (Grade 2, PATTERNS_KID): a picture and one line per card, the boards one row at a time with their bag as
+ * the picture, and every item's kid words: its bag or its draws as pictures with no words (a bag you can see into
+ * and each thing in it, or a bag nobody can see into and each draw), and an item whose answers are sentences asked as
+ * its kid-only form on the same case, with the four word tiles (Must, Likely, Unlikely, Can’t) or a yes and a no tile.
+ *
  * Every answer comes from ../../engine/puzzles/patterns.ts.
  */
 import {
@@ -25,7 +30,7 @@ import {
   type PatternMade,
   type SkinId,
 } from '../../engine/puzzles/patterns';
-import type { Item, Rng } from '../../engine/types';
+import type { Item, KidLesson, KidRow, Rng } from '../../engine/types';
 import { CAN_FAIL, distinctItems, practiceOf, type LessonModule, type Made } from './common';
 
 const ID = 's7.l1';
@@ -55,6 +60,46 @@ function pack(rng: Rng): Made[] {
   return kinds.map((k, i) => one(() => MAKERS[k](rng, skinIn(rng, frames[i]), names[i])));
 }
 
+// ---------- the kid layer (Grade 2, docs/KID-JOURNEY.md) ----------
+//
+// Beside the classic text, never instead of it. Grade 2's budget: at most 20 words on a screen, buttons and the header
+// ("Round k of n", 4 words) included, so 16 words of content (14 on a card, beside "Back" and "Next"); 2 sentences, 10
+// words in a sentence. The one new word is "likely", named on the second card; no kid line says "due" (they say "has
+// to come soon"). The items' kid words come from the generators in ../../engine/puzzles/patterns.ts.
+
+/** A board row marked under the board's line, with the board's bag as its picture (a kid board does not draw the scene). */
+const row = (label: string, art: KidRow['art']): KidRow => ({ label, art });
+
+/** The round's kid layer: one line and a picture per card, each board's line and rows, and the star line. */
+export const PATTERNS_KID: KidLesson = {
+  cards: [
+    { line: 'Four reds in a row. A good guess: red again, but not for sure.', art: 'guess-reds' },
+    { line: 'Likely: most of them, not all. Red is likely, not a must.', art: 'guess-bag-six-one' },
+    { line: 'Six circles, then a square! One new one broke the guess.', art: 'guess-break' },
+    { line: 'Each one goes back, so the bag stays the same. Blue is still unlikely.', art: 'guess-goes-back' },
+    { line: 'Count what fits, then pick: must, likely, unlikely or can’t.', art: 'guess-bag-example' },
+  ],
+  board: [
+    {
+      // The four shape rows are the worked case (given); the four color rows and the streak are marked one at a time.
+      line: 'Which word fits the next card?',
+      rows: [
+        {}, {}, {}, {},
+        row('Red?', 'guess-bag-example'),
+        row('Blue?', 'guess-bag-example'),
+        row('Yellow?', 'guess-bag-example'),
+        row('Red or blue?', 'guess-bag-example'),
+        row('After three reds: blue?', 'guess-bag-example'),
+      ],
+    },
+    {
+      line: 'The squares are gone: which word fits?',
+      rows: [row('A circle?', 'guess-bag-twin'), row('A square?', 'guess-bag-twin'), row('Red?', 'guess-bag-twin'), row('Blue?', 'guess-bag-twin')],
+    },
+  ],
+  star: 'Likely is not must, and you know it!',
+};
+
 export const lesson: LessonModule['lesson'] = {
   id: ID,
   title: 'Pattern guesses',
@@ -62,6 +107,7 @@ export const lesson: LessonModule['lesson'] = {
   drill: [colorBoard(`${ID}-do`), twinBoard(`${ID}-do2`)],
   practice: practiceOf(ID, pack),
   pass: { firstTry: 3, include: [CAN_FAIL] },
+  kid: PATTERNS_KID,
   terms: [
     { term: 'good guess', means: 'What is most likely from what you saw. It can still be wrong, so check it before you are sure.' },
     { term: 'proof', means: 'A proof shows something must be true, with no other way. Many same examples are never a proof.' },

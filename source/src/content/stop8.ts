@@ -28,6 +28,7 @@ import {
   L1_X,
   L1_Y,
   L2_ALL,
+  L2_EX,
   L2_SOME,
   L3_BREAKER,
   L3_NOT_ALL,
@@ -71,6 +72,7 @@ import {
   quantBoard,
   quantWorkedLines,
   quantWorkedScene,
+  quoteMid,
   ringTapItem,
   sen,
   someBoard,
@@ -125,12 +127,19 @@ import {
   sharedCardScene,
 } from '../engine/puzzles/nested';
 import type { Made } from '../engine/puzzles/statements';
-import type { Item, LessonDef, Rng, StopDef } from '../engine/types';
+import type { Item, KidLesson, LessonDef, Rng, StopDef } from '../engine/types';
 
 const STOP = 8;
 
 /** A made item as a Stop 9 item: its id, lesson and skill (`s8.<tag>`). */
-const finish = (m: Made, id: string, lesson: string): Item => ({ id, stop: STOP, lesson, skill: `s${STOP}.${m.tag}`, ...m.item }) as Item;
+const finish = (m: Made, id: string, lesson: string): Item => {
+  const skill = `s${STOP}.${m.tag}`;
+  const item = { id, stop: STOP, lesson, skill, ...m.item } as Item;
+  // A kid-only alternate (KidItem.alt) is the same question in kid form: it carries the item's own id, lesson and skill.
+  const alt = item.kid?.alt;
+  if (alt) item.kid = { ...item.kid!, alt: { ...alt, id, stop: STOP, lesson, skill } as Item };
+  return item;
+};
 
 /**
  * Makes the items of one set. No two items in a set look the same: a repeat is thrown away and made again from the same
@@ -154,6 +163,37 @@ const practiceOf = (lesson: string, make: (rng: Rng) => Made[]) => (rng: Rng): I
 const tf = (v: boolean) => (v ? 'true' : 'false');
 
 // ---------- Lesson 1: in the ring or not ----------
+
+const cap = (x: string) => x.charAt(0).toUpperCase() + x.slice(1);
+
+/**
+ * The kid layer (Grade 2, docs/KID-JOURNEY.md): one line per card under its picture (the rings picture itself, or a
+ * pictogram for the contrast card), one line per board, the board rows named by their card, and the star line. The
+ * one new word is “overlap”, named on the second card. The items' kid words come from the generators (ringTapKid,
+ * placeKid with the four parts as picture tiles, countKid, bothTapKid).
+ */
+const L1_KID: KidLesson = {
+  cards: [
+    { line: 'The Red ring holds every red card.', art: 'scene' },
+    { line: 'Overlap: the part two rings share.', art: 'scene' },
+    { line: 'A card in the overlap is in both rings.', art: 'rings-overlap-card' },
+    { line: 'Check each card, one ring at a time.', art: 'scene' },
+  ],
+  board: [
+    // The rings drawn above (scene: Circles on the left, Red on the right), then one card and one of its two marks a
+    // page, each mark a picture with no words: the whole right ring lit (in the Red ring?), then only its own part lit
+    // (only in it?). The card's picture names the row (no row label), so a page is the line, the rings, the card, the
+    // picture and the check and cross tiles.
+    {
+      line: 'Is this card in the green part?',
+      scene: 'scene',
+      rows: inOnlyBoard(2).rows.map(() => ({ label: '', marks: [{ art: 'ring-in-b' as const }, { art: 'ring-part-b' as const }] })),
+    },
+    // The four new cards, one at a time, and the four parts as answers.
+    { line: 'Where does it go?', rows: placeBoard(3).rows.map((r) => ({ label: cap(cardName(r.things![0])) })) },
+  ],
+  star: 'You can sort cards into rings!',
+};
 
 const L1: LessonDef = {
   id: 's8.l1',
@@ -211,6 +251,7 @@ const L1: LessonDef = {
     ];
   }),
   pass: { firstTry: 3, include: [IN_BOTH] },
+  kid: L1_KID,
 };
 
 // ---------- Lesson 2: all, some, none ----------
@@ -218,6 +259,34 @@ const L1: LessonDef = {
 const SOME_RED = sen('some', L1_X, L1_Y);
 const ALL_RED = sen('all', L1_X, L1_Y);
 const NO_RED = sen('none', L1_X, L1_Y);
+
+/** The worked example's “all” sentence and the one triangle that breaks it. */
+const ALL_TRI_BLUE = sen('all', L2_EX.x, L2_EX.y);
+const L2_EX_BREAKER = L2_EX.things.find((t) => breaks(ALL_TRI_BLUE, t))!;
+
+/**
+ * The kid layer (Grade 3, docs/KID-JOURNEY.md): one line per card under its picture (the rings pictures, or a
+ * pictogram), one line per board, and the star line. The one new word is “some”, named on the first card (at least
+ * one, and it can be all), before any card uses it; the fourth card shows it true when every circle fits. The first board's rows are their three circles alone: the line and the two sentences to mark
+ * say the rest (a row label would be a fourth sentence). The items' kid words come from truthKid and whichKid; in kid
+ * mode “Which one is true?” is its kid-only alternate (whichAlt): one of its sentences, true or false.
+ */
+const L2_KID: KidLesson = {
+  cards: [
+    // The word card first: no card names “some” before it.
+    { line: 'Some: at least one. It can even be all!', art: 'line-all-some-none' },
+    { line: `Every circle is red, so ${quoteMid(ALL_RED)} is ${tf(truth(ALL_RED, L2_ALL.things))}.`, art: 'scene' },
+    { line: `One red circle makes “some” ${tf(truth(SOME_RED, L2_SOME.things))} and “no” ${tf(truth(NO_RED, L2_SOME.things))}.`, art: 'scene' },
+    { line: 'Every circle here is red, and “some” is still true.', art: 'quant-some-all' },
+    { line: `One triangle is ${L2_EX_BREAKER.color}, so ${quoteMid(ALL_TRI_BLUE)} is ${tf(truth(ALL_TRI_BLUE, L2_EX.things))}.`, art: 'scene' },
+  ],
+  board: [
+    { line: 'Mark each sentence for these circles.', rows: someBoard(3).rows.map(() => ({ label: '' })) },
+    // The rows are the three sentences, under a picture of the board's rings (every triangle blue).
+    { line: 'Now every triangle is blue. True or false?', rows: quantBoard(4).rows.map(() => ({ art: 'rings-triangles-blue' as const })) },
+  ],
+  star: 'You know all, some, and none!',
+};
 
 const L2: LessonDef = {
   id: 's8.l2',
@@ -283,6 +352,7 @@ const L2: LessonDef = {
     ];
   }),
   pass: { firstTry: 3, include: [SOME_ALL] },
+  kid: L2_KID,
 };
 
 // ---------- Lesson 3: not all means some are not ----------

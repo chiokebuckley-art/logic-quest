@@ -104,6 +104,8 @@
   text-transform: uppercase;
   overflow-wrap: break-word;
 }
+/* The kid header "Round k of n" stays on one line, even beside the dots at 320 px. */
+.play-head-title--round { white-space: nowrap; }
 
 /* ---------- step dots ---------- */
 .play-dots {

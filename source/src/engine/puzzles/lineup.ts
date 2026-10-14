@@ -16,7 +16,7 @@
  */
 import { clueHolds } from '../grade';
 import { syncWhyWrong } from '../teach';
-import type { BoardWords, Choice, ChoiceFeedback, ChooseItem, ConfusedQuestion, ContrastPanel, Distinction, DrillMark, DrillOption, DrillRow, DrillStep, LineClue, OrderItem, Rng, Scene, Teach, TeachCase, Truth } from '../types';
+import type { BoardWords, Choice, ChoiceFeedback, ChooseItem, ConfusedQuestion, ContrastPanel, Distinction, DrillMark, DrillOption, DrillRow, DrillStep, KidItem, KidPicto, KidScene, LineClue, OrderItem, Picto, Rng, Scene, Teach, TeachCase, Truth } from '../types';
 
 export type ClueType = LineClue['t'];
 export type SkinId = 'race' | 'brooms' | 'height' | 'dragons' | 'line' | 'robots' | 'letters';
@@ -900,6 +900,121 @@ export function extraSimpler(skin: Skin, used: readonly string[]): Mini {
   return { ids, clues, text };
 }
 
+// ---------- the kid layer (Grades 2 and 3, docs/KID-JOURNEY.md) ----------
+//
+// Beside the classic text, never instead of it. Lessons 1 and 2 are Grade 2 rounds (a screen holds 20 words with its
+// header, 2 sentences, 10 words a sentence), lessons 3 and 4 Grade 3 rounds (30 words, 3 sentences, 12 words). The
+// kid prompt is the question alone, without the setting sentence. "Show me" draws a tiny twin of the same kind with
+// made-up names (Ann, Bo and Cy: no skin's pool has them), so it never shows the quiz's own question. The kid hint
+// (eight words at most) names the one move to make, never the answer.
+//
+// The clues are a picture (KidItem.scene): one row per clue, each name a picture of who it is (a kid, a wizard, a
+// dragon, a robot, a letter tile) with the name under it, and the relation the clue puts between the names as a
+// picture between them ("Ava, taller than, Ben"). Names on answer tiles get the same picture, so a name looks the same
+// in the clues and in the answers.
+
+/** Who a name is, by skin: the picture over each name in a kid clue scene and on a name tile. */
+const KID_WHO: Record<SkinId, Picto> = {
+  race: 'line-who-kid', height: 'line-who-kid', line: 'line-who-kid', brooms: 'line-who-wizard', dragons: 'line-who-dragon', robots: 'line-who-robot', letters: 'line-who-letter',
+};
+
+/**
+ * The picture of what a clue says between its names, in the skin's sense of "before": taller (heights), longer wings
+ * (dragons), left of (letters), else before; a place is its spot badge (a place clue is never at an end).
+ */
+export function kidRel(skin: Skin, c: LineClue): Picto {
+  switch (c.t) {
+    case 'before': return skin.id === 'height' ? 'line-rel-taller' : skin.id === 'dragons' ? 'line-rel-longer' : skin.id === 'letters' ? 'line-rel-left' : 'line-rel-before';
+    case 'rightBefore': return skin.id === 'letters' ? 'line-rel-just-left' : 'line-rel-right-before';
+    case 'nextTo': return 'line-rel-next';
+    case 'notNextTo': return 'line-rel-not-next';
+    case 'between': return 'line-rel-between';
+    case 'first': return 'line-rel-first';
+    case 'last': return 'line-rel-last';
+    case 'notFirst': return 'line-rel-not-first';
+    case 'notLast': return 'line-rel-not-last';
+    case 'place':
+      if (c.k < 1 || c.k > 4) throw new Error(`kidRel: no spot badge for place ${c.k}`);
+      return `line-spot-${c.k as 1 | 2 | 3 | 4}`;
+  }
+}
+
+/**
+ * The clues as a kid scene: one row per clue, in the clues' order. A name is its picture with the name under it; the
+ * relation sits between the names ("Ava, taller than, Ben"); "between" names the one in the middle first ("Cal,
+ * between, Ava, Ben"); a clue about one spot is the name and the spot ("Mo, first"). `also`: people in the line whom
+ * nothing else on the screen names, as a last row of their own (a kid mode screen has no setting sentence, and a
+ * must / might / can’t answer can turn on someone who could stand in between).
+ */
+export function kidClueScene(skin: Skin, clues: readonly LineClue[], nm: (id: string) => string, also: readonly string[] = []): KidScene {
+  const who = (id: string): KidPicto => ({ art: KID_WHO[skin.id], word: nm(id) });
+  return {
+    kind: 'pictos',
+    rows: [
+      ...clues.map((c): KidPicto[] => {
+        const rel: KidPicto = { art: kidRel(skin, c) };
+        if (c.t === 'between') return [who(c.a), rel, who(c.b), who(c.c)];
+        if ('b' in c) return [who(c.a), rel, who(c.b)];
+        return [who(c.a), rel];
+      }),
+      ...(also.length ? [also.map(who)] : []),
+    ],
+  };
+}
+
+/**
+ * Name answers as picture tiles: each name with the picture of who it is, as in the clues, and "Can’t tell" as the
+ * question tile. `quietCant`: the question tile prints no words (Grade 2, where a screen holds 20 words); it is still
+ * read aloud and announced as "Can’t tell".
+ */
+const kidNameTiles = (skin: Skin, choices: readonly Choice[], quietCant: boolean): Choice[] =>
+  choices.map((c) => (c.id === CANT ? { ...c, art: 'verdict-cant' as const, ...(quietCant ? { word: '' } : {}) } : { ...c, art: KID_WHO[skin.id] }));
+
+/**
+ * The question about one spot, in the skin's words, with no setting: "Who is the tallest?", "Who finished last?" A
+ * parade says its ends in two words: "Which robot is at the front?"
+ */
+const spotAsk = (skin: Skin, k: number, n: number) => `${skin.who} ${CONJ[skin.verb].is} ${skin.spot(k, n, true).replace(/^(at the (?:front|back)) of the parade$/, '$1')}?`;
+
+/**
+ * Lesson 1's question about an end of the line, in five words at most: a Grade 2 screen holds 20 words, and a chain of
+ * four names shows six names in its clues and four on its tiles.
+ */
+const KID_END: Record<SkinId, Record<'first' | 'last', string>> = {
+  race: { first: 'Who finished first?', last: 'Who finished last?' },
+  brooms: { first: 'Who finished first?', last: 'Who finished last?' },
+  height: { first: 'Who is the tallest?', last: 'Who is the shortest?' },
+  dragons: { first: 'Whose wings are longest?', last: 'Whose wings are shortest?' },
+  line: { first: 'Who is first in line?', last: 'Who is last in line?' },
+  robots: { first: 'Who is at the front?', last: 'Who is at the back?' },
+  letters: { first: 'Which letter is farthest left?', last: 'Which letter is farthest right?' },
+};
+
+/** Lesson 1's "Show me": a chain that decides the end, or two people a fork leaves open. */
+const CHAIN_SHOW: Record<'first' | 'last', { decided: TeachCase; cant: TeachCase }> = {
+  first: {
+    decided: { label: 'Ann is taller than Bo, and Bo than Cy.', note: 'Tallest: Ann.' },
+    cant: { label: 'Ann and Cy are each taller than Bo.', note: 'Tallest: can’t tell.' },
+  },
+  last: {
+    decided: { label: 'Ann is taller than Bo, and Bo than Cy.', note: 'Shortest: Cy.' },
+    cant: { label: 'Bo is taller than Ann and Cy.', note: 'Shortest: can’t tell.' },
+  },
+};
+
+/**
+ * A chain item in kid words. The hint is the crossing out of lesson 1 in clue words: every clue names the one ahead
+ * first, so for the first spot each clue crosses out its second name, and for the last spot its first name.
+ */
+export const chainKid = (skin: Skin, ask: 'first' | 'last', cant: boolean, scene: KidScene): KidItem => ({
+  prompt: KID_END[skin.id][ask],
+  scene,
+  nope: cant ? 'More than one could be there.' : 'Only one is left after you cross out.',
+  yes: cant ? 'No chain links them, so you can’t tell.' : 'The chain decides it.',
+  show: CHAIN_SHOW[ask][cant ? 'cant' : 'decided'],
+  hint: ask === 'first' ? 'In each clue, cross out the second name.' : 'In each clue, cross out the first name.',
+});
+
 // ---------- lesson 1: chains ----------
 
 export interface ChainOpts {
@@ -1048,7 +1163,8 @@ export function chainPuzzle(rng: Rng, o: ChainOpts): Built<ChooseItem> & { ask: 
       skill: answer === CANT ? 's3.chain-cant-tell' : 's3.chain',
       prompt: `${cast.setting} ${skin.who} ${CONJ[skin.verb].is} ${spotObj}?`,
       scene: { kind: 'clues', clues: texts },
-      choices: nameChoices(cast),
+      // In kid mode the names are picture tiles (as in the clues) and Can't tell is the question tile.
+      choices: kidNameTiles(skin, nameChoices(cast), true),
       answer,
       feedback,
       explain,
@@ -1056,6 +1172,7 @@ export function chainPuzzle(rng: Rng, o: ChainOpts): Built<ChooseItem> & { ask: 
       hintCase: bestTryCase(t, outLine, `${tryNote(t, outLine, at(outId), say(skin, 'could', nm(outId), spotObj))} Moving the others does not help: ${told[outClue]} So cross out ${nm(outId)}.`, clues.map((_, i) => i)),
       teach,
       tags: [answer === CANT ? 'cant-tell' : 'decided', `ask-${ask}`],
+      kid: chainKid(skin, ask, answer === CANT, kidClueScene(skin, clues, nm)),
       ...(answer === CANT ? { conflict: true } : {}),
     };
     syncWhyWrong(item);
@@ -1255,6 +1372,41 @@ export const STATUS_CHOICES: Choice[] = [
   { id: 'cant', label: 'Can’t be true' },
 ];
 
+/**
+ * Lesson 2's answers in kid mode: picture tiles (every order checked, some, none), each with its one word under it
+ * (the lesson's card says what must, might and can’t mean). Each tile is still read aloud by its label.
+ */
+const STATUS_ART: Record<Status, Picto> = { must: 'line-must', might: 'line-might', cant: 'line-cant' };
+export const STATUS_WORD: Record<Status, string> = { must: 'Must', might: 'Might', cant: 'Can’t' };
+const STATUS_TILES: Choice[] = STATUS_CHOICES.map((c) => ({ ...c, art: STATUS_ART[c.id as Status], word: STATUS_WORD[c.id as Status] }));
+
+/** Lesson 2's lines after a miss and a right answer, and its "Show me" twins (a race of Ann, Bo and Cy). */
+const STATUS_KID: Record<Status, { nope: string; yes: string; show: TeachCase }> = {
+  must: { nope: 'No order that fits makes it false.', yes: 'It is true in every order that fits.', show: { label: 'Ann finished right before Bo.', note: '“Ann before Bo” must be true.' } },
+  might: { nope: 'It is true in some orders, not all.', yes: 'True in some orders, false in others.', show: { label: 'Ann finished before Bo, and Cy may be between.', note: '“Right before” might be true.' } },
+  cant: { nope: 'No order that fits makes it true.', yes: 'It is false in every order that fits.', show: { label: 'Bo finished before Ann.', note: '“Ann before Bo” can’t be true.' } },
+};
+
+/** The sentence to judge in kid words. Letters say "left of" and "just left of": “A is before B.” reads as the alphabet. */
+const kidStmt = (skin: Skin, stmt: Stmt, a: string, b: string): string =>
+  skin.id === 'letters'
+    ? `“${a} is ${stmt.t === 'rightBefore' ? 'just ' : ''}left of ${b}.”`
+    : `“${a} is ${stmt.t === 'rightBefore' ? 'right before' : 'before'} ${b}.”`;
+
+/**
+ * A must / might / can't item in kid words: the sentence to judge alone, in the round's own words ("before" and "right
+ * before"; the last card says a line's own words work the same way), with the three tiles under it. A skin with no
+ * "right before" keeps its own sentence.
+ */
+export const statusKid = (skin: Skin, stmt: Stmt, stmtText: string, nm: (id: string) => string, status: Status, trap: boolean, scene: KidScene): KidItem => ({
+  prompt: skin.rightBefore ? kidStmt(skin, stmt, nm(stmt.a), nm(stmt.b)) : quoteEnd(stmtText),
+  scene,
+  ...STATUS_KID[status],
+  // The "before" trap: someone may stand between the two names, so "right before" only might be true.
+  ...(trap ? { nope: 'Someone can be in between.' } : {}),
+  hint: 'Check the sentence in each order that fits.',
+});
+
 /** Given the clues, must / might / can't a sentence about "before" or "right before" be true? */
 export function statusPuzzle(rng: Rng, o: StatusOpts): Built<ChooseItem> & { stmt: Stmt; status: Status } {
   const skin = SKINS[o.skin];
@@ -1448,7 +1600,7 @@ export function statusPuzzle(rng: Rng, o: StatusOpts): Built<ChooseItem> & { stm
       // "Must it be true?" alone does not say true when, so the question names every order that fits the clues.
       prompt: `${cast.setting} Look at this sentence: “${stmtText}” Think about every order that fits the clues. Must the sentence be true, might it be true, or can’t it be true?`,
       scene: { kind: 'clues', clues: texts },
-      choices: STATUS_CHOICES,
+      choices: STATUS_TILES,
       answer: status,
       feedback,
       explain,
@@ -1457,6 +1609,8 @@ export function statusPuzzle(rng: Rng, o: StatusOpts): Built<ChooseItem> & { stm
       hintCase: lineCase(t, hintLine, [said(hintLine)], caseNote(hintLine), clues.map((_, i) => i)),
       teach,
       tags: [status, ...(trap ? ['before-trap'] : [])],
+      // The kid scene adds whoever neither the clues nor the sentence name: the screen has no setting to name them.
+      kid: statusKid(skin, stmt, stmtText, nm, status, trap, kidClueScene(skin, clues, nm, cast.ids.filter((id) => id !== stmt.a && id !== stmt.b && !clues.some((c) => mentions(c, id))))),
       ...(trap ? { conflict: true } : {}),
     };
     syncWhyWrong(item);
@@ -1496,6 +1650,46 @@ const SPOT_REMEMBER: Record<SpotFocus, string> = {
   notNextTo: 'Two names that are not next to each other need someone in between.',
   between: '“Somewhere between” does not say which of the other two comes first.',
 };
+
+/** Lesson 3's "where" answers in kid mode: a badge with one to four dots for the spots, a question mark for Can't tell. */
+const SPOT_ART: readonly Picto[] = ['line-spot-1', 'line-spot-2', 'line-spot-3', 'line-spot-4'];
+const spotTiles = (choices: readonly Choice[]): Choice[] =>
+  choices.length - 1 > SPOT_ART.length ? [...choices] : choices.map((c, i) => ({ ...c, art: c.id === CANT ? 'verdict-cant' : SPOT_ART[i] }));
+
+/** A "where" question in a few words, with the end counting starts from: "Where is Eli, from the front?" */
+function kidWhere(skin: Skin, x: string): string {
+  switch (skin.id) {
+    case 'race':
+    case 'brooms': return `Where did ${x} finish?`;
+    case 'height': return `Where is ${x}, tallest first?`;
+    case 'dragons': return `Where is ${x}, longest wings first?`;
+    case 'letters': return `Where is ${x}, from the left?`;
+    default: return `Where is ${x}, from the front?`;
+  }
+}
+
+/** Lesson 3's "Show me" twins: what each kind of clue leaves open (a race of Ann, Bo and Cy). */
+const SPOT_SHOW: Record<SpotFocus, TeachCase> = {
+  ends: { label: 'Three runners. Bo is not first and not last.', note: 'So Bo is second.' },
+  nextTo: { label: 'Ann and Bo are next to each other.', note: 'Ann could be ahead, or Bo could.' },
+  notNextTo: { label: 'Ann and Bo are not next to each other.', note: 'Someone stands between them.' },
+  between: { label: 'Bo is between Ann and Cy.', note: 'Ann could be first, or Cy could.' },
+};
+/** With four runners, “not first” and “not last” leave two spots: the twin of a can't-tell item about the ends. */
+const ENDS_OPEN: TeachCase = { label: 'Four runners. Bo is not first and not last.', note: 'Bo could be second or third.' };
+
+/**
+ * A "where" or "who" item of lesson 3 in kid words. The hint is the lesson's move: try each answer, and move the others
+ * (`where`: the name tried in each spot; null for a "who" item).
+ */
+export const spotKid = (prompt: string, where: string | null, focus: SpotFocus, forced: boolean, scene: KidScene): KidItem => ({
+  prompt,
+  scene,
+  nope: forced ? 'Only one answer keeps every clue true.' : 'More than one answer fits the clues.',
+  yes: forced ? 'Every other answer breaks a clue.' : 'More than one fits, so you can’t tell.',
+  show: focus === 'ends' && !forced ? ENDS_OPEN : SPOT_SHOW[focus],
+  hint: where ? `Try ${where} in each spot. Move the others.` : 'Try each one there. Move the others.',
+});
 
 /** "Where is Eli in line?" or "Who finished second?", with Can't tell when the clues do not decide it. */
 export function spotPuzzle(rng: Rng, o: SpotOpts): Built<ChooseItem> & { q: 'where' | 'who'; target: string; k: number; focus: SpotFocus } {
@@ -1572,7 +1766,7 @@ export function spotPuzzle(rng: Rng, o: SpotOpts): Built<ChooseItem> & { q: 'whe
     let explain: string;
     let hint: string;
     if (where) {
-      choices = [...Array.from({ length: n }, (_, i) => ({ id: `p${i + 1}`, label: cap(ORDINALS[i]) })), CANT_TELL];
+      choices = spotTiles([...Array.from({ length: n }, (_, i) => ({ id: `p${i + 1}`, label: cap(ORDINALS[i]) })), CANT_TELL]);
       answer = forced ? `p${options[0]}` : CANT;
       prompt = `${cast.setting} ${skin.where(nm(x))}`;
       hint = `Try ${nm(x)} in each spot. Cross out a spot only when no way of placing the others keeps every clue true.`;
@@ -1585,7 +1779,8 @@ export function spotPuzzle(rng: Rng, o: SpotOpts): Built<ChooseItem> & { q: 'whe
         explain = `${twoFits} ${ot(o1)}. Or ${ot(o2)}. ${nm(x)} is in a different spot in each, so you can’t tell.`;
       }
     } else {
-      choices = nameChoices(cast);
+      // In kid mode the names are picture tiles, as in the clues.
+      choices = kidNameTiles(skin, nameChoices(cast), false);
       answer = forced ? options[0] : CANT;
       prompt = `${cast.setting} ${skin.who} ${CONJ[skin.verb].is} ${spotObj}?`;
       // Never "that spot": every sentence names the spot the question asks about. A person never breaks a clue: a
@@ -1760,6 +1955,7 @@ export function spotPuzzle(rng: Rng, o: SpotOpts): Built<ChooseItem> & { q: 'whe
       scratchLabel: 'the test board',
       confused: tryConfused(skin),
       tags: [forced ? 'decided' : 'cant-tell', focus, q, ...(moveOthers ? ['move-others'] : [])],
+      kid: spotKid(where ? kidWhere(skin, nm(x)) : spotAsk(skin, k, n), where ? nm(x) : null, focus, forced, kidClueScene(skin, clues, nm)),
       ...(o.conflict ? { conflict: true } : {}),
     };
     syncWhyWrong(item);
@@ -1806,6 +2002,53 @@ function nearMisses(order: readonly string[], clues: readonly LineClue[]): { p: 
   }
   return out;
 }
+
+/** Lesson 4's question in kid words: the order to build, from which end. */
+const KID_BUILD: Record<SkinId, string> = {
+  race: 'Put them in finish order.',
+  brooms: 'Put them in finish order.',
+  height: 'Line them up, tallest first.',
+  dragons: 'Line them up, longest wings first.',
+  line: 'Put them in line, front first.',
+  robots: 'Line up the robots, front first.',
+  letters: 'Line up the letters, left first.',
+};
+
+/**
+ * Lesson 4's "Show me" twin and hint for each kind of first step (FirstStep): a clue that names a spot, an end found by
+ * crossing out, someone next to two people, two clues that put three in order, a pair, or a line to try and fix.
+ */
+const BUILD_KID: Record<FirstStep['kind'], { show: TeachCase; hint: string }> = {
+  spot: { show: { label: 'Cy finished last. Ann finished before Bo.', note: 'So the line is Ann, Bo, Cy.' }, hint: 'Start with the clue that names a spot.' },
+  end: { show: { label: 'Ann finished before Bo and before Cy.', note: 'So Ann is first.' }, hint: 'Find an end by crossing out.' },
+  between: { show: { label: 'Bo is next to Ann and next to Cy.', note: 'So Bo is in the middle.' }, hint: 'Who is next to two people? Start there.' },
+  order3: { show: { label: 'Ann finished before Bo. Bo finished before Cy.', note: 'So the line is Ann, Bo, Cy.' }, hint: 'Find two clues that put three in order.' },
+  pair: { show: { label: 'Ann finished right before Bo.', note: 'They stand together: Ann, then Bo.' }, hint: 'Find two who must stand together.' },
+  try: { show: { label: 'No clue names a spot.', note: 'Try a line, then check each clue.' }, hint: 'Try a line. Then check every clue.' },
+};
+
+/**
+ * The two ends of a line-up in kid mode, one word each (the classic ends run to four words each: "Front of the
+ * line"), printed over the first and the last spot of the kid-only line-up (KidItem.alt).
+ */
+export const KID_ENDS: Record<SkinId, readonly [string, string]> = {
+  race: ['First', 'Last'],
+  brooms: ['First', 'Last'],
+  height: ['Tallest', 'Shortest'],
+  dragons: ['Longest', 'Shortest'],
+  line: ['Front', 'Back'],
+  robots: ['Front', 'Back'],
+  letters: ['Left', 'Right'],
+};
+
+/** A build item in kid words: the order to build, the clues as a picture, one line after a miss, and the first step's twin and hint. */
+export const buildKid = (skin: SkinId, step: FirstStep['kind'], scene: KidScene): KidItem => ({
+  prompt: KID_BUILD[skin],
+  scene,
+  nope: 'A clue is false in your line.',
+  yes: 'Every clue is true in this line.',
+  ...BUILD_KID[step],
+});
 
 /** Place everyone. The clues force exactly one order, and every clue is needed. */
 export function buildPuzzle(rng: Rng, o: BuildOpts): Built<OrderItem> {
@@ -1873,10 +2116,15 @@ export function buildPuzzle(rng: Rng, o: BuildOpts): Built<OrderItem> {
         ? 'Start with the clue that names an exact spot. Then place the rest one by one.'
         : `${step.text}${step.kind === 'try' ? '' : ' Then place the rest one by one.'}`}`,
       tags: [anchor >= 0 ? 'spot-clue' : 'no-spot-clue'],
+      kid: buildKid(skin.id, step.kind, kidClueScene(skin, clues, nm)),
       // The names in the order the pool shows them (never the answer), tested clue by clue.
       hintCase: lineCase(t, names, [], `${cap(clueNums(brokenBy(clues, names)))} ${isAre(brokenBy(clues, names).length)} false here. So this line does not fit.`, clues.map((_, i) => i)),
       teach,
     };
+    // Kid mode (KidItem.alt): the same line-up, the same names, clues and answer, with its two ends in one word each
+    // ("Front" and "Back"), so a Grade 3 screen holds the clues, the names, the spots and Check.
+    const [firstEnd, lastEnd] = KID_ENDS[skin.id];
+    item.kid = { ...item.kid!, alt: { ...item, firstLabel: firstEnd, lastLabel: lastEnd } };
     return { item, ids: cast.ids, order, clues };
   }
   throw new Error('buildPuzzle: no puzzle found');
@@ -2021,6 +2269,19 @@ export const boardFits = (b: LineBoard): string[][] => fits(b.ids, b.clues);
 
 /** "Ava, Ben, Cal", or "Ava, Ben, Cal (tallest first)". */
 export const boardLine = (b: LineBoard, order: readonly string[]) => orderWords(SKINS[b.skin], boardName, order);
+
+/**
+ * A board's "before" or "right before" sentence in kid words, quoted as lesson 2's quiz quotes it: “Ava is right before
+ * Ben.” (letters: “A is just left of B.”). Only a skin that can say "right before" (lesson 2's boards).
+ */
+export function kidSays(b: LineBoard, s: LineClue): string {
+  const skin = SKINS[b.skin];
+  if ((s.t !== 'before' && s.t !== 'rightBefore') || !skin.rightBefore) throw new Error('kidSays: a before or right before sentence, on a board that can say both');
+  return kidStmt(skin, s, boardName(s.a), boardName(s.b));
+}
+
+/** The same sentence as a yes-or-no question, for a check or a cross: "is Ava right before Ben?" */
+export const kidAsks = (b: LineBoard, s: LineClue): string => kidSays(b, s).replace(/^“(\S+) is (.+)\.”$/, 'is $1 $2?');
 
 /** The people no clue names. */
 export const unnamed = (b: LineBoard) => b.ids.filter((id) => !b.clues.some((c) => mentions(c, id)));

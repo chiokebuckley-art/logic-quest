@@ -1,6 +1,8 @@
 /**
  * The body of a multi item: text cards in two columns, each a toggle button (aria-pressed). Any set may be
- * right, including none, so Check is always on. Short faces (E, K, 4, 7) are drawn big like playing cards.
+ * right, including none, so Check is always on. Short faces (E, K, 4, 7) are drawn big like playing cards. In kid
+ * mode the help line is for screen readers only and the cards are plain: no "Tap to choose" or "Chosen" under them
+ * (each card's pressed state says it).
  */
 import type { MultiItem } from '../../engine/types';
 
@@ -17,14 +19,16 @@ export interface MultiViewProps {
   /** Learn mode, right or shown: ring the cards in the answer. */
   revealed: boolean;
   onToggle(id: string): void;
+  /** Kid mode (Grades 1 to 3, an item with its kid layer). */
+  kid?: boolean;
 }
 
-export function MultiView({ item, chosen, locked, revealed, onToggle }: MultiViewProps) {
+export function MultiView({ item, chosen, locked, revealed, onToggle, kid = false }: MultiViewProps) {
   const big = item.choices.every((c) => c.label.trim().length <= 3);
   const note = chosenNote(item);
   return (
     <div className="play-stack-sm">
-      <p className="play-help">Tap one to choose it. Tap it again to undo.</p>
+      <p className={kid ? 'play-sr' : 'play-help'}>Tap one to choose it. Tap it again to undo.</p>
       <ul className={`play-tcards${big ? ' play-tcards--big' : ''}`} aria-label="Cards to choose from">
         {item.choices.map((c) => {
           const on = chosen.includes(c.id);
@@ -40,7 +44,7 @@ export function MultiView({ item, chosen, locked, revealed, onToggle }: MultiVie
                 onClick={() => { if (!locked) onToggle(c.id); }}
               >
                 <span className="play-tcard-face">{c.label}</span>
-                <span className="play-tcard-note" aria-hidden="true">{on ? note : locked ? '' : 'Tap to choose'}</span>
+                {!kid && <span className="play-tcard-note" aria-hidden="true">{on ? note : locked ? '' : 'Tap to choose'}</span>}
                 {fits && (
                   // A word, not a ✓: on "Which boxes get a ✗?" a ✓ badge would read as "this box gets a ✓".
                   <span className="play-tcard-fits">

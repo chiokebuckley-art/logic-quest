@@ -13,12 +13,12 @@
 import {
   BASE_SKINS, ECHO_TRANSFER, L1, L2, L3, LONGER_BLOCK, NEAR_END, PATTERNS, REPAIR_TRANSFER, SAME_PIECES, STAR_TRANSFER, STOP,
   atPosition, blockFits, blocksOf, build, countLine, describeStructure, distinctSet, echoWhyItem, findItem, firstMiss,
-  fixItem, lettersOf, madeLine, makeSkin, matchItem, meantLine, modelOf, positionItem, rebuildItem, repairWhyItem, repeatOrNotItem,
+  fixItem, lettersOf, madeLine, makeSkin, matchItem, meantLine, modelOf, pieceArt, positionItem, rebuildItem, repairWhyItem, repeatOrNotItem,
   seenLine, shortestBlock, splitPosition, steppedScene, structureOf, tokensOf, unitItem, unitLengthItem, unitOf, unitText,
   unitWhyItem, type Broken, type ChainModel, type Skin,
 } from '../engine/puzzles/observatory/chains';
 import type { ChainScene } from '../engine/scenes/chain';
-import type { DrillMark, DrillStep, IdeaCard, Item, LessonDef, Rng, StopDef } from '../engine/types';
+import type { DrillMark, DrillStep, IdeaCard, Item, KidBoard, KidLesson, LessonDef, Picto, Rng, StopDef } from '../engine/types';
 
 const label = (s: Skin, i: number) => s.pieces[i].token.label;
 const a = (s: Skin, i: number) => s.pieces[i].a;
@@ -508,6 +508,124 @@ function echoTwinBoard(): DrillStep {
   };
 }
 
+// ---------- the kid layer (Grades 1 to 3, docs/KID-JOURNEY.md) ----------
+//
+// Beside the classic text, never instead of it. Star Chain and Repair Bench are Grade 1 rounds: at most 12 words a
+// screen, the header ("Round k of n", 4 words) and the buttons included, so a card line of six words, 2 sentences, 8
+// words in a sentence. Echo Bells is a Grade 2 round (20 words, 2 sentences, 10 words). A kid card's picture is a
+// pictogram of its chain (the cards' own scenes step through words). A kid board is marked one mark per page: a row's
+// picture is its chain, a block length or a spot is a ten frame of dots and a piece is its picture (KidBoard.options,
+// no words under them), and a row with several marks names each mark in a few words (KidRow.marks). Repair Bench's
+// boards draw their chain above the rows (KidBoard.scene; the worked board's stepped scene, whose steps are sentences,
+// gives way to the plain chain in a kid-only board, KidBoard.alt), and its letter board draws the rule over each part
+// as letter tiles. The one new word of each round is named on its first card: "unit" (Star Chain), "rule" (Repair
+// Bench), "pattern" (Echo Bells). The items' kid words come from the generators in
+// ../engine/puzzles/observatory/chains.ts.
+
+/** Kid board tiles: a count (a block length, a spot) as a ten frame of dots, with no word under it. */
+const dotTiles = (ns: readonly number[]): NonNullable<KidBoard['options']> => Object.fromEntries(ns.map((n) => [String(n), { art: `ten-frame-${n}` as Picto }]));
+/** Kid board tiles: each kind of piece (option `pc${i}`) as its picture, with no word under it. */
+const pieceTiles = (s: Skin, kinds: readonly number[]): NonNullable<KidBoard['options']> =>
+  Object.fromEntries(kinds.map((i) => [`pc${i}`, { art: pieceArt(s, i)! }]));
+/** The marks of a row of spots past the end, in kid words: "Spot 11?" */
+const spotMarks = (spots: readonly number[]) => spots.map((p) => ({ label: `Spot ${p}?` }));
+/** The fix row's two marks in kid words: the spot (dots), then the piece. */
+const FIX_MARKS = [{ label: 'Which spot breaks?' }, { label: 'What goes there?' }];
+
+/** Repair Bench's letter board part, drawn as letter tiles under the rule K, M, M (checked against the chain itself). */
+function letterPartArt(x: { s: number; e: number }): Picto {
+  const rule = REPAIR_TWIN.unit.map((i) => label(LETTERS, i)).join('').toLowerCase();
+  const part = REPAIR_TWIN.seq.slice(x.s - 1, x.e).map((i) => label(LETTERS, i)).join('').toLowerCase();
+  if (rule !== 'kmm' || (part !== 'kmm' && part !== 'kmk')) throw new Error(`Repair Bench's letter board has no picture for ${rule} over ${part}`);
+  return part === 'kmm' ? 'repair-kmm-ok' : 'repair-kmm-break';
+}
+
+/** Star Chain in kid words (Grade 1). */
+export const STAR_KID: KidLesson = {
+  cards: [
+    { line: 'Unit: the shortest part that repeats.', art: 'chain-unit' },
+    { line: 'Try a part. Check every piece.', art: 'chain-try' },
+    { line: 'Count on, unit by unit.', art: 'chain-far' },
+    { line: 'Not told how? We guess next.', art: 'chain-seen' },
+  ],
+  board: [
+    // starBoard(): the worked row (given), the unit's length (2, 3 or 6 dots), then three spots past the end.
+    {
+      line: 'Use the unit.',
+      rows: [{}, { label: 'How long is it?', art: 'chain-star' }, { label: '', art: 'chain-star', marks: spotMarks([11, 13, 16]) }],
+      options: { ...dotTiles([2, 3, 6]), ...pieceTiles(SHAPES, [0, 1]) },
+    },
+    // starTwinBoard(): a new chain in colors, its unit's length (2, 4 or 8 dots), then three spots past the end.
+    {
+      line: 'Find the new unit.',
+      rows: [{ label: 'How long?', art: 'chain-twin' }, { label: '', art: 'chain-twin', marks: spotMarks([9, 11, 14]) }],
+      options: { ...dotTiles([2, 4, 8]), ...pieceTiles(COLORS, [0, 1]) },
+    },
+  ],
+  star: 'You found the unit!',
+};
+
+/** Repair Bench in kid words (Grade 1): each part of the chain against the rule, the rule drawn over the part. */
+export const REPAIR_KID: KidLesson = {
+  cards: [
+    { line: 'Rule: the part it must repeat.', art: 'chain-break' },
+    { line: 'Check right to the end.', art: 'chain-end' },
+    { line: 'Some chains never repeat. Test them.', art: 'chain-mess' },
+  ],
+  board: [
+    // repairBoard(): part 1 is the worked case (given); parts 2 and 3, then the fix (the spot as dots, then the piece).
+    // In kid mode the same board over the plain chain (its stepped scene says sentences).
+    {
+      line: 'Match the rule?',
+      rows: [{}, { label: 'Part 2', art: 'repair-part-ok' }, { label: 'Part 3', art: 'repair-part-break' }, { label: '', art: 'repair-part-break', marks: FIX_MARKS }],
+      options: { ...dotTiles([7, 8, 9]), ...pieceTiles(SHAPES, [0, 1, 2]) },
+      scene: 'scene',
+      alt: { ...repairBoard(), scene: { kind: 'chain', tokens: tokensOf(REPAIR), stated: meantLine(REPAIR) } },
+    },
+    // repairTwinBoard(): letters, so each part is drawn as letter tiles under the rule's letter tiles.
+    {
+      line: 'Match the rule?',
+      rows: [...blocksOf(REPAIR_TWIN).map((x) => ({ label: `Part ${x.j}`, art: letterPartArt(x) })), { label: '', art: 'repair-kmm-break' as const, marks: FIX_MARKS }],
+      options: { ...dotTiles([7, 8, 9]), ...pieceTiles(LETTERS, [0, 1]) },
+      scene: 'scene',
+    },
+  ],
+  star: 'You fixed the chain!',
+};
+
+/** Echo Bells in kid words (Grade 2): the structure is a "pattern"; the letters name it. */
+export const ECHO_KID: KidLesson = {
+  cards: [
+    { line: 'Pattern: which spots match. New pieces can keep it.', art: 'echo-same' },
+    { line: 'New kind, next letter. Red, blue, blue is A, B, B.', art: 'echo-match' },
+    { line: 'Red, blue, red is A, B, A. Same colors, new pattern!', art: 'echo-other' },
+  ],
+  board: [
+    // echoBoard(): red is the worked case (given); blue's letter, the block in claps (a clap or a tap tile per spot),
+    // and clap, tap, clap.
+    {
+      line: 'Letters show the pattern.',
+      rows: [
+        {},
+        { label: 'Red is A, blue is?', art: 'echo-colors' },
+        { label: '', art: 'echo-colors', marks: [1, 2, 3].map((i) => ({ label: `Spot ${i} in claps?` })) },
+        { label: 'Clap, tap, clap: same as red, blue, blue?', art: 'echo-colors' },
+      ],
+      options: pieceTiles(SOUNDS, [0, 1]),
+    },
+    // echoTwinBoard(): the dance in letters, step by step, then two color blocks.
+    {
+      line: 'The dance: jump, jump, spin.',
+      rows: [
+        { label: '', art: 'echo-dance', marks: [1, 2, 3].map((i) => ({ label: `Step ${i} in letters?` })) },
+        { label: 'Red, blue, blue: same as the dance?', art: 'echo-dance' },
+        { label: 'Red, red, blue: same as the dance?', art: 'echo-dance' },
+      ],
+    },
+  ],
+  star: 'You can match patterns!',
+};
+
 // ---------- the packs ----------
 
 /** Star Chain: explain, a faded position, the same task with no frame, box the unit (the trap), then a transfer. */
@@ -615,6 +733,7 @@ const star: LessonDef = {
       () => positionItem(rng, { ask: 'far', skin: rng.pick(STAR_TRANSFER), phase: 'transfer' }),
     ]), `${L1}-independent-`),
   pass: { firstTry: 3, include: [LONGER_BLOCK] },
+  kid: STAR_KID,
 };
 
 const repair: LessonDef = {
@@ -646,6 +765,7 @@ const repair: LessonDef = {
       () => findItem(rng, { skin: rng.pick(REPAIR_TRANSFER), nearEnd: true, phase: 'transfer' }),
     ]), `${L2}-independent-`),
   pass: { firstTry: 3, include: [NEAR_END] },
+  kid: REPAIR_KID,
 };
 
 const echo: LessonDef = {
@@ -677,6 +797,7 @@ const echo: LessonDef = {
       () => matchItem(rng, { from: rng.pick(ECHO_TRANSFER), to: rng.pick(['colors', 'sounds'] as const), phase: 'transfer' }),
     ]), `${L3}-independent-`),
   pass: { firstTry: 3, include: [SAME_PIECES] },
+  kid: ECHO_KID,
 };
 
 // ---------- the Ring Check, the Arcade, new examples, the diagnostic ----------

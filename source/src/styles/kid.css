@@ -1,0 +1,229 @@
+/* The Kid Journey (docs/KID-JOURNEY.md): the grade picker, the grade map, Pip, the star sky, days this week, the
+   placement result and the grade badge ceremony. Big tap targets; nothing moves when reduce motion is on. */
+
+.kid-title { font-family: var(--font-display); font-weight: 700; font-size: 20px; letter-spacing: 0.02em; line-height: 1.3; margin: 0; }
+.kid-label { font-weight: 700; font-size: 16px; }
+
+/* new player: name and color, then Go; import and link below, small */
+.kid-new-form { gap: 14px; }
+.kid-new-name .kid-title { font-size: 17px; }
+.kid-new-more { justify-content: center; gap: 6px; opacity: 0.85; }
+.kid-new-more .btn.small { min-height: 36px; padding: 4px 10px; font-size: 12.5px; }
+.kid-new-more { display: flex; flex-direction: column; align-items: center; }
+.kid-grownups { text-decoration: underline; text-underline-offset: 3px; }
+.kid-grownups-panel { justify-content: center; gap: 6px; }
+.kid-new-back { align-self: flex-start; min-width: 44px; min-height: 44px; }
+
+/* which grade are you in? */
+.kid-grade { gap: 14px; }
+.kid-grade-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.kid-grade-btn {
+  min-height: 64px; border-radius: 16px; border: 2px solid var(--line); background: var(--bg-2); color: var(--text);
+  font-family: var(--font-display); font-weight: 700; font-size: 24px; cursor: pointer;
+}
+.kid-grade-btn.is-wide { grid-column: 1 / -1; font-size: 18px; }
+.kid-grade-btn[aria-pressed='true'] { border-color: var(--gold); background: var(--gold); color: var(--bg); }
+.kid-grade-btn:active { transform: scale(0.97); }
+
+/* the star sky */
+.kid-sky { width: 100%; height: auto; display: block; background: radial-gradient(ellipse at 50% 0%, #1e2656, #0a0d2a 75%); border-radius: 14px; }
+.kid-sky.is-small { max-height: 140px; }
+.kid-sky-dot { fill: #fff; opacity: 0.45; }
+.kid-sky-line { fill: none; stroke: rgba(154, 163, 209, 0.35); stroke-width: 0.8; stroke-dasharray: 2 2; }
+.kid-sky-label { fill: var(--text-2); font-size: 6px; font-family: var(--font-body); }
+.kid-star path { stroke-width: 1; stroke-linejoin: round; }
+.kid-star.is-clean path { fill: var(--gold); stroke: var(--gold); }
+.kid-star.is-mended path { fill: #c9cff0; stroke: #c9cff0; }
+.kid-star.is-open path { fill: none; stroke: var(--gold); }
+.kid-star.is-locked path { fill: rgba(154, 163, 209, 0.35); stroke: none; }
+.kid-star.glow-1 path { filter: drop-shadow(0 0 2px rgba(255, 201, 60, 0.8)); }
+.kid-star.glow-2 path { filter: drop-shadow(0 0 4px rgba(60, 255, 157, 0.9)); }
+.kid-star[role='button'] { cursor: pointer; }
+.kid-star[role='button']:focus-visible path { stroke: var(--cyan); stroke-width: 2; }
+.kid-sky-link { display: block; width: 100%; padding: 0; border: 0; background: none; cursor: pointer; }
+
+/* Pip, stickers, buildings, badges */
+.kid-pip { display: block; flex-shrink: 0; }
+.kid-pip.is-cheer { animation: kid-bounce 0.9s ease-in-out infinite alternate; }
+@keyframes kid-bounce { from { transform: translateY(0); } to { transform: translateY(-6px); } }
+.kid-pip-row { display: flex; align-items: center; gap: 12px; }
+.kid-pip-words { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.kid-badge.is-dim, .kid-building.is-dim { opacity: 0.35; filter: grayscale(0.8); }
+.kid-me-prizes { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; justify-content: center; }
+
+/* the grade map's rows */
+.kid-map { display: flex; flex-direction: column; gap: 14px; }
+.kid-rounds { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.kid-round { width: 100%; }
+.kid-row-star { display: inline-flex; color: rgba(154, 163, 209, 0.5); flex-shrink: 0; }
+.kid-row-star.is-clean { color: var(--gold); }
+.kid-row-star.is-mended { color: #c9cff0; }
+.kid-row-star.is-clean svg, .kid-row-star.is-mended svg { fill: currentColor; }
+.kid-check-row .kid-row-star { color: var(--mint); }
+.kid-others summary { cursor: pointer; color: var(--text-2); font-weight: 600; padding: 8px 0; }
+.kid-others-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+
+/* days this week */
+.kid-week { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; }
+.kid-week-label { font-size: 13px; color: var(--text-2); font-weight: 600; }
+.kid-week-dots { display: inline-flex; gap: 5px; }
+.kid-week-dot {
+  width: 24px; height: 24px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 700; color: var(--muted); border: 1.5px solid var(--line);
+}
+.kid-week-dot.is-on { background: var(--mint); border-color: var(--mint); color: var(--bg); }
+.kid-week-dot.is-ahead { opacity: 0.55; }
+.sl-week {
+  flex-shrink: 0; display: inline-flex; align-items: center; gap: 4px; min-height: 30px; padding: 0 10px; border-radius: 999px;
+  background: rgba(60, 255, 157, 0.12); border: 1px solid rgba(60, 255, 157, 0.45); color: var(--mint); font-weight: 700; font-size: 13px;
+}
+
+/* the kid Home */
+.kid-home { align-items: stretch; }
+.kid-home-pip { display: flex; justify-content: center; }
+.kid-play { font-size: 18px; min-height: 60px; }
+
+/* placement result */
+.kid-placed { align-items: center; text-align: center; }
+.kid-placed-pick { display: flex; gap: 8px; align-items: center; }
+
+/* the grade badge ceremony */
+.kid-ceremony {
+  position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; padding: 16px;
+  background: radial-gradient(ellipse at 50% 30%, #1e2656, #0a0d2a 80%);
+}
+.kid-ceremony-card { display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; max-width: 360px; width: 100%; }
+.kid-ceremony .kid-badge { animation: kid-pop 0.6s ease-out both; }
+@keyframes kid-pop { from { transform: scale(0.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+.kid-ceremony.is-still .kid-badge, .kid-ceremony.is-still .kid-pip, .reduce-motion .kid-pip.is-cheer, .reduce-motion .kid-ceremony .kid-badge { animation: none; }
+.kid-cert-line { color: var(--text-2); margin: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .kid-pip.is-cheer, .kid-ceremony .kid-badge { animation: none; }
+}
+
+@media (max-width: 360px) {
+  .kid-grade-btn { min-height: 56px; font-size: 20px; }
+  .kid-week-dot { width: 22px; height: 22px; }
+}
+
+/* "Print a certificate": the ceremony card alone, on white */
+@media print {
+  .kid-ceremony { position: static; background: #fff; color: #000; }
+  .kid-ceremony .btn { display: none; }
+  .kid-ceremony .kid-title, .kid-cert-line { color: #000; }
+  .nav, .hud, .update-banner, .sync-notice { display: none !important; }
+}
+
+/* ---------- kid rendering of cards, boards, items and feedback (Grades 1 to 3) ---------- */
+.kid-picto { display: block; flex-shrink: 0; }
+.kid-pic { display: flex; justify-content: center; padding: 8px 0 2px; }
+.kid-line { font-size: 22px; line-height: 1.3; }
+.kid-card .play-actions { margin-top: 4px; }
+.kid-big-btn { min-height: 56px; font-size: 18px; }
+
+/* the three goal stars over a question */
+.kid-goal { display: flex; justify-content: center; gap: 8px; }
+.kid-goal-star path { fill: none; stroke: var(--gold); stroke-width: 1.6; stroke-linejoin: round; }
+.kid-goal-star.is-on path { fill: var(--gold); }
+
+/* the kid hint, on its own small screen in place of the question */
+.kid-hint { display: flex; flex-direction: column; gap: 12px; }
+.kid-hint-line { font-size: 20px; font-weight: 600; }
+.kid-more-btn { min-width: 52px; padding: 0 12px; }
+
+/* a question in kid words */
+.kid-prompt { font-size: 20px; font-weight: 700; }
+.kid-hint-btn { min-width: 52px; padding: 0 12px; }
+
+/* answer tiles: a check and a cross, or one picture each */
+.kid-tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.kid-tiles--many { grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); }
+.kid-tile {
+  min-height: 96px; padding: 12px 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  background: var(--bg-3); color: var(--text); border: 2px solid var(--line); border-radius: 18px; cursor: pointer;
+  font-family: inherit; font-weight: 700; font-size: 16px;
+}
+.kid-tile:hover:not([aria-disabled='true']) { border-color: rgba(255, 201, 60, 0.6); }
+.kid-tile.is-picked { border-color: var(--gold); box-shadow: inset 0 0 0 2px var(--gold); background: #2a3166; }
+.kid-tile.is-right { border-color: var(--teal); box-shadow: inset 0 0 0 2px var(--teal); }
+.kid-tile.is-miss { border-color: var(--amber); box-shadow: inset 0 0 0 2px var(--amber); }
+.kid-tile[aria-disabled='true'] { cursor: default; }
+.kid-tile:active:not([aria-disabled='true']) { transform: scale(0.97); }
+.kid-tile-word { line-height: 1.2; text-align: center; }
+
+/* "Yes!" and "Not yet" panels */
+.kid-feedback-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.kid-yes { font-family: var(--font-display); font-size: 26px; font-weight: 700; margin: 0; color: #7dffbf; }
+.kid-nope { font-size: 20px; font-weight: 700; margin: 0; line-height: 1.3; }
+.kid-line-small { font-size: 18px; margin: 0; }
+.kid-miss { background: rgba(255, 122, 26, 0.1); border: 1px solid rgba(255, 122, 26, 0.55); }
+.kid-show:focus { outline: 2px solid var(--gold); outline-offset: 2px; border-radius: 10px; }
+
+/* a board of rows, one row at a time */
+.kid-board-row { display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; }
+.kid-row-label { font-size: 20px; font-weight: 600; margin: 0; }
+.kid-board-marks { display: flex; flex-direction: column; gap: 10px; width: 100%; }
+.kid-board-mark { display: flex; flex-direction: column; gap: 6px; }
+.kid-board-done { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.kid-board-status { display: flex; justify-content: center; min-height: 0; margin: 0; }
+
+/* the star screen */
+.kid-star-screen { align-items: center; text-align: center; }
+.kid-star-title { font-size: 28px; }
+.kid-big-star path { stroke-width: 1; stroke-linejoin: round; }
+.kid-big-star.is-clean path { fill: var(--gold); stroke: var(--gold); }
+.kid-big-star.is-mended path { fill: #c9cff0; stroke: #c9cff0; }
+.kid-star-screen .kid-big-star { animation: kid-pop 0.6s ease-out both; }
+.reduce-motion .kid-star-screen .kid-big-star { animation: none; }
+.kid-star-count { margin: 0; flex-wrap: wrap; gap: 4px; }
+@media (prefers-reduced-motion: reduce) {
+  .kid-star-screen .kid-big-star { animation: none; }
+}
+@media (max-width: 360px) {
+  .kid-tile { min-height: 84px; }
+  .kid-line { font-size: 20px; }
+}
+
+/* ---------- kid rendering, round 2: items (kid scenes, plain cards, empty spots) ---------- */
+/* a kid scene of pictograms: rows of pictures, each with at most one short word under it */
+.kid-pictos { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.kid-pictos-row { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-end; gap: 10px; }
+.kid-pictos-cell { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 56px; }
+.kid-pictos-word { font-size: 16px; font-weight: 700; line-height: 1.2; text-align: center; }
+/* cards drawn plain: the faces only, centered */
+.kid-things { justify-content: center; }
+/* an empty spot of a line-up: a dashed box, no word */
+.kid-slot-empty {
+  display: inline-block; width: 64px; min-height: 36px; border: 2px dashed rgba(154, 163, 209, 0.55); border-radius: 10px;
+}
+@media (max-width: 360px) {
+  .kid-pictos-cell { min-width: 48px; }
+}
+
+/* ---------- kid rendering, round 2: boards (one mark per page, option tiles) and the world check result ---------- */
+/* the step's own scene over the row to mark (KidBoard.scene) */
+.kid-board-scene { width: 100%; }
+/* one mark per page: its picture (a kid picture, or the shape card it is about) and its label over the tiles */
+.kid-mark-pic { display: flex; justify-content: center; align-items: center; gap: 10px; }
+.kid-mark-label { font-size: 18px; font-weight: 600; text-align: center; }
+/* word options drawn as picture tiles: a tile without a picture prints its option's words */
+.kid-option-tiles .kid-tile { min-height: 84px; }
+.kid-option-tiles .kid-tile-word { font-size: 16px; }
+
+/* the world check result in kid mode: "Not yet." and a row per missed round, or "You built it!" */
+.kid-wc-result { display: flex; flex-direction: column; gap: 14px; }
+.kid-wc-result .kid-feedback-top { width: 100%; }
+.kid-wc-rows { list-style: none; margin: 0; padding: 0; width: 100%; }
+.kid-wc-rows.kid-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(72px, 1fr)); gap: 10px; }
+.kid-wc-row { display: contents; }
+.kid-wc-tile { min-height: 72px; }
+.kid-wc-num {
+  font-size: 34px;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--gold, #f6c744);
+}
+.kid-wc-back { min-width: 56px; }
+@media (min-width: 420px) {
+  .kid-wc-learn { flex: 0 0 auto; }
+}

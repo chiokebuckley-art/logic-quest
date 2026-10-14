@@ -18,3 +18,4 @@ import './styles/observatory-ring1.css';
 import './styles/observatory-ring2.css';
 import './styles/observatory-ring3.css';
 import './styles/observatory-ring4.css';
+import './styles/kid.css';

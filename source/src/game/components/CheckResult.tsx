@@ -89,7 +89,7 @@ function YouSaid({ item, record }: { item: Item; record?: AnswerRecord }) {
   return <AnswerWords item={item} answer={a} />;
 }
 
-function MissedItem({ item, record, readAloud }: { item: Item; record?: AnswerRecord; readAloud: boolean }) {
+export function MissedItem({ item, record, readAloud }: { item: Item; record?: AnswerRecord; readAloud: boolean }) {
   const said = record?.timedOut || record?.answer;
   const model = explanationFor(item, record?.answer ?? null);
   return (

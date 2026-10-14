@@ -55,6 +55,11 @@ import {
   whyChainItem,
   WHY_SKILL,
   boardName,
+  allOrders,
+  kidAsks,
+  kidSays,
+  ORDINALS,
+  STATUS_WORD,
   type ClueType,
   type LineBoard,
   type SkinId,
@@ -62,7 +67,7 @@ import {
   type Status,
 } from '../engine/puzzles/lineup';
 import { andOrWarmUp } from './stop2';
-import type { ConfusedQuestion, DrillRow, DrillStep, IdeaCard, Item, LessonDef, LineClue, Misconception, Rng, StopDef } from '../engine/types';
+import type { ConfusedQuestion, DrillMark, DrillRow, DrillStep, IdeaCard, Item, KidBoard, KidLesson, KidMark, KidRow, LessonDef, LineClue, Misconception, Picto, Rng, StopDef } from '../engine/types';
 
 const EVERYDAY: readonly SkinId[] = ['race', 'height', 'line'];
 const FANTASY: readonly SkinId[] = ['dragons', 'robots', 'brooms'];
@@ -578,6 +583,293 @@ export const L5_DRILL: DrillStep = {
   done: 'Right. Only clue 3 can be covered and still leave one order. So clue 3 is the clue that is not needed.',
 };
 
+// ---------- the kid layer (Grades 2 and 3, docs/KID-JOURNEY.md) ----------
+//
+// Beside the classic text, never instead of it. Lessons 1 and 2 are Grade 2 rounds: a screen holds 20 words with its
+// header ("Round k of n", 4 words), in 2 sentences of 10 words at most, so a card line has 14 (beside "Back" and
+// "Next"). Lessons 3 and 4 are Grade 3 rounds: 30 words, 3 sentences of 12 words. Each card has a picture first. The
+// items' kid words and their clue pictures come from the generators (chainKid, statusKid, spotKid and buildKid in the
+// engine). One new word per round, named on a word card: "chain" (lesson 1), "right before" (lesson 2), "break"
+// (lesson 3), "block" (lesson 4).
+//
+// A kid board shows no clue list and is marked one mark per page, under its line: the line, the row's label and the
+// mark's label say all a page needs. A Grade 2 page holds two sentences, the line and the mark's label (the row's label
+// is '', so each mark says what its row adds); a Grade 3 page holds three: the line, the row and the mark. Every kid
+// word on a board is worked out from the board's own clues and marks. Word answers are picture tiles
+// (KidBoard.options): a name under the picture of a kid, must / might / can’t with one word each, a spot as its badge,
+// and Can’t tell as the question tile.
+
+/** Picture tiles for the names of a board (a kid, the name under it), and Can’t tell as the question tile when a mark has it. */
+const nameTiles = (ids: readonly string[], cant = true): NonNullable<KidBoard['options']> => ({
+  ...Object.fromEntries(ids.map((id) => [id, { art: 'line-who-kid' as const, word: boardName(id) }])),
+  ...(cant ? { [CANT]: { art: 'verdict-cant' as const } } : {}),
+});
+
+/** The badges of the spots (one to four dots), as the where answers of lesson 3 draw them. */
+const SPOT_BADGE: readonly Picto[] = ['line-spot-1', 'line-spot-2', 'line-spot-3', 'line-spot-4'];
+/** "Where" answers as badge tiles with their one word ("First", "Second", …), and Can’t tell as the question tile. */
+const spotTiles = (n: number): NonNullable<KidBoard['options']> => ({
+  ...Object.fromEntries(SPOT_BADGE.slice(0, n).map((art, i) => [`p${i + 1}`, { art, word: `${ORDINALS[i][0].toUpperCase()}${ORDINALS[i].slice(1)}` }])),
+  [CANT]: { art: 'verdict-cant' },
+});
+
+/** A row's kid marks, one per mark in order, by what follows the row's id in the mark's id ("c1", "move", "keep"). */
+function kidMarks(r: DrillRow, by: (suffix: string, m: DrillMark) => KidMark): KidMark[] {
+  return r.marks.map((m) => {
+    if (!m.id.startsWith(`${r.id}-`)) throw new Error(`a mark of row ${r.id} is named after it: ${m.id}`);
+    return by(m.id.slice(r.id.length + 1), m);
+  });
+}
+
+/** The order a line row tests, found from its own label ("Finish order: Ava, Ben, Cal."). */
+function orderOf(b: LineBoard, r: DrillRow): string[] {
+  const p = allOrders(b.ids).find((q) => r.label === `${SKINS[b.skin].lineLabel}: ${boardLine(b, q)}.`);
+  if (!p) throw new Error(`no order of the board has the label ${r.label}`);
+  return p;
+}
+
+/** The sentence a mark judges, found from its own label (“Ava finished right before Ben.”): a "before" or "right before" sentence. */
+function sentenceOf(b: LineBoard, label: string): LineClue {
+  const said = b.ids.flatMap((a) => b.ids.filter((c) => c !== a).flatMap((c): LineClue[] => [before(a, c), rightBefore(a, c)]));
+  const s = said.find((x) => `“${boardTexts({ ...b, clues: [x] })[0]}”` === label);
+  if (!s) throw new Error(`no before or right before sentence reads ${label}`);
+  return s;
+}
+
+/** A try row's kid label: its line without "Try" ("Eli first, as in Eli, Fay, Gus."). */
+function tryLabel(r: DrillRow): string {
+  if (!/^Try /.test(r.label)) throw new Error(`a try row starts with “Try”: ${r.label}`);
+  return r.label.replace(/^Try /, '');
+}
+
+/** A try row's marks in kid words: each clue checked in its line (`clue(i)`), the line that keeps the try, and keep or cross out. */
+function tryMarks(r: DrillRow, clue: (i: number) => string): KidMark[] {
+  return kidMarks(r, (suffix, m) => {
+    if (/^c\d$/.test(suffix)) return { label: clue(Number(suffix.slice(1)) - 1) };
+    if (suffix === 'keep') return { label: 'Keep this try?' };
+    const keeps = /^Move the others, not \S+\. Which line keeps (.+) and every clue true\?$/.exec(m.label);
+    if (suffix === 'move' && keeps) return { label: `Which line keeps ${keeps[1]}?` };
+    throw new Error(`no kid words for the mark ${m.id}`);
+  });
+}
+
+/** “Not first” and “not last” as lesson 3's first card says them: the clue a mark checks, in two words. */
+const KID_CLUE: Partial<Record<LineClue['t'], string>> = { notFirst: 'not first', notLast: 'not last' };
+
+/**
+ * Lesson 1's board. Clue 1 is the same on every row, so it is the board's line; each mark says what its row adds and
+ * asks one thing: "And Ava than Ben: who is tallest?" (the chain), "Just this clue: who is taller?" (clue 2 taken
+ * away), "And Ben than Ava: who is shortest?" (clue 2 turned around: a fork).
+ */
+const [L1_DO_1, L1_DO_2] = L1_DO.clues;
+const L1_FORK_2 = L1_FORK.clues[1];
+if (L1_DO_1.t !== 'before' || L1_DO_2.t !== 'before' || L1_FORK_2.t !== 'before' || L1_FORK.clues[0] !== L1_DO_1 || L1_NOCHAIN.clues.length !== 1 || L1_NOCHAIN.clues[0] !== L1_DO_1) {
+  throw new Error('L1 board: every row keeps clue 1, and its second clue (if any) is a “taller than” clue');
+}
+/** "And Ava than Ben": a row's second "taller than" clue, after the line's "Cal is taller than Ava." */
+const andThan = (c: Extract<LineClue, { t: 'before' }>) => `And ${boardName(c.a)} than ${boardName(c.b)}`;
+/** Each question of the board in kid words, by its mark's own label, with the badge of the spot it asks about. */
+function l1Ask(m: DrillMark): { ask: string; art?: Picto } {
+  if (/^Who is taller, \w+ or \w+\?$/.test(m.label)) return { ask: 'who is taller?' };
+  const spot: Record<string, { ask: string; art: Picto }> = {
+    'The tallest': { ask: 'who is tallest?', art: 'line-spot-1' },
+    'The second tallest': { ask: 'who is second?', art: 'line-spot-2' },
+    'The shortest': { ask: 'who is shortest?', art: 'line-spot-3' },
+    'Who is the tallest?': { ask: 'who is tallest?', art: 'line-spot-1' },
+    'Who is the shortest?': { ask: 'who is shortest?', art: 'line-spot-3' },
+  };
+  const s = spot[m.label];
+  if (!s) throw new Error(`L1 board: no kid words for ${m.label}`);
+  return s;
+}
+/** A row's marks, each its row's words ("And Ava than Ben") and its question. */
+const l1Marks = (r: DrillRow, lead: string): KidMark[] => kidMarks(r, (_, m) => {
+  const { ask, art } = l1Ask(m);
+  return { label: `${lead}: ${ask}`, ...(art ? { art } : {}) };
+});
+
+/** Lesson 1, chains (Grade 2). */
+export const L1_KID: KidLesson = {
+  cards: [
+    { line: 'A clue compares two people. “Ava is taller than Ben.”', art: 'line-compare' },
+    { line: 'Chain: clues that link up, like Ava, Ben, then Cal.', art: 'line-chain' },
+    { line: 'The chain proves Ava is taller than Cal too.', art: 'line-proof' },
+    { line: 'Cross out anyone shorter than someone. The one left is tallest.', art: 'line-cross-out' },
+    // The question tile: in this round's answers, Can’t tell is a question mark with no words under it.
+    { line: 'No chain links Ava and Cal. “Can’t tell” is a real answer.', art: 'verdict-cant' },
+    { line: 'Before you answer, ask: do the clues prove it?', art: 'line-look' },
+    { line: 'Turn one clue around. Now nothing links them, so you can’t tell.', art: 'line-split' },
+  ],
+  board: [
+    {
+      line: boardTexts(L1_DO)[0],
+      // L1_ROWS in order: the card's chain (shown), the new chain, clue 2 taken away, clue 2 turned around.
+      rows: [
+        {},
+        { label: '', art: 'line-chain', marks: l1Marks(L1_ROWS[1], andThan(L1_DO_2)) },
+        { label: '', marks: l1Marks(L1_ROWS[2], 'Just this clue') },
+        { label: '', art: 'line-fork', marks: l1Marks(L1_ROWS[3], andThan(L1_FORK_2)) },
+      ],
+      options: nameTiles(L1_DO.ids),
+    },
+  ],
+  star: 'You can follow a chain.',
+};
+
+/**
+ * Lesson 2's boards. The line is the clue; each mark names its order and asks about one sentence ("Ava, Ben, Cal: is Ava
+ * right before Ben?", a check or a cross), or quotes the sentence for must, might or can’t (picture tiles).
+ */
+const STATUS_TILES: NonNullable<KidBoard['options']> = {
+  must: { art: 'line-must', word: STATUS_WORD.must },
+  might: { art: 'line-might', word: STATUS_WORD.might },
+  cant: { art: 'line-cant', word: STATUS_WORD.cant },
+};
+/** A lesson 2 row in kid words: an order's marks ask about the clue or a sentence in that order; must / might / can’t marks quote the sentence. */
+function l2Row(b: LineBoard, r: DrillRow): KidRow {
+  if (r.marks.every((m) => m.given)) return {};
+  if (r.marks.every((m) => m.options.some((o) => o.id === 'must'))) return { label: '', art: 'line-orders', marks: r.marks.map((m) => ({ label: kidSays(b, sentenceOf(b, m.label)) })) };
+  const line = boardLine(b, orderOf(b, r));
+  return {
+    label: '',
+    marks: kidMarks(r, (suffix, m) => {
+      if (suffix === 'fit') return { label: `${line}: does this order fit?` };
+      if (/^c\d$/.test(suffix)) return { label: `${line}: ${kidAsks(b, b.clues[Number(suffix.slice(1)) - 1])}` };
+      if (/^s\d$/.test(suffix)) return { label: `${line}: ${kidAsks(b, sentenceOf(b, m.label))}` };
+      throw new Error(`L2 board: no kid words for ${m.id}`);
+    }),
+  };
+}
+
+/** Lesson 2, before vs right before (Grade 2). */
+export const L2_KID: KidLesson = {
+  cards: [
+    { line: '“Before” means sooner. Someone may finish in between.', art: 'line-gap' },
+    { line: 'Right before: just one place sooner, with no one between.', art: 'line-pair' },
+    { line: 'Ava finished before Ben. Three orders fit that clue.', art: 'line-orders' },
+    // A plain card (the round's one word card is "right before"): what must, might and can’t say about the orders.
+    { line: 'Check each order. All true means must, some means might, none means can’t.', art: 'line-all-some-none' },
+    { line: '“In front of” is like “before.” “Right in front of” is like “right before.”', art: 'line-front' },
+  ],
+  board: [
+    { line: `Clue: ${boardTexts(L2_EXAMPLE)[0]}`, rows: L2_DRILL[0].rows.map((r) => l2Row(L2_EXAMPLE, r)), options: STATUS_TILES },
+    { line: `Clue: ${boardTexts(L2_RIGHT)[0]}`, rows: L2_DRILL[1].rows.map((r) => l2Row(L2_RIGHT, r)), options: STATUS_TILES },
+  ],
+  star: 'You know before from right before.',
+};
+
+/**
+ * Lesson 3's boards. The line is the board's clue (or both clues), each try row its line ("Ben first, as in Ben, Ava,
+ * Cal."), and each mark one short question: is the clue true here, which line keeps the try, keep this try?
+ */
+const L3_EX_CLUES = L3_EXAMPLE.clues.map((c) => KID_CLUE[c.t]);
+if (L3_EX_CLUES.some((w) => !w)) throw new Error('L3 board 1: its clues are “not first” and “not last”');
+
+/** Lesson 3, not first, not last, next to, between (Grade 3). */
+export const L3_KID: KidLesson = {
+  cards: [
+    { line: '“Not first” and “not last” leave the middle. With four, two spots are left.', art: 'line-middle' },
+    { line: 'Break a clue: make it false. Eli first breaks “not first.”', art: 'line-pin' },
+    { line: '“Next to” means no one in between. Either one can be ahead.', art: 'line-next' },
+    { line: '“Between” means one is ahead of Cal, one behind. It does not say which.', art: 'line-gap' },
+    { line: 'Keep Ava first, but move the others. One broken line is not enough to cross out.', art: 'line-swap' },
+  ],
+  board: [
+    {
+      line: 'Eli is not first and not last.',
+      rows: [
+        {},
+        { label: tryLabel(L3_DRILL[0].rows[1]), marks: tryMarks(L3_DRILL[0].rows[1], (i) => `Is “${L3_EX_CLUES[i]}” true here?`) },
+        { label: tryLabel(L3_DRILL[0].rows[2]), marks: tryMarks(L3_DRILL[0].rows[2], (i) => `Is “${L3_EX_CLUES[i]}” true here?`) },
+        { label: 'Hana runs too. Where did Eli finish?' },
+      ],
+      options: spotTiles(L3_FOUR.ids.length),
+    },
+    {
+      line: boardTexts(L3_NEXT)[0],
+      rows: [
+        {},
+        { label: tryLabel(L3_DRILL[1].rows[1]), marks: tryMarks(L3_DRILL[1].rows[1], () => 'Is the clue true here?') },
+        { label: tryLabel(L3_DRILL[1].rows[2]), marks: tryMarks(L3_DRILL[1].rows[2], () => 'Is the clue true here?') },
+        { label: 'Where did Cal finish?' },
+        { label: `Add a clue: ${boardTexts(plusClue(L3_NEXT, L3_NEXT_ADD)).slice(-1)[0]} Where is Cal?` },
+      ],
+      options: spotTiles(L3_NEXT.ids.length),
+    },
+    {
+      line: boardTexts(L3_BETWEEN)[0],
+      rows: [
+        {},
+        { label: tryLabel(L3_BEN1), marks: tryMarks(L3_BEN1, () => 'Is the clue true in this line?') },
+        { label: tryLabel(L3_CAL1), marks: tryMarks(L3_CAL1, () => 'Is the clue true in this line?') },
+        { label: 'Who finished first?' },
+        { label: `Add a clue: ${boardTexts(plusClue(L3_BETWEEN, L3_BETWEEN_ADD)).slice(-1)[0]} Who was last?` },
+      ],
+      // The names as kid tiles, and “No line works” as a cross with its one word.
+      options: { ...nameTiles(L3_BETWEEN.ids), none: { art: 'cross', word: 'None' } },
+    },
+  ],
+  star: 'You can try each spot.',
+};
+
+/** Lesson 4's no-spot board: Ben is next to two people (clues 1 and 2 of the twin), then clue 3 turns the block. */
+const [L4_NEXT1, L4_NEXT2] = L4_NOSPOT_TWIN.clues;
+if (L4_NEXT1.t !== 'nextTo' || L4_NEXT2.t !== 'nextTo' || L4_NEXT1.a !== L4_NEXT2.a) throw new Error('L4 no-spot board: clues 1 and 2 put one runner next to two others');
+
+/** A board's two clues as one sentence: “Cal finished last, and Ava before Ben.” (a spot clue, then a "before" clue). */
+function l4Clues(b: LineBoard): string {
+  const [spot, ahead] = b.clues;
+  if ((spot.t !== 'first' && spot.t !== 'last') || ahead.t !== 'before' || b.skin !== 'race') throw new Error('L4 board: a race, a first or last clue, then a “before” clue');
+  return `${boardTexts(b)[0].replace(/\.$/, '')}, and ${boardName(ahead.a)} before ${boardName(ahead.b)}.`;
+}
+/** A clue checked in one line, as a question: "Is Cal last here?", "Is Ava before Ben here?" */
+function l4Ask(c: LineClue): string {
+  if (c.t === 'first' || c.t === 'last') return `Is ${boardName(c.a)} ${c.t} here?`;
+  if (c.t === 'before') return `Is ${boardName(c.a)} before ${boardName(c.b)} here?`;
+  throw new Error(`L4 board: no kid question for a ${c.t} clue`);
+}
+/** A line row of the test board: "Test Ben, Ava, Cal.", each clue as a question, and does it fit. */
+function l4Test(b: LineBoard, r: DrillRow): KidRow {
+  if (r.marks.every((m) => m.given)) return {};
+  return {
+    label: `Test ${boardLine(b, orderOf(b, r))}.`,
+    marks: kidMarks(r, (suffix) => {
+      if (suffix === 'fit') return { label: 'Does this line fit?' };
+      if (/^c\d$/.test(suffix)) return { label: l4Ask(b.clues[Number(suffix.slice(1)) - 1]) };
+      throw new Error(`L4 board: no kid words for ${r.id}-${suffix}`);
+    }),
+  };
+}
+/** A row that places everyone: one question per spot ("Who finished second?"), with the spot's badge. */
+const l4Place = (r: DrillRow): KidMark[] => r.marks.map((m, i) => ({ label: `Who finished ${m.label.toLowerCase()}?`, art: SPOT_BADGE[i] }));
+
+/** Lesson 4, build the whole line (Grade 3). */
+export const L4_KID: KidLesson = {
+  cards: [
+    { line: 'Put everyone in order. Every clue must be true.', art: 'line-slots' },
+    { line: 'Start with a clue that names a spot, like “Cal finished last.”', art: 'line-sure' },
+    { line: 'Cal finished last, and Ava before Ben. So it is Ava, Ben, Cal.', art: 'line-flag' },
+    { line: 'Check your line, one clue at a time. A false clue means move someone.', art: 'line-checks' },
+    { line: 'Block: people who stand together. Ben is next to Ava and Cal. So he is in the middle.', art: 'line-block' },
+    { line: 'No clue names a spot? Find a block, then turn it the right way.', art: 'line-turn' },
+  ],
+  board: [
+    { line: l4Clues(L4_EXAMPLE), rows: L4_DRILL[0].rows.map((r) => l4Test(L4_EXAMPLE, r)) },
+    { line: l4Clues(L4_TWIN), rows: [{ label: '', marks: l4Place(L4_DRILL[1].rows[0]) }], options: nameTiles(L4_TWIN.ids, false) },
+    {
+      line: 'Find the block first.',
+      rows: [
+        // The row says what clues 1 and 2 give, and its one mark asks where that leaves him.
+        { label: `${boardName(L4_NEXT1.a)} is next to ${boardName(L4_NEXT1.b)} and to ${boardName(L4_NEXT2.b)}.`, marks: [{ label: `Where is ${boardName(L4_NEXT1.a)}?` }] },
+        { label: `${boardTexts(L4_NOSPOT_TWIN)[2]} Which way?` },
+        { label: 'Now put each runner in a spot.', marks: l4Place(L4_DRILL[2].rows[2]) },
+      ],
+      options: nameTiles(L4_NOSPOT_TWIN.ids, false),
+    },
+  ],
+  star: 'You can build a whole line.',
+};
+
 // ---------- lessons ----------
 
 /** Lesson 3's quiz plan entries. */
@@ -590,6 +882,7 @@ const lessons: LessonDef[] = [
   {
     id: L1,
     title: 'Chains',
+    kid: L1_KID,
     ideas: [
       {
         title: 'Clues about order',
@@ -674,6 +967,7 @@ const lessons: LessonDef[] = [
   {
     id: L2,
     title: 'Before vs right before',
+    kid: L2_KID,
     ideas: [
       {
         title: 'Before',
@@ -740,6 +1034,7 @@ const lessons: LessonDef[] = [
   {
     id: L3,
     title: 'Not first, not last, next to, between',
+    kid: L3_KID,
     ideas: [
       {
         title: 'Not first, not last',
@@ -811,6 +1106,7 @@ const lessons: LessonDef[] = [
   {
     id: L4,
     title: 'Build the whole line',
+    kid: L4_KID,
     ideas: [
       {
         title: 'The whole line',

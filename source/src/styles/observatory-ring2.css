@@ -27,6 +27,25 @@
 .play-ob-seq-cell.is-ask .play-ob-seq-val { color: var(--gold, #ffc93c); }
 .play-ob-seq-gap { display: grid; place-items: center; padding: 0 2px; color: var(--muted, #9aa3d1); font-weight: 700; }
 
+/* Kid mode (Grades 1 to 3): the staircase as a picture with no words. Rows of bigger tiles, centered, then "…" and a
+   dashed "?" for the step asked about; a list is its numbers in one row with a hop between neighbors. */
+.play-ob-stairs.is-kid { align-items: center; }
+.play-ob-stairs.is-kid .play-ob-stair-rows { align-items: center; gap: 8px; }
+.play-ob-stairs.is-kid .play-ob-stair-row { display: flex; justify-content: center; gap: 6px; }
+.play-ob-stairs.is-kid .play-ob-tiles { gap: 4px; }
+.play-ob-stairs.is-kid .play-ob-tile { width: 20px; height: 20px; }
+.play-ob-stairs.is-kid.is-beads .play-ob-tile.is-centre { width: 14px; }
+.play-ob-stairs.is-kid.is-seats .play-ob-tile { width: 16px; height: 16px; }
+.play-ob-kid-seq { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px; margin: 0; }
+.play-ob-kid-num {
+  display: inline-grid; place-items: center; min-width: 44px; min-height: 40px; padding: 4px 8px; border-radius: 10px;
+  background: var(--bg-3, #1e2656); border: 1px solid var(--line-soft, rgba(154, 163, 209, 0.16));
+  font-family: var(--font-display, 'Orbitron', sans-serif); font-size: 20px; color: var(--text, #f1f3ff);
+}
+.play-ob-kid-num.is-ask { border: 2px dashed var(--gold, #ffc93c); color: var(--gold, #ffc93c); }
+.play-ob-kid-gap { color: var(--muted, #9aa3d1); font-weight: 700; font-size: 20px; }
+.play-ob-kid-hop { width: 14px; height: 9px; border: 2px solid var(--gold, #ffc93c); border-bottom: 0; border-radius: 9px 9px 0 0; }
+
 /* ---------- machine ---------- */
 .play-ob-machine { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .play-ob-machine-body { overflow-wrap: anywhere; }

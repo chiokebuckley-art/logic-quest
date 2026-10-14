@@ -85,8 +85,10 @@ export interface LessonRunnerProps {
   /**
    * The lesson is passed: the guided boards were marked right, every planned try is finished, and the pass rule
    * (LessonDef.pass, default 3 right on the first try with no hint) is met. Reading the cards never calls this.
+   * `clean`: every try was right on the first try, with no hint and no miss before it (read from the run's results
+   * before the host records the lesson done and clears the saved run).
    */
-  onComplete(): void;
+  onComplete(summary: { clean: boolean }): void;
   onExit(): void;
   /** The guided boards (the Do step) were marked right. The host records it; the lesson is not done yet. */
   onDrilled?(): void;
@@ -96,6 +98,18 @@ export interface LessonRunnerProps {
   onProgress?(progress: LessonProgress): void;
   /** The pass rule can no longer be met in this run (no more quiz items): start the lesson again with new items. */
   onRestart?(): void;
+  /** The line over the title, when the host names the place itself ("Round 2 of 4 · Sky Path"). */
+  over?: string;
+  /**
+   * The round's place in its world, for a round opened from the grade map. In kid mode the play header then shows
+   * only the back button and "Round k of n" (no lesson title, no world): the word budget counts it.
+   */
+  round?: { k: number; n: number };
+  /**
+   * Kid mode: the stars of the round's grade with this round's star counted, and the grade's rounds, for the star
+   * screen's "3 of 7" toward the grade badge.
+   */
+  kidTally?: { got: number; of: number };
 }
 
 /** Where a lesson run is: the next quiz try (0-based), first-try wins, the boards, and each quiz answer. */
@@ -111,6 +125,15 @@ export interface LessonProgress {
 export interface CheckRunnerProps {
   stop: StopDef;
   kind: CheckKind;
+  /** The header's two lines, when the check is not a stop check (a world check): over the title, and the title. */
+  header?: { over: string; title: string };
+  /** The note over the first question. Default: the stop check's note. */
+  note?: string;
+  /**
+   * Kid mode (a world check): open on a one-tap "Ready?" screen with a big "Go", so the first question is read aloud
+   * by itself from that tap. The note shows there, not over the first question.
+   */
+  ready?: boolean;
   items: Item[];
   /** Seconds per question, or null when grown-ups switched the timer off. */
   timeLimit: number | null;
