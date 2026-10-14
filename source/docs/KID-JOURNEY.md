@@ -168,7 +168,11 @@ at 375 and 430 px, with every screen within budget. Notes from the reviews:
   classic "mark the cases first" board in kid mode; the round's own boards teach the step.
 - Some Grade 3 screens sit at exactly their budget (Line Up board 3, Grid Detective board 3 and its two-part prompts),
   so any added word there fails the budget test.
-- The Grade 4 to 8 trims (section 4) follow in the next release.
+- The Grade 4 to 8 trims (section 4) are in: the wordiest cards of Arguments, Guess the rule, Ways to Think, the
+  sign lessons, Spot the Trick and Knights and Knaves lost a third to two thirds of their own body text, and the
+  Spot the Trick boards their restated prose, with every idea, defined word, pinned example and scene unchanged.
+  Cards whose contrast scene alone runs past 120 words stay over the band budget by design; the next step, if ever,
+  is shorter scenes in the engine builders.
 
 ## How to add a kid layer
 

@@ -435,7 +435,7 @@ export const SUN_ONE: Table = { ...SUN_TABLE, cands: [ICE], rows: SUN_TABLE.rows
 
 export const LAMP_SCENE = tableScene(LAMP_TABLE, `The lamp follows the switch both ways. ${cap(aloneWhy(LAMP_TABLE, 0))} The switch is the cause.`);
 export const SUN_SCENE = tableScene(SUN_TABLE, 'Each row is one day. ✓ means yes. ✗ means no.');
-export const SUN4_SCENE = tableScene(SUN_TABLE_4, `${breakWhy(SUN_TABLE_4, 1)} ${breakTag(SUN_TABLE_4, 1, breakRow(SUN_TABLE_4, 1))} So ice cream is not the cause.`);
+export const SUN4_SCENE = tableScene(SUN_TABLE_4, 'Day 4 is new.');
 
 export const VERDICT_OPTIONS: DrillOption[] = [
   { id: 'cause', label: 'The cause' },
@@ -712,7 +712,7 @@ function worksPanel(k: 0 | 1): ContrastPanel {
   const kind = breakKind(t, 0);
   if (!kind) throw new Error('worksPanel: each test breaks the clock');
   return {
-    world: `Does ${CLOCK.noun} make ${LAMP.make}?`,
+    world: `Is ${CLOCK.noun} the cause?`,
     who: `Test ${AB[k]}`,
     says: `${cap(isOn(CLOCK, r.v[0]))}, but ${isOn(LAMP, r.e)}.`,
     truth: followsAll(t, 0),
@@ -720,7 +720,7 @@ function worksPanel(k: 0 | 1): ContrastPanel {
       kind === 'no-effect'
         ? `It happened, but the effect did not. Check 1 breaks: ${CLOCK.noun} did not work.`
         : `The effect came without it. Check 2 breaks: something else ${madeIt(LAMP)}.`,
-    then: noteCanSave(r, 0) ? 'It is out, unless the table names something that stopped it.' : 'It is out. One thing turns the lamp on, and no note can change that.',
+    then: noteCanSave(r, 0) ? 'It is out, unless the table names something that stopped it.' : 'It is out, and no note can change that.',
   };
 }
 
@@ -731,7 +731,7 @@ export function worksContrast(): Extract<Scene, { kind: 'contrast' }> {
   return {
     kind: 'contrast',
     pairs: [worksPanel(0), worksPanel(1)],
-    ask: { q: 'Are these the same kind of break?', a: `No. In test A, ${CLOCK.noun} did not work. In test B, something else turned the lamp on. A cause must pass both checks.` },
+    ask: { q: 'Are these the same kind of break?', a: 'No. They break different checks.' },
     words: { worldTag: 'Check', saysWord: 'row:', truth: 'Passes', untruth: 'Fails' },
   };
 }
@@ -826,23 +826,22 @@ export function recordsContrast(): Extract<Scene, { kind: 'contrast' }> {
     kind: 'contrast',
     pairs: [
       {
-        world: `Tests. ${CAP_NAME} put the red cap on or off on purpose. He kept everything else the same.`,
+        world: `Tests. ${CAP_NAME} put the cap on or off on purpose.`,
         who: `${CAP_NAME}’s`,
         says: capMarks(),
         truth: shownT,
-        because: 'Only the cap changed, and the win followed it both ways. That is a fair test.',
-        then: 'So the cap is the cause.',
+        because: 'Only the cap changed, and the win followed it both ways.',
+        then: 'That is a fair test.',
       },
       {
-        world: `Records. ${CAP_NAME} wrote down what happened at each game.`,
+        world: `Records. ${CAP_NAME} wrote down each game.`,
         who: `${CAP_NAME}’s`,
         says: capMarks(),
         truth: shownR,
-        because: 'Lots of things nobody wrote down changed too, like the weather. One of them could cause the win.',
-        then: 'Going together is a clue to test.',
+        because: 'Things nobody wrote down changed too. One could cause the win.',
       },
     ],
-    ask: { q: 'Did the marks change?', a: 'No. Only who made the rows changed. Tests can show a cause. Records can show a thing is not the cause, but they can’t show it is.' },
+    ask: { q: 'Did the marks change?', a: 'No. Only who made the rows changed.' },
     words: { worldTag: 'Who made the rows', saysWord: 'rows:', truth: 'The cause', untruth: 'Can’t tell yet' },
   };
 }
@@ -931,9 +930,6 @@ export function causeIdeas(): IdeaCard[] {
       distinction: WORKS_VS_ONLY_CAUSE.id,
       body: [
         'A row can break a cause in two ways.',
-        `Below, two tests check one idea: does ${CLOCK.noun} make ${LAMP.make}?`,
-        'It happened, but the effect did not: check 1 breaks. It did not work. A note that names what stopped it can save it.',
-        'The effect came without it: check 2 breaks. Something else made the effect happen. No note can save that.',
       ],
       scene: worksContrast(),
     },
@@ -958,10 +954,8 @@ export function causeIdeas(): IdeaCard[] {
       title: 'Tests or records?',
       distinction: TESTS_VS_RECORDS.id,
       body: [
-        'Before you check a table, ask: who made these rows?',
-        'Tests: someone changed things on purpose. They changed one thing and kept the rest the same. Tests can show a cause.',
-        'Records: someone wrote down what happened. Lots of things nobody wrote down changed too. Records can show a thing is not the cause. They can’t show it is.',
-        'Below, the marks are the same. Only who made the rows is different.',
+        'First ask: who made the rows?',
+        'Tests can show a cause. Records can show a thing is not the cause. They can’t show it is.',
       ],
       scene: recordsContrast(),
     },
@@ -970,7 +964,7 @@ export function causeIdeas(): IdeaCard[] {
       body: [
         'On hot days, the shop sells lots of ice cream. On hot days, lots of kids get sunburns too. So ice cream and sunburns go together.',
         'Does ice cream cause sunburns? These days can’t tell you. The heat changed at the same time, every time.',
-        'These days are records: someone just wrote them down. Records are not a fair test. Lots of things nobody wrote down change from day to day.',
+        'Records are not a fair test. Lots of things nobody wrote down change from day to day.',
         'Two things that go together give you a guess to check. They are not a proof.',
       ],
       scene: SUN_SCENE,
@@ -978,11 +972,10 @@ export function causeIdeas(): IdeaCard[] {
     {
       title: 'Look for a third thing',
       body: [
-        'Here is one more day. On day 4, it is hot, but the shop is closed. So no ice cream is sold. Kids still get sunburns.',
-        'The sunburns came without ice cream, so check 2 breaks. Ice cream is not the cause. The heat is a third thing that comes with both.',
-        'On day 4, the table names what stopped ice cream sales: shop closed. The heat may cause both. A fair test could check it.',
-        'A third thing can make two things go together.',
-        'When two things go together, ask: could a third thing cause both? Then check.',
+        'On day 4, it is hot, but the shop is closed. Kids still get sunburns.',
+        'The sunburns came without ice cream, so check 2 breaks. Ice cream is not the cause.',
+        'The table names what stopped ice cream sales: shop closed. The heat may cause both. A fair test could check it.',
+        'A third thing can make two things go together. So ask: could a third thing cause both? Then check.',
       ],
       scene: SUN4_SCENE,
     },

@@ -764,9 +764,9 @@ describe('stop 5 content', () => {
     expect(inside.body[0]).toBe('Suppose Ava is a knave. That is a guess, so everything we find now is inside the guess.');
     expect(inside.body[1]).toBe('Need: Ava’s words must be false. Says: Ben is a knave. So: false means Ben is a knight, inside the guess.');
     expect(inside.body[2]).toMatch(/The guess crashes!$/);
-    expect(after.body[0]).toBe('The guess crashed, so throw it away, and everything inside it. Now we know: Ava is a knight.');
+    expect(after.body[0]).toBe('The guess crashed, so throw it all away. Now we know: Ava is a knight.');
     expect(after.body.join(' ')).toContain('So: Ben is a knave. This is known.');
-    expect(after.body.at(-1)).toBe('Ben was a knight inside the guess. Now Ben is a knave. That is fine: the first was only pretend.');
+    expect(after.body.at(-1)).toBe('Ben flips. That is fine: the first was only pretend.');
   });
 
   it('the lesson 4 example has one answer, and supposing Ava is a knight crashes; Ben and Cal both flip after the crash', () => {
@@ -789,7 +789,7 @@ describe('stop 5 content', () => {
     expect(cases(ids, { ava: 'knave' }).filter((k) => fits(mean, 'ava', k)).every((k) => k.ben === 'knight')).toBe(true);
     expect(cases(ids, { ava: 'knave', ben: 'knight' }).filter((k) => fits(mean, 'ben', k)).every((k) => k.cal === 'knave')).toBe(true);
     expect(inside.body.join(' ')).toContain('So: false means Cal is a knight, inside the guess.');
-    expect(after.body[0]).toBe('The guess crashed, so throw it away, and everything inside it. Now we know: Ava is a knave.');
+    expect(after.body[0]).toBe('The guess crashed, so throw it all away. Now we know: Ava is a knave.');
     expect(after.body.join(' ')).toContain('Says: Ben is a knave. So: false means Ben is a knight.');
     expect(after.body.join(' ')).toContain('Says: Cal is a knave. So: Cal is a knave.');
     // Ben and Cal flip from inside the guess to known, as the card says.
@@ -1692,9 +1692,9 @@ describe('See -> Do -> Quiz (skill-drill handoff)', () => {
     expect(l1.ideas.length).toBe(7);
     expect(l1.ideas.map((c) => c.title)).toEqual(['Riddle Island', 'A knight’s words', 'A knave’s words', 'Two different things', 'Check a case', 'When you can’t tell', 'Words about others']);
     // The fact and the test are told apart: "given" is gone, the well is "a fact", and Fay's kind is a test.
-    expect(see.body[0]).toBe('On this board, the well is full. That is a fact, so it stays the same in every case here.');
+    expect(see.body[0]).toBe('The well is full. That is a fact, so it stays the same in every case.');
     expect(see.body.join(' ')).toContain('Test: Fay is a knight. Fay says, “The well is not full.” The well is full, so Fay’s words are false.');
-    expect(see.body.join(' ')).toContain('A knight’s words must be true. False words from a knight break the rule, so this case crashes.');
+    expect(see.body.join(' ')).toContain('A knight’s words must be true. So this case crashes.');
     expect(see.body.at(-1)).toBe('A crash shows the test is wrong, never the fact. So Fay can’t be a knight.');
     expect(JSON.stringify(l1.ideas)).not.toMatch(/\bgiven\b/);
     const board = L1_DRILL[1];
@@ -1760,7 +1760,7 @@ describe('See -> Do -> Quiz (skill-drill handoff)', () => {
     expect(swim.done).toContain('or what kind Cal is');
     // The swim card works the four cases from two unknowns, and its shown case is the board's.
     const card = stop5.lessons[0].ideas.find((c) => c.title === 'When you can’t tell')!;
-    expect(card.body[0]).toBe('Cal says, “I can swim.” No one knows Cal’s kind, or if Cal can swim. Two things are unknown, and each can go two ways. So there are four cases.');
+    expect(card.body[0]).toBe('No one knows Cal’s kind, or if Cal can swim. Two things are unknown, and each can go two ways. So there are four cases.');
     expect(card.body[1]).toContain(`${shownRows(swim)[0].label}`);
     expect(rows[0].fits, 'the card’s case holds').toBe(true);
   });

@@ -785,7 +785,7 @@ export function testItem(rng: Rng, o: ExplainOptions): ExplainMade {
   cases.push({ label: 'No check.', note: 'Nothing new is found, so both ideas stay in.' });
   return done('explain-test', 'test', c, {
     kind: 'choose',
-    prompt: `${opening(s, true)} Two explanations fit ${everyClue(c.shown.length)}: ${q(s, A)} and ${qEnd(s, B)} Which check could rule one of them out?`,
+    prompt: `${s.letters ? '' : `${opening(s, true)} `}Two explanations fit ${everyClue(c.shown.length)}: ${q(s, A)} and ${qEnd(s, B)} Which check could rule one of them out?`,
     scene: sceneOf(c, s.letters ? { unseen: s.clues.slice(2) } : {}),
     choices,
     answer: 'split',
@@ -848,7 +848,7 @@ export function newClueItem(rng: Rng, o: ExplainOptions): ExplainMade {
   const third = c.ideas.find((i) => i.id !== before.id && i.id !== now.id)!;
   const item: ItemCore = {
     kind: 'choose',
-    prompt: `${opening(s, true)} At first, ${q(s, before)} was the best guess. Then a new clue turned up. Which explanation is best now?`,
+    prompt: `${opening(s, true)} At first, ${q(s, before)} was the best guess. Which explanation is best now?`,
     scene: sceneOf(c),
     choices: ideaChoices(c),
     answer: now.id,
@@ -872,6 +872,8 @@ export function newClueItem(rng: Rng, o: ExplainOptions): ExplainMade {
 const REVISE_ASKS = [
   {
     ask: (who: string, first: string, clues: string) => `${who} picked ${first} as the best guess for ${clues}. Then a new clue ruled it out. Was that first best guess a proof?`,
+    /** For a story, whose scene shows the first best guess, the new clue and the best guess now. */
+    short: (first: string) => `The first best guess was ${first}. Was it a proof?`,
     guess: 'No. It was a best guess to test.',
     fit: 'Yes. It fit every clue, so it had to be true.',
     simple: 'Yes. The simplest idea is always right.',
@@ -879,6 +881,7 @@ const REVISE_ASKS = [
   },
   {
     ask: (who: string, first: string, clues: string) => `${who} picked ${first} as the best guess for ${clues}. Then a new clue came. Did the first clues prove that guess?`,
+    short: (first: string, clues: string) => `Did ${clues} prove ${first}?`,
     guess: 'No. They made it the best guess, not a sure thing.',
     fit: 'Yes. It fit the first clues, so it was sure.',
     simple: 'Yes. It needed the fewest extra things, so it was sure.',
@@ -948,7 +951,7 @@ export function reviseItem(rng: Rng, o: ExplainOptions): ExplainMade {
   };
   return done('explain-revise', 'revise', c, {
     kind: 'choose',
-    prompt: `${opening(s)} ${v.ask(who, q(s, first), firstClues)}`,
+    prompt: `${opening(s)} ${s.letters ? v.ask(who, q(s, first), firstClues) : v.short(q(s, first), firstClues)}`,
     scene: sceneOf(c, s.letters ? {} : { firstBest: first, nowBest: now }),
     choices: rng.shuffle(choices),
     answer: 'guess',
@@ -1010,12 +1013,11 @@ export const ruledBy = (c: Clue) => ({ out: WORKED_PAIR.find((i) => !c.fits[i.id
 export function newClueScene(): Extract<Scene, { kind: 'grid' }> {
   const clues = [...WORKED_SHOWN, WORKED_NEW];
   const best = bestOf(WORKED.ideas, clues)!;
-  const { out, kept } = ruledBy(WORKED_NEW);
   const cols = [...gridCols(WORKED_SHOWN), { id: WORKED_NEW.id, label: `${WORKED_NEW.short}?`, clue: WORKED_NEW }];
   return gridScene(
     WORKED.ideas,
     cols,
-    `${WHOLE_STORY} “${WORKED_NEW.short}?” is a check. ${out.short} has a ✗ there and ${kept.short} has a ✓, so it tells them apart. The report says no rain fell. Best guess now: ${best.short}.`,
+    `${WHOLE_STORY} Best guess now: ${best.short}.`,
   );
 }
 
@@ -1226,20 +1228,20 @@ export function fitsContrast(): Extract<Scene, { kind: 'contrast' }> {
         who: 'The clue',
         says: miss.clue.text,
         truth: !!miss.clue.fits[miss.idea.id],
-        because: `${miss.clue.why[miss.idea.id]} The story would make the clue different.`,
+        because: miss.clue.why[miss.idea.id],
       },
       {
         world: `${fit.idea.text}.`,
         who: 'The clue',
         says: fit.clue.text,
         truth: !!fit.clue.fits[fit.idea.id],
-        because: 'The cold story says nothing about the soil. In that story, the soil can still be wet.',
-        then: 'It fits, even though the cold does not explain the wet soil.',
+        because: 'The cold story says nothing about the soil.',
+        then: 'It fits, but it does not explain the wet soil.',
       },
     ],
     ask: {
       q: 'Does an idea have to explain a clue to fit it?',
-      a: `No. ${cap(fit.idea.name)} does not explain the wet soil, but it still fits. An idea misses a clue only when its story would make the clue different.`,
+      a: 'No. It misses only when its story would make the clue different.',
     },
     words: { worldTag: 'Whole story', truth: 'Fits', untruth: 'Misses' },
   };
@@ -1251,9 +1253,7 @@ export function fitsContrastCard(): IdeaCard {
     title: 'Fits is not the same as explains',
     distinction: FITS_VS_EXPLAINS.id,
     body: [
-      'An idea does not have to explain a clue to fit it.',
-      'Picture the idea as the whole story. Then ask: could the clue still be true in that story?',
-      'If yes, the idea fits, even when the clue is about something else. If the story would make the clue different, the idea misses it.',
+      'Could the clue still be true in the idea’s whole story? If yes, it fits.',
     ],
     scene: fitsContrast(),
   };

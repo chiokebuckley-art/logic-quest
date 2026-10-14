@@ -2599,9 +2599,8 @@ const IDEAS: Record<string, IdeaCard[]> = {
       title: 'Two different things',
       distinction: MARK_VS_FITS.id,
       body: [
-        'Each card has a mark. Each rule you test gives it Fits or Not. These are two different things.',
-        'The mark is the machine’s answer, and it never changes. Fits or Not comes from the rule you test, so it changes with the rule.',
-        'Look at the small blue circle below. Same card, same mark, two rules.',
+        'The mark never changes. Fits or Not comes from the rule you test, so it changes with the rule.',
+        'Below: same card, same mark, two rules.',
       ],
       scene: L5_MARK_SCENE,
     },
@@ -2617,9 +2616,8 @@ const IDEAS: Record<string, IdeaCard[]> = {
       title: 'Kept is not proved',
       distinction: KEPT_VS_PROVED.id,
       body: [
-        'A rule that matches every mark is kept for now. It is still possible, but it is not proved. Stop 8 has more on guesses like this.',
-        'Look below. Two rules match all six marks. A new card could tell them apart. It is like “Can’t tell yet” in Stop 1: the marks do not decide it.',
-        'In a puzzle, the rule the machine uses is one of the choices. When the other choices are ruled out, the one left must be it.',
+        'A rule that matches every mark is kept for now. It is still possible, but it is not proved.',
+        'Two rules match all six marks. In a puzzle, the machine’s rule is one of the choices. When the others are ruled out, the one left must be it.',
       ],
       scene: L5_KEPT_SCENE,
     },

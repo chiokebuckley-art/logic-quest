@@ -32,25 +32,20 @@ import {
   PIP_NO,
   PIP_NO_FLIP,
   PIP_NO_SWAP,
-  PIP_NOT,
   PIP_NOT_FLIP,
   PIP_NOT_SWAP,
-  GLORP_NO,
   GLORP_NO_SWAP,
-  GLORP_NOT,
   GLORP_NOT_SWAP,
   PLACE_VS_JOB,
   RAIN,
   RAIN_STORY,
   REX_ANIMAL,
   SOUNDS_RIGHT,
-  SUN_BROKEN,
   TRUE_NOT_FORCED,
   TRUE_VS_FOLLOWS,
   argScene,
   argText,
   believableItem,
-  breakLines,
   breaks,
   casesLeft,
   casesScene,
@@ -66,10 +61,10 @@ import {
   followsWorkedScene,
   formItem,
   fourCases,
-  givenTexts,
   givenTrueBoard,
   givenTrueContrast,
   givensItem,
+  leftIntro,
   glorpBoard,
   glorpNoScene,
   glorpNotScene,
@@ -86,8 +81,7 @@ import {
   rolesBoard,
   shapeBoard,
   solidItem,
-  statusReason,
-  statusSay,
+  statusOf,
   storyScene,
   sunBoard,
   sunWorkedScene,
@@ -131,6 +125,11 @@ function distinctItems(): (make: () => ArgMade) => ArgMade {
 const practiceOf = (lesson: string, make: (rng: Rng) => ArgMade[]) => (rng: Rng): Item[] => make(rng).map((m, i) => finish(m, `${lesson}-p${i + 1}`, lesson));
 const quote = (s: string) => `“${s}”`;
 const outCases = (arg: Arg) => CASES.filter((c) => breaks(arg, c) >= 0).map((c) => String(CASES.indexOf(c) + 1));
+/** A flip or a swap’s verdict in few words: “It can’t be true.” or “Cases 3 and 4 are left. It might be true or false.” */
+const verdictShort = (arg: Arg) => {
+  const st = statusOf(arg);
+  return st === 'might' ? `${leftIntro(arg)} It might be true or false.` : st === 'cant' ? 'It can’t be true.' : 'It must be true. It follows.';
+};
 const listAnd = (xs: readonly string[]) => (xs.length <= 2 ? xs.join(' and ') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
 
 // ---------- Lesson 1: givens and the claim ----------
@@ -165,9 +164,7 @@ const l1: LessonDef = {
       distinction: PLACE_VS_JOB.id,
       scene: placeContrast(),
       body: [
-        'The claim is not always the last sentence.',
-        'These two stories have the same givens and the same claim, in a new order.',
-        'In the second story, “must” points to the claim. It comes first.',
+        'The claim is not always the last sentence. Here the same story comes in a new order.',
       ],
     },
     {
@@ -236,18 +233,14 @@ const l2: LessonDef = {
       distinction: TRUE_VS_FOLLOWS.id,
       scene: trueFollowsContrast(),
       body: [
-        'A claim can be true and still not follow.',
-        'Pip really is a bird. In the first argument, the givens force it.',
-        'In the second, they don’t. Pip could be a toy with feathers.',
+        'Pip really is a bird. But only the first givens force it.',
       ],
     },
     {
       title: 'Example: Pip has feathers',
       scene: followsWorkedScene(),
       body: [
-        `Given 1 is ${quote(givenTexts(PIP)[0])} Given 2 is ${quote(givenTexts(PIP)[1])}`,
-        `Cases ${listAnd(outCases(PIP))} each break a given, so cross them out.`,
-        `${statusReason(PIP, false)} So the claim must be true. It follows.`,
+        `Cases ${listAnd(outCases(PIP))} each break a given, so cross them out. Then look at the case left.`,
       ],
     },
     {
@@ -255,11 +248,9 @@ const l2: LessonDef = {
       title: 'Given 2 can say “not”',
       scene: pipNotScene(),
       body: [
-        `Here given 2 says “not.” ${breakLines(PIP_NOT)}`,
-        `${statusReason(PIP_NOT, false)} ${statusSay(PIP_NOT)}`,
-        `Flip the claim to its opposite: ${quote(claimText(PIP_NOT_FLIP))} ${statusReason(PIP_NOT_FLIP, false)} ${statusSay(PIP_NOT_FLIP)}`,
-        `Flip the first Pip example too: ${quote(argText(PIP_FLIP))} ${statusReason(PIP_FLIP, false)} ${statusSay(PIP_FLIP)}`,
-        `Swap given 2 and the claim: ${quote(argText(PIP_NOT_SWAP))} ${statusReason(PIP_NOT_SWAP, false)} ${statusSay(PIP_NOT_SWAP)}`,
+        `Flip the claim: ${quote(claimText(PIP_NOT_FLIP))} ${verdictShort(PIP_NOT_FLIP)}`,
+        `Flip the first example too: ${quote(argText(PIP_FLIP))} ${verdictShort(PIP_FLIP)}`,
+        `Swap given 2 and the claim: ${quote(argText(PIP_NOT_SWAP))} ${verdictShort(PIP_NOT_SWAP)}`,
       ],
     },
     {
@@ -267,10 +258,9 @@ const l2: LessonDef = {
       title: 'Given 1 can say “No”',
       scene: pipNoScene(),
       body: [
-        `A given can start with “No.” ${noBroken(PIP_NO)}`,
-        `${breakLines(PIP_NO)} ${statusReason(PIP_NO, false)} ${statusSay(PIP_NO)}`,
-        `Flip the claim to its opposite: ${quote(claimText(PIP_NO_FLIP))} ${statusReason(PIP_NO_FLIP, false)} ${statusSay(PIP_NO_FLIP)}`,
-        `Swap given 2 and the claim: ${quote(argText(PIP_NO_SWAP))} ${statusReason(PIP_NO_SWAP, false)} ${statusSay(PIP_NO_SWAP)}`,
+        noBroken(PIP_NO),
+        `Flip the claim: ${quote(claimText(PIP_NO_FLIP))} ${verdictShort(PIP_NO_FLIP)}`,
+        `Swap given 2 and the claim: ${quote(argText(PIP_NO_SWAP))} ${verdictShort(PIP_NO_SWAP)}`,
       ],
     },
   ],
@@ -316,9 +306,7 @@ const l3: LessonDef = {
       title: 'Example: check the cases',
       scene: glorpWorkedScene(),
       body: [
-        'Check the cases, just like before. You don’t need to know what a glorp is.',
-        `Cases ${listAnd(outCases(GLORP))} each break a given. ${statusReason(GLORP, false)}`,
-        'So it follows.',
+        `Check the cases, just like before. Cases ${listAnd(outCases(GLORP))} each break a given.`,
       ],
     },
     {
@@ -336,9 +324,8 @@ const l3: LessonDef = {
       distinction: TRUE_VS_FOLLOWS.id,
       scene: rexScene(),
       body: [
-        `Now look at this one: ${quote(argText(REX_ANIMAL))}`,
-        'Every sentence sounds fine. Rex may even be a cat! But Rex could be a dog. A dog is an animal too.',
-        `That is case ${CASES.indexOf(rexLeak) + 1}. The givens do not force the claim, so it does not follow.`,
+        'Rex may even be a cat! But Rex could be a dog, and a dog is an animal too.',
+        `That is case ${CASES.indexOf(rexLeak) + 1}. The givens do not force the claim.`,
       ],
     },
     {
@@ -355,9 +342,7 @@ const l3: LessonDef = {
       title: 'Glorps with “not”',
       scene: glorpNotScene(),
       body: [
-        'Given 2 can say “not” with made-up words too. You still don’t need to know what a glorp is.',
-        `${breakLines(GLORP_NOT)} ${statusReason(GLORP_NOT, false)} ${followSay(GLORP_NOT)}`,
-        `Swap given 2 and the claim: ${quote(argText(GLORP_NOT_SWAP))} ${statusReason(GLORP_NOT_SWAP, false)} ${followSay(GLORP_NOT_SWAP)}`,
+        `Swap given 2 and the claim: ${quote(argText(GLORP_NOT_SWAP))} ${leftIntro(GLORP_NOT_SWAP)} ${followSay(GLORP_NOT_SWAP)}`,
       ],
     },
     {
@@ -365,9 +350,7 @@ const l3: LessonDef = {
       title: 'Glorps with “No”',
       scene: glorpNoScene(),
       body: [
-        `Given 1 can start with “No.” ${noBroken(GLORP_NO)}`,
-        `${breakLines(GLORP_NO)} ${statusReason(GLORP_NO, false)} ${followSay(GLORP_NO)}`,
-        `Swap given 2 and the claim: ${quote(argText(GLORP_NO_SWAP))} ${statusReason(GLORP_NO_SWAP, false)} ${followSay(GLORP_NO_SWAP)}`,
+        `Swap given 2 and the claim: ${quote(argText(GLORP_NO_SWAP))} ${leftIntro(GLORP_NO_SWAP)} ${followSay(GLORP_NO_SWAP)}`,
       ],
     },
   ],
@@ -391,8 +374,6 @@ const l3: LessonDef = {
 
 // ---------- Lesson 4: solid arguments ----------
 
-const sunLeak = casesLeft(SUN_BROKEN).find((c) => !claimIn(SUN_BROKEN, c))!;
-
 const l4: LessonDef = {
   id: 's18.l4',
   title: 'Solid arguments',
@@ -411,9 +392,7 @@ const l4: LessonDef = {
       distinction: GIVEN_VS_TRUE.id,
       scene: givenTrueContrast(),
       body: [
-        'Being given does not make a sentence true.',
-        'Both arguments have the same shape, so both follow.',
-        'But a penguin can’t fly. So given 1 of the second one is false. It is not solid.',
+        'Both arguments follow. But a penguin can’t fly, so only the first is solid.',
       ],
     },
     {
@@ -422,9 +401,7 @@ const l4: LessonDef = {
       distinction: TRUE_VS_FOLLOWS.id,
       scene: sunWorkedScene(),
       body: [
-        'Every sentence here is true. The sun really is a star.',
-        `But case ${CASES.indexOf(sunLeak) + 1} is left, and the claim is false there. The givens do not force the claim.`,
-        'So it does not follow. And if it does not follow, it is not solid.',
+        'The sun really is a star. But the givens do not force the claim.',
       ],
     },
     {

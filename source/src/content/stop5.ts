@@ -180,9 +180,8 @@ export const L1_CONTRAST: IdeaCard = {
   distinction: KIND_VS_TRUTH.id,
   scene: L1_CONTRAST_SCENE,
   body: [
-    'A case is one full way things could be. In a case, we test a kind: we pretend a speaker is a knight or a knave. The case holds if everyone fits the rule. It crashes if someone breaks it.',
-    'Two things are easy to mix up. One: the kind we test. It says what the words must be. Two: whether the words are true. That comes from what they say, checked against the case.',
-    'Below, Ben is tested as a knave both times, with the same words. Only the well changes.',
+    'A case is one full way things could be. To test a kind, we pretend a speaker is a knight or a knave. The case holds if everyone fits the rule. It crashes if someone breaks it.',
+    'Do not mix up two things. One: the kind we test. It says what the words must be. Two: whether the words are true. That comes from what they say, checked against the case.',
   ],
 };
 const benCase = (p: boolean) => factRow({ name: 'Ben', fact: WELL, negative: false, k: 'knave', p, test: true });
@@ -595,9 +594,9 @@ const lessons: LessonDef[] = [
         title: 'Check a case',
         scene: L1_WELL_SCENE,
         body: [
-          'On this board, the well is full. That is a fact, so it stays the same in every case here.',
-          'Now we test a kind for each islander. Test: Fay is a knight. Fay says, “The well is not full.” The well is full, so Fay’s words are false.',
-          'A knight’s words must be true. False words from a knight break the rule, so this case crashes.',
+          'The well is full. That is a fact, so it stays the same in every case.',
+          'Test: Fay is a knight. Fay says, “The well is not full.” The well is full, so Fay’s words are false.',
+          'A knight’s words must be true. So this case crashes.',
           'A crash shows the test is wrong, never the fact. So Fay can’t be a knight.',
         ],
       },
@@ -605,18 +604,18 @@ const lessons: LessonDef[] = [
         title: 'When you can’t tell',
         scene: L1_SWIM_SCENE,
         body: [
-          'Cal says, “I can swim.” No one knows Cal’s kind, or if Cal can swim. Two things are unknown, and each can go two ways. So there are four cases.',
-          'Test: Cal is a knight, and Cal can swim. The words say Cal can swim, and Cal can, so they are true. That fits a knight, so this case holds.',
+          'No one knows Cal’s kind, or if Cal can swim. Two things are unknown, and each can go two ways. So there are four cases.',
+          'Test: Cal is a knight, and Cal can swim. Then the words are true. That fits a knight, so this case holds.',
           'Check the other cases the same way: the words first, then the kind.',
-          'If two cases hold and give different answers, you can’t tell. That is a real answer. It is not giving up.',
+          'If two cases hold with different answers, you can’t tell. That is a real answer, not giving up.',
         ],
       },
       {
         title: 'Words about others',
         scene: L1_OTHERS_SCENE,
         body: [
-          'Islanders can talk about each other too. Dee says, “Eli is a knave.” Dee and Eli can each be a knight or a knave.',
-          'Test: Dee is a knave, and Eli is a knave. The words say Eli is a knave, and Eli is one, so they are true. A knave’s words must be false, so this case crashes.',
+          'Islanders can talk about each other too. Dee and Eli can each be a knight or a knave.',
+          'Test: Dee and Eli are both knaves. Then the words are true, so this case crashes.',
           'Test: Dee is a knave, and Eli is a knight. Now the words are false. That fits a knave, so this case holds.',
           'So if Dee is a knave, Eli is a knight. It works the other way too: true words come from a knight, and false words from a knave.',
         ],
@@ -764,20 +763,19 @@ const lessons: LessonDef[] = [
         distinction: GUESS_VS_KNOWN.id,
         scene: L3_CONTRAST_SCENE,
         body: [
-          'The guess crashed, so throw it away, and everything inside it. Now we know: Ava is a knight.',
+          'The guess crashed, so throw it all away. Now we know: Ava is a knight.',
           'Need: Ava’s words must be true. Says: Ben is a knave. So: Ben is a knave. This is known.',
-          'Check Ben: Ben’s words must be false. Ava and Ben are different kinds, so the words are false. Everyone fits, so this case holds.',
-          'Ben was a knight inside the guess. Now Ben is a knave. That is fine: the first was only pretend.',
+          'Check Ben: his words must be false, and they are. So this case holds.',
+          'Ben flips. That is fine: the first was only pretend.',
         ],
       },
       {
         title: 'Four possible answers',
         scene: L3_SCENE,
         body: [
-          'A guess can also hold. Then list the cases: keep the guess, and try the other islander as a knight, then as a knave.',
-          'Each of those is a case: one full way things could be. If just one case holds, you know what the other islander must be.',
-          'If the two cases both hold, you can’t tell. If they both crash, your guess crashes.',
-          'Following a guess is a short way to list the cases. With Ava as a knight, “So Ben is a knave” means the case with Ben as a knight crashes. On the board, each row is one case.',
+          'A guess can also hold. Then keep the guess, and try the other islander as a knight, then as a knave.',
+          'If just one of those cases holds, you know the other islander’s kind. If both hold, you can’t tell. If both crash, your guess crashes.',
+          'Following a guess is a short way to list the cases. With Ava as a knight, “So Ben is a knave” means the case with Ben as a knight crashes.',
         ],
       },
     ],
@@ -833,10 +831,10 @@ const lessons: LessonDef[] = [
         title: 'Inside the guess',
         scene: L4_GUESS_SCENE,
         body: [
-          'Suppose Ava is a knight. Everything we find now is inside the guess.',
-          'Need: Ava’s words must be true. Says: Ben is a knave. So: Ben is a knave, inside the guess.',
+          'Suppose Ava is a knight. Now we are inside the guess.',
+          'Need: Ava’s words must be true. Says: Ben is a knave. So: Ben is a knave.',
           'Need: Ben’s words must be false. Says: Cal is a knave. So: false means Cal is a knight, inside the guess.',
-          'Need: Cal’s words must be true. Says: Ava and Ben are the same kind. But inside the guess they are different kinds. The guess crashes!',
+          'Need: Cal’s words must be true. Says: Ava and Ben are the same kind. But they are different kinds. The guess crashes!',
         ],
       },
       {
@@ -844,7 +842,7 @@ const lessons: LessonDef[] = [
         distinction: GUESS_VS_KNOWN.id,
         scene: L4_CONTRAST_SCENE,
         body: [
-          'The guess crashed, so throw it away, and everything inside it. Now we know: Ava is a knave.',
+          'The guess crashed, so throw it all away. Now we know: Ava is a knave.',
           'Need: Ava’s words must be false. Says: Ben is a knave. So: false means Ben is a knight.',
           'Need: Ben’s words must be true. Says: Cal is a knave. So: Cal is a knave.',
           'Ben and Cal both flip. That is fine: the first ones were only pretend.',

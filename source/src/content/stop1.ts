@@ -1138,8 +1138,8 @@ const L5 = signLesson({
       title: 'A new rule',
       body: [
         'Here is a new rule: “Every sign is false.”',
-        'It means no sign tells the truth. The number of true signs is 0. The rule is always right, just like before.',
-        'Check each chest the same way. Pretend the treasure is in it. Mark each sign true or false.',
+        'It means no sign tells the truth: 0 true signs. The rule is always right.',
+        'Pretend the treasure is in a chest, and mark each sign true or false.',
         'Count the true signs. Keep the chest where no sign is true. Reject the others.',
       ],
     },
@@ -1163,8 +1163,8 @@ const L6 = signLesson({
       title: 'A new rule',
       body: [
         'Here is a new rule: “Exactly two signs are true.”',
-        'It means two signs tell the truth, and one does not. The number of true signs is 2. “Exactly two” means 2, no more and no fewer. Three true signs do not fit.',
-        'Check each chest the same way. Pretend the treasure is in it. Mark each sign true or false.',
+        'Two signs tell the truth, and one does not. “Exactly two” means 2, no more and no fewer. Three true signs do not fit.',
+        'Pretend the treasure is in a chest, and mark each sign true or false.',
         'Count the true signs. Keep the chest that makes exactly two signs true. Reject the others.',
       ],
     },
@@ -1180,7 +1180,15 @@ const L6 = signLesson({
  * True passes part 1 and False fails it. The two intro cards are one card, to make room.
  */
 const L7_TEST = [0, 1, 2].find((b) => b !== L7_EXAMPLE.answer)!;
-export const L7_OWNER_CONTRAST = signOwnerContrastCard(L7_EXAMPLE, 'chest', L7_TEST);
+const L7_WORDS = signWords('chest');
+/** The contrast card with a short body: its scene (the same as its board's) already shows part 1 pass and fail. */
+export const L7_OWNER_CONTRAST: IdeaCard = {
+  ...signOwnerContrastCard(L7_EXAMPLE, 'chest', L7_TEST),
+  body: [
+    `We pretend the ${L7_WORDS.item} is ${L7_WORDS.prep} ${L7_WORDS.the(L7_TEST)}, two times. Only the words on its sign change.`,
+    'Stamp the sign from its words. Then part 1 of the rule checks the stamp.',
+  ],
+};
 export const L7_OWNER_DRILL = signOwnerDrill(L7_EXAMPLE, 'chest', 's1.l7-part-one', 2, L7_TEST);
 
 const L7 = signLesson({
@@ -1193,7 +1201,7 @@ const L7 = signLesson({
       title: 'A new rule',
       body: [
         'Here is a new rule: “The sign on the chest with the treasure is true. The other signs are false.”',
-        'Counting is not enough here. The one true sign has to be on the chest with the treasure.',
+        'Counting is not enough. The true sign has to be on the chest with the treasure.',
         'Pretend the treasure is in a chest. Stamp each sign from its words. Part 1: is that chest’s own sign True? Part 2: are the other two signs False?',
         'If either part fails, reject the chest.',
       ],
@@ -1204,8 +1212,8 @@ const L7 = signLesson({
       title: 'Remember: two different things',
       distinction: TREASURE_VS_SIGN.id,
       body: [
-        'Where we pretend the treasure is and whether a sign is true are two different things. The pretend place does not make a sign true, and it does not make it false.',
-        'The rule is about the real treasure chest. In a test, it does not make a sign true. First stamp each sign from its words. Then check the rule: is the pretend chest’s own stamp True?',
+        'Where we pretend the treasure is and whether a sign is true are two different things. The pretend place does not make a sign true or false.',
+        'The rule is about the real treasure chest. In a test, it does not make a sign true. Stamp each sign from its words. Then check the rule: is the pretend chest’s own stamp True?',
       ],
     },
   ],

@@ -19,6 +19,9 @@ stops after two misses in a row) and plays the rounds in order on a star sky.
   answers are whole sentences, kid mode asks a kid-only twin of the same skill, computed by the same generator and
   checked by tests; the classic lessons, ids, answers and pass rules are unchanged, and a grown-up with no grade sees
   the Journey as before.
+- **Grades 4 to 8 read shorter too:** the wordiest cards of Arguments, Guess the rule, Ways to Think, the sign
+  lessons, Spot the Trick and Knights and Knaves lost a third to two thirds of their body text, with every idea,
+  defined word and example kept.
 - The spec and its decisions are `docs/KID-JOURNEY.md`; the kid-layer rules are in `docs/CONTENT_GUIDE.md`.
 
 **v0.12.0 — The logic the audit found missing:** from the Logic Quest Curriculum and Logic Audit (October 13,

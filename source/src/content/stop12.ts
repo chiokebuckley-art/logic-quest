@@ -24,12 +24,8 @@ import {
   AFTER_VS_CAUSE,
   APPLES,
   BEE_ONE,
-  BEE_TWO,
   CAR,
-  CEREAL,
   EACH_VS_ONE,
-  FISH,
-  LAKE,
   LIGHTNING,
   OCTOPUS,
   POOL,
@@ -93,7 +89,6 @@ import {
   SKINS,
   TRICK_KINDS,
   TRUE_TRICK,
-  W_CAR,
   W_CEREAL,
   W_FASTEST,
   W_FISH,
@@ -108,7 +103,6 @@ import {
   falseDoors,
   caseFacts,
   caseMid,
-  cap,
   leakCase,
   mid,
   nameItem,
@@ -120,7 +114,7 @@ import {
   type TrickKind,
   type TrickMade,
 } from '../engine/puzzles/tricks';
-import type { Item, LessonDef, Rng, StopDef } from '../engine/types';
+import type { DrillStep, Item, LessonDef, Rng, StopDef } from '../engine/types';
 
 const STOP = 12;
 
@@ -144,6 +138,11 @@ function distinctItems(): (make: () => TrickMade) => TrickMade {
 const practiceOf = (lesson: string, make: (rng: Rng) => TrickMade[]) => (rng: Rng): Item[] => make(rng).map((m, i) => finish(m, `${lesson}-p${i + 1}`, lesson));
 const quote = (s: string) => `“${s}”`;
 const PASS = { firstTry: 3, include: [TRUE_TRICK] };
+/**
+ * A board with shorter directions: its rows, marks and why lines stay as made. The card just before it and its own
+ * "What changed" note already say the rest.
+ */
+const shortBody = (board: DrillStep, ...body: string[]): DrillStep => ({ ...board, body });
 /** Lesson 5’s three families: tricks about people. */
 const L5_FAMILIES: Family[] = ['person', 'twist', 'authority'];
 
@@ -178,8 +177,7 @@ const l1: LessonDef = {
       scene: flipWorkedScene(),
       body: [
         'Ben says, “The grass is wet. So it rained.” That runs the rule backward.',
-        `Look at the cases. Case ${leakNum(RAIN_AC)} breaks no given. It did not rain, but a sprinkler wet the grass.`,
-        `The claim is false in case ${leakNum(RAIN_AC)}. So the givens do not force it.`,
+        `In case ${leakNum(RAIN_AC)}, a sprinkler wet the grass.`,
         'This is the flip trick. Grown-ups call it affirming the consequent.',
       ],
     },
@@ -188,10 +186,9 @@ const l1: LessonDef = {
       scene: notWorkedScene(),
       body: [
         'Mia says, “It did not rain. So the grass is dry.”',
-        'The rule only talks about rainy days. With no rain, a sprinkler can still wet the grass.',
-        `That is case ${leakNum(RAIN_DA)} again. So this claim does not follow either.`,
+        `The rule only talks about rainy days. In case ${leakNum(RAIN_DA)}, a sprinkler wets the grass.`,
         'This is the NOT trick. Grown-ups call it denying the antecedent.',
-        'In If… then, the flip trick was Flip only. The NOT trick was NOT only.',
+        'In If… then, these were Flip only and NOT only.',
       ],
     },
     {
@@ -200,8 +197,7 @@ const l1: LessonDef = {
       distinction: TRUE_VS_PROVES.id,
       scene: trueProvedContrast(),
       body: [
-        'A trick can land on a true claim. That does not make it a good reason.',
-        'Both claims here are true. But only one reason forces its claim.',
+        'A trick can land on a true claim. Both claims here are true, but only one reason forces its claim.',
         'So ask two things. Is the claim true? Did the reason prove it?',
       ],
     },
@@ -240,18 +236,17 @@ const l2: LessonDef = {
       scene: middleWorkedScene(),
       body: [
         'Kim says, “All bees are insects. Buzz is an insect. So Buzz is a bee.”',
-        'Bees and Buzz are both in one middle group: insects. That does not put Buzz with the bees.',
-        `Case ${leakNum(BEE_ONE)} breaks no given. Buzz is an insect but not a bee. Say Buzz is an ant.`,
-        'In Arguments, you saw this shape does not follow. Its name is the middle trick.',
+        'Sharing a middle group, insects, does not put Buzz with the bees.',
+        `In case ${leakNum(BEE_ONE)}, Buzz is an insect but not a bee. Say Buzz is an ant.`,
+        'This is the middle trick.',
       ],
     },
     {
       title: 'Two groups in the middle',
       scene: twoWorkedScene(),
       body: [
-        'The same trick works with two groups: “All bees are insects. All ants are insects. So all bees are ants.”',
-        'Both groups sit inside the insect group. That does not put one group inside the other.',
-        `Case ${leakNum(BEE_TWO)} shows it. Buzz is an insect, and Buzz is not an ant.`,
+        'The trick works with two groups too: “All bees are insects. All ants are insects. So all bees are ants.”',
+        'Sharing the insect group does not put one group inside the other.',
         'Grown-ups call this trick the undistributed middle.',
       ],
     },
@@ -269,7 +264,7 @@ const l2: LessonDef = {
       title: 'Each has one, or one for all?',
       distinction: EACH_VS_ONE.id,
       scene: eachOneContrast(),
-      body: ['Look at the same two kids in both panels.', 'Sentence 1 is true. Sentence 2 is false.', 'So sentence 1 can’t prove sentence 2.'],
+      body: ['Sentence 1 is true. Sentence 2 is false. So sentence 1 can’t prove sentence 2.'],
     },
     {
       // A reminder of Lesson 1, on a middle trick whose claim is really true.
@@ -325,8 +320,7 @@ const l3: LessonDef = {
       title: 'Example: the claim again',
       scene: circleWorkedScene(),
       body: [
-        `Look at the cases. Given 1 crosses out case 2, the only case where the claim is false.`,
-        'So given 1 and the claim always match. That is how you know it is the claim again.',
+        'Given 1 and the claim always match. So given 1 is the claim again.',
         `A real reason tells you something new: ${quote(W_FASTEST.news[0])} You could check that on its own.`,
       ],
     },
@@ -335,9 +329,9 @@ const l3: LessonDef = {
       scene: doorsWorkedScene(),
       body: [
         `Ivy says, ${quote(`${SPORTS.givens[0].text} ${SPORTS.givens[1].text} So ${SPORTS.claimMid}.`)}`,
-        'If both givens were true, the claim would follow.',
-        `But given 1 shuts out a door: ${third.replace(/\.$/, '')}. Some kids in the class really do ride bikes.`,
-        'So given 1 is false, and the reason proves nothing. This is the two-doors trick. Grown-ups call it a false dilemma.',
+        'With true givens, the claim would follow.',
+        `But given 1 shuts out a door: ${third.replace(/\.$/, '')}. So the reason proves nothing.`,
+        'This is the two-doors trick. Grown-ups call it a false dilemma.',
       ],
     },
     {
@@ -345,7 +339,7 @@ const l3: LessonDef = {
       title: 'Two doors, or more?',
       distinction: TWO_VS_ALL.id,
       scene: doorsContrast(),
-      body: ['An either-or names two doors. It is true only if no other door is there.', 'A coin has just two sides. But kids can do many things.', 'So before you trust an either-or, look for a third door.'],
+      body: ['An either-or names two doors. It is true only if no other door is there.'],
     },
     {
       // A reminder of Lesson 1, on the doors trick with a claim that is true.
@@ -387,10 +381,8 @@ const l4: LessonDef = {
       title: 'Example: too few',
       scene: hastyWorkedScene(),
       body: [
-        'Ava says, “I tasted 2 of the 6 apples in the bag. Both were sour. So all 6 are sour.”',
-        `The other 4 apples were never tasted. Case ${leakNum(APPLES)} breaks no given: one of them is not sour.`,
-        'So the claim does not follow. A few can’t prove all.',
-        'This is the too-few trick. Grown-ups call it a hasty generalization.',
+        `Ava never tasted the other 4. In case ${leakNum(APPLES)}, one of them is not sour.`,
+        'A few can’t prove all. This is the too-few trick. Grown-ups call it a hasty generalization.',
       ],
     },
     {
@@ -401,9 +393,7 @@ const l4: LessonDef = {
       title: 'Everybody says',
       scene: popularWorkedScene(),
       body: [
-        `Ivy says, ${quote(`${LIGHTNING.givens[0].text} So ${LIGHTNING.claimMid}.`)}`,
-        `Case ${leakNum(LIGHTNING)} breaks no given: most kids say it, and it is false. Lots of people can believe something false.`,
-        'In fact, tall towers get hit by lightning many times a year.',
+        `In case ${leakNum(LIGHTNING)}, most kids say it, and it is false. Tall towers get hit many times a year.`,
         'This is the everybody-says trick. Grown-ups call it the appeal to popularity.',
       ],
     },
@@ -412,7 +402,7 @@ const l4: LessonDef = {
       title: 'A vote, or the facts?',
       distinction: SAY_VS_TRUE.id,
       scene: sayTrueContrast(),
-      body: ['Counting people can prove some things. It proves what a group picked.', 'It can’t prove what is true about the world. Only the facts can.'],
+      body: ['Counting people can prove a pick. Only the facts can prove a fact.'],
     },
     {
       // A reminder of Lesson 1, on the everybody-says trick with a claim that is really true.
@@ -426,7 +416,7 @@ const l4: LessonDef = {
       ],
     },
   ],
-  drill: [hastyBoard(), sayBoard()],
+  drill: [shortBody(hastyBoard(), 'For each reason, does it prove its claim?'), shortBody(sayBoard(), 'Answer both questions for each reason.')],
   distinctions: [SAY_VS_TRUE, { ...TRUE_VS_PROVES, taughtIn: 's12.l1' }],
   terms: [
     { term: 'hasty generalization', also: 'the too-few trick', means: 'Checking a few things, then making a claim about all of them.' },
@@ -458,10 +448,9 @@ const l5: LessonDef = {
       title: 'Attacking the person',
       scene: personWorkedScene(),
       body: [
-        `Some tricks are about people, not facts. ${W_POOL.setting}`,
-        'Leo says, “Don’t listen to Mia. She is late for everything.”',
-        `Look at case ${leakNum(POOL)}. Mia is late, and the pool does open at noon. Being late says nothing about the pool.`,
-        'Leo talked about Mia, not about her claim. This trick is called attacking the person. Grown-ups call it ad hominem.',
+        `${W_POOL.setting} Leo says, “Don’t listen to Mia. She is late for everything.”`,
+        `In case ${leakNum(POOL)}, Mia is late, and the pool does open at noon.`,
+        'Leo talked about Mia, not her claim. This is attacking the person. Grown-ups call it ad hominem.',
       ],
     },
     {
@@ -469,7 +458,7 @@ const l5: LessonDef = {
       title: 'Who says it, or the facts?',
       distinction: WHO_VS_WHAT.id,
       scene: whoContrast(),
-      body: ['Mia and Kim say the same words about the library.', 'Mia is late a lot. Kim never is. But the sign decides if the words are true.', 'Who says a claim does not make it true or false.'],
+      body: ['Who says a claim does not make it true or false.'],
     },
     {
       // See: the twisted claim, both cases marked.
@@ -477,8 +466,6 @@ const l5: LessonDef = {
       scene: twistWorkedScene(),
       body: [
         `${W_LAKE.setting} ${W_LAKE.retell}`,
-        `Then Mia says, ${quote(`${W_LAKE.reason} So ${LAKE.claimMid}.`)}`,
-        `Look at case ${leakNum(LAKE)}. The lake is not a hot bath, but it is warm enough for a swim. Leo never said it was a bath.`,
         'Mia answered a claim nobody made. This is the twisted-claim trick. Grown-ups call it a straw man.',
       ],
     },
@@ -487,9 +474,7 @@ const l5: LessonDef = {
       title: 'A famous name',
       scene: authorityWorkedScene(),
       body: [
-        `${W_CEREAL.setting} She says this cereal is the healthiest one.`,
-        'The singer knows a lot about songs. That does not make her know about food.',
-        `Look at case ${leakNum(CEREAL)}. She says it, and the cereal is not the healthiest.`,
+        `${W_CEREAL.setting} She knows a lot about songs, not about food.`,
         'This is the famous-name trick. Grown-ups call it an appeal to authority. Ask what the person really knows.',
       ],
     },
@@ -540,10 +525,9 @@ const l6: LessonDef = {
       title: 'The slippery slope',
       scene: slopeWorkedScene(),
       body: [
-        `${W_FISH.setting} Leo says, “If Ms. Lee says yes, other kids will ask for pets. Then the class will turn into a zoo.”`,
-        'Each step needs its own reason. Leo gives none.',
-        `Look at case ${leakNum(FISH)}. Other kids ask, but the class does not turn into a zoo. ${W_FISH.other}`,
-        'This trick is called the slippery slope. One step does not have to lead to the next.',
+        `${W_FISH.setting} Leo says that will lead to more pets, then a zoo.`,
+        `Each step needs its own reason. Leo gives none. ${W_FISH.other}`,
+        'This trick is called the slippery slope.',
       ],
     },
     {
@@ -551,10 +535,9 @@ const l6: LessonDef = {
       title: 'It came first, so it caused it?',
       scene: afterWorkedScene(),
       body: [
-        `${W_CAR.speaker} says, ${quote(`${W_CAR.after} So ${CAR.claimMid}.`)}`,
-        `Look at case ${leakNum(CAR)}. ${cap(caseMid(CAR, leakCase(CAR)!))}. The rain still came right after the car wash.`,
+        `In case ${leakNum(CAR)}, ${caseMid(CAR, leakCase(CAR)!)}.`,
         'Coming first is not the same as causing. This trick is called after-therefore-because. Grown-ups also say post hoc.',
-        'In Ways to Think, two things that go together were only a guess to check. One thing right after another is the same.',
+        'As in Ways to Think, it is only a guess to check.',
       ],
     },
     {
@@ -562,7 +545,7 @@ const l6: LessonDef = {
       title: 'After, or a cause?',
       distinction: AFTER_VS_CAUSE.id,
       scene: afterContrast(),
-      body: ['In both stories, one thing came right after another.', 'Ana’s doorbell has a rule: nothing but the button can ring it. So her press must be the cause.', 'Kai’s rain has no rule like that. Clouds could have made the rain.'],
+      body: ['Coming right after is not enough. A cause needs a rule that nothing else could do it.'],
     },
     {
       // A reminder of Lesson 1, on an after-therefore claim that is really true.
@@ -576,7 +559,7 @@ const l6: LessonDef = {
       ],
     },
   ],
-  drill: [chainBoard(), afterBoard()],
+  drill: [shortBody(chainBoard(), 'Mark each case. Then say if the reason proves the claim.'), shortBody(afterBoard(), 'Answer both questions for each story.')],
   distinctions: [AFTER_VS_CAUSE, { ...TRUE_VS_PROVES, taughtIn: 's12.l1' }],
   terms: [
     { term: 'slippery slope', means: 'Saying one step will lead to the next and the next, with no reason for each step.' },

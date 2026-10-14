@@ -473,8 +473,8 @@ describe('reminders, misconceptions and questions in each rule’s words (s1-rev
   it('The owner’s sign: its reminder never says the treasure chest can have a false sign, and no L7 card or board says it', () => {
     const sign = l7.ideas.find((c) => c.distinction === 'treasure-vs-sign')!;
     expect(sign.body).toEqual([
-      'Where we pretend the treasure is and whether a sign is true are two different things. The pretend place does not make a sign true, and it does not make it false.',
-      'The rule is about the real treasure chest. In a test, it does not make a sign true. First stamp each sign from its words. Then check the rule: is the pretend chest’s own stamp True?',
+      'Where we pretend the treasure is and whether a sign is true are two different things. The pretend place does not make a sign true or false.',
+      'The rule is about the real treasure chest. In a test, it does not make a sign true. Stamp each sign from its words. Then check the rule: is the pretend chest’s own stamp True?',
     ]);
     // The line that seems to contradict the owner's rule is in no L7 card, board, mix-up or question.
     const boards = [...l7.drill!, ...l7.practice(createRng(3)).flatMap((it) => (it.workFirst ? [it.workFirst] : []))];
