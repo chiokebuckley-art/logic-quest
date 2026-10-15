@@ -815,30 +815,31 @@ export const L3_DRILL: DrillStep[] = [
 ];
 
 /**
- * The two NOT boards in kid mode (Grade 1): each board's learner row as one page per answer, “NOT all big:” over “one is
- * not?”, a check tile and a cross tile, with the board's cards as the row's picture (KidBoard.alt, notKidDrill).
+ * The two NOT boards in kid mode (Grade 1): each board's statement asked on cards, “NOT all big?” and “NOT three or
+ * more red?”, one card set per page with a check tile and a cross tile (KidBoard.alt, notKidDrill). The first set
+ * breaks the board's classic mistake, the second gives the other answer; every answer comes from the engine.
  */
-const L3_KID_BIG = notKidDrill(L3_DRILL[0].id, L3_DO_BIG);
-const L3_KID_THREE = notKidDrill(L3_DRILL[1].id, L3_DO_THREE);
+export const L3_KID_BIG = notKidDrill(L3_DRILL[0].id, L3_DO_BIG);
+export const L3_KID_THREE = notKidDrill(L3_DRILL[1].id, L3_DO_THREE);
+const kidBoard = (b: typeof L3_KID_BIG): KidBoard => ({ line: b.line, rows: b.step.rows.map(() => ({ label: '' })), alt: b.step });
 
 /**
- * The kid layer (Grade 1, docs/KID-JOURNEY.md): one line and a picture per card, and each board as its kid-only step
- * (one answer per page, the board's cards as the picture). The one new word is "NOT", named on the first card. The
- * items' kid words come from notItem(), and their kid form is its alternate (one answer, yes or no).
+ * The kid layer (Grade 1, docs/KID-JOURNEY.md): NOT is seen on cards, never only reasoned about in words. One red card
+ * is true, and NOT flips it to false (the word card for NOT); three red cards make “All red?” true; with one blue card
+ * “NOT all red?” is true, and with all red it is false; and the trap in pictures: “NOT all red” (two red, one blue) is
+ * not “none red” (no red at all). The items' kid form is their alternate from notItem(): a few cards and the NOT
+ * question, yes or no.
  */
 export const L3_KID: KidLesson = {
   cards: [
-    { line: 'NOT: it flips true and false.', art: 'not-flip' },
-    { line: 'A red card? NOT means none.', art: 'not-flip' },
-    { line: 'NOT all red: one is not.', art: 'cards-every' },
-    { line: 'Three and three is a tie.', art: 'cards-tie' },
-    { line: 'NOT more red: same or fewer.', art: 'cards-tie' },
-    { line: 'Check: they never agree.', art: 'check' },
+    { line: 'This card is red. True!', art: 'card-red-true' },
+    { line: 'NOT red? False: NOT flips it.', art: 'card-red-not' },
+    { line: 'All red? True.', art: 'cards-all-red' },
+    { line: 'NOT all red? True: one blue.', art: 'cards-one-blue' },
+    { line: 'NOT all red? False.', art: 'cards-all-red' },
+    { line: 'NOT all red is not none.', art: 'cards-not-none' },
   ],
-  board: [
-    { line: L3_KID_BIG.line, rows: L3_KID_BIG.step.rows.map(() => ({ art: 'cards-every' as const })), alt: L3_KID_BIG.step },
-    { line: L3_KID_THREE.line, rows: L3_KID_THREE.step.rows.map(() => ({ art: 'cards-tie' as const })), alt: L3_KID_THREE.step },
-  ],
+  board: [kidBoard(L3_KID_BIG), kidBoard(L3_KID_THREE)],
   star: 'You can use NOT!',
 };
 

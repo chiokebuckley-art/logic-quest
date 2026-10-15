@@ -23,6 +23,8 @@ export interface Thing {
   hidden?: boolean;
   /** Drawn as a badge: 'yes' = let through / fits, 'no' = stopped / does not fit. Used by "guess my rule". */
   mark?: 'yes' | 'no';
+  /** Drawn with a ring around it: the card a kid "Show me" points at (the one that is not red). */
+  ring?: boolean;
 }
 
 /** A treasure box with a sign on it (Smullyan-style sign puzzles). */
@@ -276,6 +278,9 @@ export type Picto =
   // caves and boxes of the sign puzzles (a picture answer tile, like the chest)
   | 'cards-look' | 'cards-cant' | 'cards-settled' | 'cards-twin' | 'card-face-down' | 'cards-every' | 'cards-tie'
   | 'not-flip' | 'verdict-true' | 'verdict-false' | 'verdict-cant' | 'signpost' | 'door' | 'cave' | 'box'
+  // and the NOT round's cards: a red card checked true, the same card flipped by NOT, three red cards, two red and a
+  // ringed blue one, and “NOT all red” beside “none red”
+  | 'card-red-true' | 'card-red-not' | 'cards-all-red' | 'cards-one-blue' | 'cards-not-none'
   // stop 2 (NOT, AND, OR): one shape card by size, color and shape (a picture answer tile), the rule pictures, and a
   // count answer tile (a ten frame with one to ten dots)
   | `card-${Size}-${Color}-${Shape}`

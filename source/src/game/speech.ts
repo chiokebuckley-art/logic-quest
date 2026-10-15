@@ -156,6 +156,7 @@ export function thingName(t: Thing): string {
   const base = t.hidden ? 'face-down card' : `${t.size} ${t.color} ${t.shape}`;
   if (t.mark === 'yes') return `${base}, marked yes`;
   if (t.mark === 'no') return `${base}, marked no`;
+  if (t.ring) return `${base}, ringed`;
   return base;
 }
 

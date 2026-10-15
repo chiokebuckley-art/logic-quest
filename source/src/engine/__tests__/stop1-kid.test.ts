@@ -5,12 +5,12 @@
  * one the case gives (worked out again here, from the classic item's own words), never a typed one.
  */
 import { describe, expect, it } from 'vitest';
-import type { ChooseItem, Item, KidItem } from '../types';
+import type { ChooseItem, Item, KidItem, Thing } from '../types';
 import { KID_SHOW, KID_TWIN, L1_SHOWN, L2_KID, L3_DRILL, L3_KEYS, L3_KID, L4_DRILL, L4_KID, SENTENCES, TEACH_SENTENCES, isStatement, stop1 } from '../../content/stop1';
 import { gradeById } from '../../content/grades';
 import { kidItemOf } from '../../game/kidPlay';
 import { practiceFor } from '../drill';
-import { FRAMES, KINDS, holds, kidNotLine, notItem, say, type Card, type Stmt } from '../puzzles/statements';
+import { FRAMES, KINDS, holds, notItem, type Card } from '../puzzles/statements';
 import { fkGrade, longestSentence, sentences, words } from '../readability';
 import { createRng } from '../rng';
 
@@ -128,8 +128,50 @@ describe('lesson 2: the three answers are pictures with no words, the cards draw
   });
 });
 
-/** Is b true exactly when a is false, on every row of up to three face-up cards? (Brute force, apart from the engine's test rows.) */
-function flips(a: Stmt, b: Stmt): boolean {
+/**
+ * The second method for lesson 3: the kid NOT question read back from its own words, apart from the engine. “NOT all
+ * red?” is about the cards being all red; its trap reading (the classic mistake a young reader makes) is “none are
+ * red”. Each reading is a plain test on face-up cards.
+ */
+const NUMS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4 };
+function wordTest(w: string): (c: Card) => boolean {
+  if (w === 'red' || w === 'blue' || w === 'yellow') return (c) => c.color === w;
+  if (w === 'big' || w === 'small') return (c) => c.size === w;
+  const shape = w.replace(/s$/, '');
+  if (shape === 'circle' || shape === 'square' || shape === 'triangle') return (c) => c.shape === shape;
+  throw new Error(`no card word “${w}”`);
+}
+const count = (cards: readonly Card[], w: string) => cards.filter(wordTest(w)).length;
+/** The sentence after “NOT”, its trap reading, and the cards that show it (the ones “Show me” rings). */
+function readKid(prompt: string): { said: (cs: readonly Card[]) => boolean; trap: (cs: readonly Card[]) => boolean; ring: (cs: readonly Card[]) => number[]; kind: string } {
+  const at = (cs: readonly Card[], t: (c: Card) => boolean) => cs.flatMap((c, i) => (t(c) ? [i] : []));
+  let m: RegExpExecArray | null;
+  if ((m = /^NOT all (\w+)\?$/.exec(prompt))) {
+    const x = wordTest(m[1]);
+    return { kind: 'all', said: (cs) => cs.every(x), trap: (cs) => !cs.some(x), ring: (cs) => at(cs, (c) => !x(c)) };
+  }
+  if ((m = /^NOT some (\w+)\?$/.exec(prompt))) {
+    const x = wordTest(m[1]);
+    return { kind: 'some', said: (cs) => cs.some(x), trap: (cs) => cs.some((c) => !x(c)), ring: (cs) => at(cs, x) };
+  }
+  if ((m = /^NOT more (\w+) than (\w+)\?$/.exec(prompt))) {
+    const [a, b] = [m[1], m[2]];
+    return { kind: 'more', said: (cs) => count(cs, a) > count(cs, b), trap: (cs) => count(cs, b) > count(cs, a), ring: () => [] };
+  }
+  if ((m = /^NOT (\w+) or more (\w+)\?$/.exec(prompt))) {
+    const [k, w] = [NUMS[m[1]], m[2]];
+    return { kind: 'or more', said: (cs) => count(cs, w) >= k, trap: (cs) => count(cs, w) <= k, ring: (cs) => at(cs, wordTest(w)) };
+  }
+  if ((m = /^NOT exactly (\w+) (\w+)\?$/.exec(prompt))) {
+    const [k, w] = [NUMS[m[1]], m[2]];
+    return { kind: 'exactly', said: (cs) => count(cs, w) === k, trap: (cs) => cs.length - count(cs, w) === k, ring: (cs) => at(cs, wordTest(w)) };
+  }
+  throw new Error(`no reading for “${prompt}”`);
+}
+const plain = (things: readonly Thing[]): Card[] => things.map((t) => ({ shape: t.shape, color: t.color, size: t.size }));
+
+/** Rows of face-up cards to check that the kid words say the classic statement: every row of one to three cards, and some of four. */
+const ROWS: Card[][] = (() => {
   const rows: Card[][] = [];
   for (const x of KINDS) {
     rows.push([x]);
@@ -138,64 +180,89 @@ function flips(a: Stmt, b: Stmt): boolean {
       for (const z of KINDS) rows.push([x, y, z]);
     }
   }
-  const four = (d: Card) => [d, d, d, d];
-  for (const x of KINDS) for (const y of KINDS) rows.push([...four(x), y], [...four(x), ...four(y)]);
-  return rows.every((r) => holds(a, r) !== holds(b, r));
-}
+  for (const x of KINDS) for (const y of KINDS) rows.push([x, x, x, y], [x, x, y, y]);
+  return rows;
+})();
 
-describe('lesson 3: “NOT all red: none are red?” about one of its own answers, yes or no', () => {
-  it('every NOT item of the lesson’s kinds has one; it asks the right NOT (yes) or the classic mistake (no)', () => {
-    let yes = 0;
-    let no = 0;
+describe('lesson 3: the NOT asked on cards the kid can see, yes or no', () => {
+  it('every NOT item of the lesson’s kinds has one: 3 or 4 plain cards, its statement in kid words, the answer read back from the words', () => {
+    const tally: Record<string, { items: number; breaks: number; yes: number }> = {};
     for (const seed of SEEDS) {
       for (const key of L3_KEYS) {
         for (const frame of FRAMES) {
           const m = notItem(createRng(seed * 31 + key.length), { frame, key });
           const alt = m.item.kid!.alt as ChooseItem;
           expect(alt, key).toBeTruthy();
-          const { s, right, wrongs } = m.flip!;
-          const line = (x: Stmt) => {
-            const k = kidNotLine(s, x);
-            return k ? `${k.head}: ${k.tail}?` : null;
-          };
-          const asked = [right, ...wrongs].filter((x) => line(x) === alt.kid!.prompt);
-          expect(asked.length, alt.kid!.prompt).toBe(1);
-          expect(alt.answer).toBe(flips(s, asked[0]) ? 'yes' : 'no');
-          expect(alt.answer === 'yes').toBe(asked[0] === right);
-          // The answer it asks about is one of the item's own answers.
-          expect(m.item.choices.map((c) => c.label)).toContain(say(asked[0], m.flip!.noun));
-          expect(n(alt.kid!.prompt)).toBeLessThanOrEqual(7);
-          expect(alt.kid!.scene).toEqual({ kind: 'none' });
-          if (alt.answer === 'yes') yes++;
-          else no++;
-          kidRules(alt.kid!, true);
+          const k = alt.kid!;
+          const read = readKid(k.prompt);
+          // The kid words say the classic statement: on every row they hold exactly when it does.
+          for (const row of ROWS) if (read.said(row) !== holds(m.flip!.s, row)) throw new Error(`“${k.prompt}” is not “${m.item.scene?.kind === 'text' ? m.item.scene.lines[0] : ''}” on ${JSON.stringify(row)}`);
+          // The cards: 3 or 4, drawn plain, the same in the scene and in Show me.
+          expect(alt.scene?.kind).toBe('things');
+          const things = (alt.scene as { things: Thing[] }).things;
+          const cards = plain(things);
+          expect(cards.length).toBeGreaterThanOrEqual(3);
+          expect(cards.length).toBeLessThanOrEqual(4);
+          expect(things.every((t) => !t.hidden && !t.mark && !t.ring)).toBe(true);
+          expect(k.scene).toEqual({ kind: 'things' });
+          // The answer: is the NOT true on these cards? Read back from the words, not from the engine.
+          const yes = !read.said(cards);
+          expect(alt.answer, `${k.prompt} ${JSON.stringify(cards)}`).toBe(yes ? 'yes' : 'no');
+          expect(alt.choices.map((c) => c.id)).toEqual(['yes', 'no']);
+          // Show me: the same cards, the ones that show it ringed.
+          expect(plain(k.show!.things!)).toEqual(cards);
+          expect(k.show!.things!.flatMap((t, i) => (t.ring ? [i] : []))).toEqual(read.ring(cards));
+          expect(k.show!.label).toMatch(/^Look: /);
+          expect(n(k.prompt)).toBeLessThanOrEqual(7);
+          kidRules(k, true);
+          // The trap reading gives the other answer on a card set that breaks it.
+          const breaks = read.trap(cards) !== yes;
+          // For “all”, a set that breaks the trap has one odd card: two red and one blue.
+          if (breaks && read.kind === 'all') expect(read.ring(cards), k.prompt).toHaveLength(1);
+          const t = (tally[key] ??= { items: 0, breaks: 0, yes: 0 });
+          t.items++;
+          if (breaks) t.breaks++;
+          if (yes) t.yes++;
         }
       }
     }
-    // Both answers come up.
-    expect(yes).toBeGreaterThan(100);
-    expect(no).toBeGreaterThan(100);
+    for (const [key, t] of Object.entries(tally)) {
+      // At least half of the items break the trap, kind by kind, and both answers come up.
+      expect(t.breaks / t.items, key).toBeGreaterThanOrEqual(0.5);
+      expect(t.yes, key).toBeGreaterThan(t.items / 8);
+      expect(t.items - t.yes, key).toBeGreaterThan(t.items / 8);
+    }
+    // “NOT all red” on two red and one blue: true, where “none are red” says false.
+    const every = SEEDS.map((seed) => notItem(createRng(seed), { frame: 'abstract', key: 'everyColor' }).item.kid!.alt as ChooseItem);
+    expect(every.some((a) => a.answer === 'yes' && plain((a.scene as { things: Thing[] }).things).length === 3)).toBe(true);
   });
 
-  it('each board is asked one answer per page, yes for its NOT and no for the rest, with the board’s cards as the picture', () => {
+  it('each board asks its statement on one card set per page: the first set breaks the trap, the second gives the other answer', () => {
     L3_DRILL.forEach((step, k) => {
       const kb = L3_KID.board![k];
       const alt = kb.alt!;
       expect(alt.id).toBe(step.id);
       const mine = step.rows.find((r) => r.marks.some((m) => !m.given))!;
-      const not = mine.marks[0];
-      expect(alt.rows.length).toBeGreaterThanOrEqual(2);
-      expect(kb.rows).toHaveLength(alt.rows.length);
-      for (const r of alt.rows) {
-        const opt = not.options.find((o) => r.id === `${mine.id}-${o.id}`)!;
-        expect(opt, r.id).toBeTruthy();
+      const read = readKid(kb.line);
+      // The line says the board's own statement: the classic row's sentence is the one each page asks about.
+      for (const r of alt.rows) expect(r.marks[0].label).toContain(mine.label.replace(/\.”$/, '”'));
+      expect(alt.rows).toHaveLength(2);
+      expect(kb.rows).toEqual(alt.rows.map(() => ({ label: '' })));
+      const answers = alt.rows.map((r) => {
+        const cards = plain(r.things!);
+        expect(cards.length).toBeGreaterThanOrEqual(3);
+        expect(cards.length).toBeLessThanOrEqual(4);
         expect(r.marks).toHaveLength(1);
-        expect(r.marks[0].answer).toBe(opt.id === not.answer ? 'yes' : 'no');
-        expect(n(`${kb.line} ${r.label}`)).toBeLessThanOrEqual(7);
-      }
-      expect(alt.rows.filter((r) => r.marks[0].answer === 'yes')).toHaveLength(1);
-      expect(kb.rows!.every((r) => r.art === (k === 0 ? 'cards-every' : 'cards-tie'))).toBe(true);
+        expect(r.marks[0].options.map((o) => o.id)).toEqual(['yes', 'no']);
+        const yes = !read.said(cards);
+        expect(r.marks[0].answer).toBe(yes ? 'yes' : 'no');
+        return { yes, breaks: read.trap(cards) !== yes };
+      });
+      expect(answers[0].breaks).toBe(true);
+      expect(answers[0].yes).not.toBe(answers[1].yes);
+      expect(n(kb.line)).toBeLessThanOrEqual(7);
     });
+    expect(L3_KID.board!.map((b) => b.line)).toEqual(['NOT all big?', 'NOT three or more red?']);
   });
 });
 
@@ -273,7 +340,7 @@ describe('the kid words of the alternates read at Grade 7 or lower', () => {
     const g3 = packs('s1.l4').flatMap((it) => (altOf(it)?.kid ? [...kidRules(altOf(it)!.kid!, false), ...(altOf(it)!.scene as { lines: string[] }).lines] : []));
     expect(fkGrade(g1.join(' '))).toBeLessThanOrEqual(7);
     expect(fkGrade(g3.join(' '))).toBeLessThanOrEqual(7);
-    const boards = [...L3_KID.board!, L4_KID.board![2]].flatMap((b) => [b.line, ...b.alt!.rows.map((r) => r.label)]);
+    const boards = [...L3_KID.board!, L4_KID.board![2]].flatMap((b) => [b.line, ...b.alt!.rows.map((r, i) => b.rows?.[i]?.label ?? r.label).filter((x) => x)]);
     expect(fkGrade(boards.join(' '))).toBeLessThanOrEqual(7);
   });
 });

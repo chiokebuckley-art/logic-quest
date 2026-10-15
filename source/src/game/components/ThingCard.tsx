@@ -116,6 +116,7 @@ function CardFace({ thing }: { thing: Thing }) {
     <svg className="play-thing-svg" viewBox="0 0 60 80" aria-hidden="true" focusable="false">
       {thing.hidden ? <CardBack /> : <Shape thing={thing} />}
       {thing.mark && <MarkBadge mark={thing.mark} />}
+      {thing.ring && <circle className="play-thing-ring" cx="30" cy="42" r="27.5" fill="none" stroke="#ffc93c" strokeWidth="3.5" />}
     </svg>
   );
 }

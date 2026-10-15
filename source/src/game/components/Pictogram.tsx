@@ -69,6 +69,11 @@ export const PICTO_WORDS: Readonly<Record<Picto, string>> = {
   'cards-every': 'a red circle a small red square and a blue triangle',
   'cards-tie': 'three red and three yellow',
   'not-flip': 'true and false swap',
+  'card-red-true': 'a red card that is true',
+  'card-red-not': 'the red card flipped to false',
+  'cards-all-red': 'three red cards',
+  'cards-one-blue': 'two red cards and a ringed blue card',
+  'cards-not-none': 'two red and one blue is not no red',
   'verdict-true': 'true',
   'verdict-false': 'false',
   'verdict-cant': 'cannot tell',
@@ -1124,6 +1129,45 @@ const DRAW: Readonly<Record<Picto, () => ReactElement>> = {
       <path d="M45 27l10 10M55 27 45 37" stroke={C.white} strokeWidth="3.5" fill="none" strokeLinecap="round" />
       <path d="M20 15q12-10 24 0M44 49q-12 10-24 0" stroke={C.white} strokeWidth="3" fill="none" strokeLinecap="round" />
       <path d="M47 18 45 10 40 15ZM17 46 19 54 24 49Z" fill={C.white} />
+    </>
+  ),
+  // the NOT round's cards (stop 1, lesson 3): one red card with a check, the same card flipped to a cross by NOT, three
+  // red cards, two red and one blue with the blue one ringed, and “NOT all red” (two red, one blue) beside “none red”
+  // (three blue) with a crossed-out equals sign between them
+  'card-red-true': () => (
+    <>
+      <circle cx="26" cy="36" r="20" fill={C.red} />
+      <circle cx="48" cy="16" r="11" fill={C.green} />
+      <path d="M42.5 16.5l4 4 7-8" stroke={C.white} strokeWidth="3.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+    </>
+  ),
+  'card-red-not': () => (
+    <>
+      <circle cx="26" cy="36" r="20" fill={C.red} />
+      <circle cx="48" cy="16" r="11" fill={C.white} />
+      <path d="M43.5 11.5l9 9M52.5 11.5l-9 9" stroke={C.red} strokeWidth="3.5" fill="none" strokeLinecap="round" />
+      <path d="M8 58q18 8 36-2" stroke={C.white} strokeWidth="3" fill="none" strokeLinecap="round" />
+      <path d="M47 51 46 60 39 57Z" fill={C.white} />
+    </>
+  ),
+  'cards-all-red': () => <>{[11, 32, 53].map((x) => <circle key={x} cx={x} cy="32" r="9" fill={C.red} />)}</>,
+  'cards-one-blue': () => (
+    <>
+      <circle cx="11" cy="32" r="9" fill={C.red} />
+      <circle cx="32" cy="32" r="9" fill={C.red} />
+      <circle cx="53" cy="32" r="8" fill={C.blue} />
+      <circle cx="53" cy="32" r="10.5" fill="none" stroke={C.gold} strokeWidth="2.5" />
+    </>
+  ),
+  'cards-not-none': () => (
+    <>
+      <circle cx="8" cy="22" r="5.5" fill={C.red} />
+      <circle cx="21" cy="22" r="5.5" fill={C.red} />
+      <circle cx="14.5" cy="40" r="5.5" fill={C.blue} />
+      <path d="M27 29h10M27 35h10M38 25 26 39" stroke={C.white} strokeWidth="2.5" strokeLinecap="round" />
+      <circle cx="43" cy="22" r="5.5" fill={C.blue} />
+      <circle cx="56" cy="22" r="5.5" fill={C.blue} />
+      <circle cx="49.5" cy="40" r="5.5" fill={C.blue} />
     </>
   ),
   // the answer tiles of "True, false or can’t tell": a check, a cross and a question mark, named by their answers
